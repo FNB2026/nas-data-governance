@@ -1,0 +1,13 @@
+name: temporary-download-cleanup
+version: 1
+priority: 700
+match:
+  directory_role: [temporary]
+  filename: ["*.part", "*.download"]
+  age_days:
+    greater_than: 30
+action:
+  type: quarantine
+risk:
+  level: medium
+reason: 超过 30 天的未完成下载文件
