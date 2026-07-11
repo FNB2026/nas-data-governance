@@ -5,11 +5,11 @@
 - 只读文件扫描；SQLite 目标模式；快速指纹与 SHA-256；完全重复报告。
 - 验收：不跟随符号链接、不跨挂载点、可处理中断与权限错误、测试不删除任何文件。
 
-## M2 目录语境与去重计划（进行中）
+## M2 目录语境与去重计划（已完成）
 
 - 已实现：基于路径信号的目录角色、敏感/原始/备份/系统保护、基于完整哈希的草案计划、冲突复核。
-- 待完成：上级目录链结构化、业务锚点、完整保留评分与 SQLite 持久化。
-- 验收：内容相同但职责不同的文件默认保留；冲突进入人工复核。
+- 已完成：上级目录链结构化（1—6 层 ParentChain 与 BranchPoint）、业务锚点识别（项目代号、年份目录）、完整保留评分（Authority/Stability/PathDepth/RoleBonus 四项可解释分数）、SQLite 持久化层（storages/file_instances/directory_contexts/operation_tasks/operation_plans/operation_logs 读写）。
+- 验收：内容相同但职责不同的文件默认保留；冲突进入人工复核；业务锚点不同的副本进入人工复核；保留项有可解释的评分理由。
 
 ## M3 安全执行
 

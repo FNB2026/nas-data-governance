@@ -29,6 +29,9 @@ internal/domain/          核心对象与安全约束
 internal/scanner/         只读文件系统扫描
 internal/fingerprint/     快速指纹与完整哈希
 internal/index/           JSONL 索引适配器
+internal/dircontext/      目录角色分类、上级目录链与业务锚点
+internal/planner/         草案计划与可解释保留评分
+internal/store/           SQLite 持久化层（项目自身数据库）
 internal/report/          完全重复报告
 knowledge/cards/          白皮书知识卡
 knowledge/maps/           概念关系与开发路线
@@ -38,8 +41,8 @@ docs/adr/                 架构决策记录
 
 ## 当前边界
 
-- 已有：只读扫描、排除规则、符号链接跳过、跨挂载点保护、JSONL 索引格式、完全重复报告、目录角色识别与草案计划。
-- 预留：SQLite 仓储、真实格式识别、业务锚点提取、完整保留评分、安全执行器、隔离与回滚。
+- 已有：只读扫描、排除规则、符号链接跳过、跨挂载点保护、JSONL 索引格式、完全重复报告、目录角色识别、上级目录链与业务锚点、可解释保留评分、草案计划、SQLite 持久化层。
+- 预留：真实格式识别、安全执行器、隔离与回滚、CLI 接入 SQLite 仓储。
 - 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；跨备份域自动去重。
 
 详见 [知识地图](knowledge/maps/knowledge-map.md) 与 [开发路线](knowledge/maps/roadmap.md)。

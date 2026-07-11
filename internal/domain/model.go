@@ -17,12 +17,50 @@ const (
 	RoleSystem        DirectoryRole = "system_application"
 )
 
+// Storage describes one indexed volume. The schema lives in schemas/001_initial.sql.
+type Storage struct {
+	ID        string    `json:"id"`
+	RootPath  string    `json:"root_path"`
+	Kind      string    `json:"kind"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type DirectoryContext struct {
 	Role           DirectoryRole `json:"role"`
 	AuthorityLevel int           `json:"authority_level"`
 	PrivacyLevel   string        `json:"privacy_level"`
 	Protected      bool          `json:"protected"`
 	MatchedTerms   []string      `json:"matched_terms,omitempty"`
+	// ParentChain records the role/authority of up to 6 ancestor directories,
+	// nearest first. White paper §5-7 requires comparison across 1-6 levels.
+	ParentChain []ChainNode `json:"parent_chain,omitempty"`
+	// BranchPoint is the nearest ancestor where sibling directories diverge
+	// in role; empty when the chain is uniform. Used to detect cross-archive
+	// duplicates that share a shallow root but differ in storage duty.
+	BranchPoint string `json:"branch_point,omitempty"`
+	// BusinessAnchor is a stable identifier (client name, project code) found
+	// along the path, used to distinguish "same content, different business
+	// purpose" cases. Empty when no anchor is detected.
+	BusinessAnchor string `json:"business_anchor,omitempty"`
+}
+
+// ChainNode is one entry in DirectoryContext.ParentChain.
+type ChainNode struct {
+	Path      string        `json:"path"`
+	Name      string        `json:"name"`
+	Role      DirectoryRole `json:"role"`
+	Authority int           `json:"authority"`
+}
+
+// RetentionScore explains why a particular duplicate copy is retained.
+// Higher Total wins; ties fall back to path/mtime stable ordering.
+type RetentionScore struct {
+	Total     int      `json:"total"`
+	Authority int      `json:"authority"`  // from DirectoryContext.AuthorityLevel
+	Stability int      `json:"stability"`  // older mtime = more stable
+	PathDepth int      `json:"path_depth"` // deeper organized path wins
+	RoleBonus int      `json:"role_bonus"` // raw/archive bonus; temporary/cache penalty
+	Reasons   []string `json:"reasons"`
 }
 
 type FileInstance struct {
@@ -48,7 +86,14 @@ type DuplicateGroup struct {
 
 type PlanState string
 
-const PlanDraft PlanState = "DRAFT"
+const (
+	PlanDraft        PlanState = "DRAFT"         // planner output, awaiting review
+	PlanApproved     PlanState = "APPROVED"      // human-approved for execution
+	PlanStaleChecked PlanState = "STALE_CHECKED" // pre-execution state verified
+	PlanExecuting    PlanState = "EXECUTING"     // action in progress
+	PlanVerified     PlanState = "VERIFIED"      // post-execution checksum passed
+	PlanRolledBack   PlanState = "ROLLED_BACK"   // rollback completed
+)
 
 type PlannedAction struct {
 	Path    string           `json:"path"`
@@ -59,13 +104,32 @@ type PlannedAction struct {
 
 type OperationPlan struct {
 	ID            string          `json:"id"`
+	TaskID        string          `json:"task_id,omitempty"`
 	State         PlanState       `json:"state"`
 	ContentSHA256 string          `json:"content_sha256"`
 	Size          int64           `json:"size"`
 	Risk          RiskLevel       `json:"risk"`
 	RetainPath    string          `json:"retain_path,omitempty"`
+	RetainScore   RetentionScore  `json:"retain_score,omitempty"`
 	Actions       []PlannedAction `json:"actions"`
 	Evidence      []string        `json:"evidence"`
+}
+
+// OperationTask groups plans produced in one planner run for traceability.
+type OperationTask struct {
+	ID        string    `json:"id"`
+	RootPath  string    `json:"root_path"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// OperationLog is one audit entry appended during plan execution.
+type OperationLog struct {
+	ID        int64          `json:"id"`
+	PlanID    string         `json:"plan_id"`
+	EventType string         `json:"event_type"`
+	Detail    map[string]any `json:"detail"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 type OperationType string
