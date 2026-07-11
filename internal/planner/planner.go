@@ -173,7 +173,7 @@ func ScoreRetention(file domain.FileInstance, ctx domain.DirectoryContext, now t
 func reviewActions(files []domain.FileInstance, contexts []domain.DirectoryContext, reason string) []domain.PlannedAction {
 	actions := make([]domain.PlannedAction, len(files))
 	for i, file := range files {
-		actions[i] = domain.PlannedAction{Path: file.Path, Action: domain.OperationReview, Reason: reason, Context: contexts[i]}
+		actions[i] = domain.PlannedAction{Path: file.Path, Action: domain.OperationReview, Reason: reason, Context: contexts[i], File: file}
 	}
 	return actions
 }
@@ -185,7 +185,7 @@ func quarantineActions(files []domain.FileInstance, contexts []domain.DirectoryC
 		if filepath.Clean(file.Path) == filepath.Clean(retainPath) {
 			action, reason = domain.OperationKeep, "同组保留项：保留评分最高"
 		}
-		actions[i] = domain.PlannedAction{Path: file.Path, Action: action, Reason: reason, Context: contexts[i]}
+		actions[i] = domain.PlannedAction{Path: file.Path, Action: action, Reason: reason, Context: contexts[i], File: file}
 	}
 	return actions
 }

@@ -100,6 +100,9 @@ type PlannedAction struct {
 	Action  OperationType    `json:"action"`
 	Reason  string           `json:"reason"`
 	Context DirectoryContext `json:"context"`
+	// File is the plan-time snapshot used by the executor's stale check.
+	// Empty for actions that don't touch the filesystem (REVIEW, SKIP).
+	File FileInstance `json:"file,omitempty"`
 }
 
 type OperationPlan struct {
