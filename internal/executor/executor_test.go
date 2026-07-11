@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,7 +39,7 @@ func makeApprovedPlan(t *testing.T, content string) (*domain.OperationPlan, stri
 
 func TestExecuteQuarantineSuccess(t *testing.T) {
 	plan, src, qDir := makeApprovedPlan(t, "duplicate content")
-	exec, err := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	exec, err := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,9 +71,9 @@ func TestExecuteQuarantineSuccess(t *testing.T) {
 }
 
 func TestExecuteRejectsNonApprovedPlan(t *testing.T) {
-	plan, _, qDir := makeApprovedPlan(t, "x")
+	plan, src, qDir := makeApprovedPlan(t, "x")
 	plan.State = domain.PlanDraft
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 	result := exec.Execute(context.Background(), plan)
 	if result.Err == nil {
 		t.Fatal("expected error for non-approved plan")
@@ -82,13 +83,66 @@ func TestExecuteRejectsNonApprovedPlan(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsActionOutsideConfiguredSourceRoots(t *testing.T) {
+	plan, src, qDir := makeApprovedPlan(t, "x")
+	exec, err := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := exec.Execute(context.Background(), plan)
+	if !errors.Is(result.Err, errOutOfScope) {
+		t.Fatalf("expected out-of-scope error, got %v", result.Err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("out-of-scope source must not be touched: %v", err)
+	}
+	entries, err := os.ReadDir(qDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("out-of-scope plan must not write quarantine: entries=%d err=%v", len(entries), err)
+	}
+}
+
+func TestExecuteRefusesSymlinkInsideConfiguredSourceRoot(t *testing.T) {
+	root := t.TempDir()
+	target := t.TempDir()
+	qDir := t.TempDir()
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	realPath := filepath.Join(target, "duplicate.txt")
+	if err := os.WriteFile(realPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Snapshot(realPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedPath := filepath.Join(link, "duplicate.txt")
+	plan := &domain.OperationPlan{ID: "symlink", State: domain.PlanApproved, Actions: []domain.PlannedAction{{
+		Path: linkedPath, Action: domain.OperationQuarantine,
+		File: domain.FileInstance{Path: linkedPath, Size: snap.Size, ModifiedAt: snap.ModifiedAt, Device: snap.Device, Inode: snap.Inode, ContentSHA256: snap.Hash},
+	}}}
+	exec, err := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := exec.Execute(context.Background(), plan)
+	if !errors.Is(result.Err, errActionFailed) {
+		t.Fatalf("expected safe symlink rejection, got %v", result.Err)
+	}
+	if _, err := os.Stat(realPath); err != nil {
+		t.Fatalf("symlink target must remain untouched: %v", err)
+	}
+}
+
 func TestExecuteStaleCheckSendsBackToDraft(t *testing.T) {
 	plan, src, qDir := makeApprovedPlan(t, "original")
 	// Mutate the file after the snapshot was taken so size differs.
 	if err := os.WriteFile(src, []byte("changed content is longer"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 	result := exec.Execute(context.Background(), plan)
 
 	if result.Err != nil {
@@ -132,7 +186,7 @@ func TestExecuteRollsBackOnFailure(t *testing.T) {
 			{Path: src2, Action: domain.OperationMove, File: file2},
 		},
 	}
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
 	result := exec.Execute(context.Background(), plan)
 
 	if result.Err == nil {
@@ -164,7 +218,7 @@ func TestExecuteSkipsNonFilesystemActions(t *testing.T) {
 			{Path: src, Action: domain.OperationKeep},
 		},
 	}
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
 	result := exec.Execute(context.Background(), plan)
 
 	if result.Err != nil {
@@ -184,8 +238,8 @@ func TestExecuteSkipsNonFilesystemActions(t *testing.T) {
 }
 
 func TestExecuteContextCancellation(t *testing.T) {
-	plan, _, qDir := makeApprovedPlan(t, "x")
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	plan, src, qDir := makeApprovedPlan(t, "x")
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before execute
@@ -199,8 +253,8 @@ func TestExecuteContextCancellation(t *testing.T) {
 }
 
 func TestExecuteAuditStepsRecorded(t *testing.T) {
-	plan, _, qDir := makeApprovedPlan(t, "audit me")
-	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat})
+	plan, src, qDir := makeApprovedPlan(t, "audit me")
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 	result := exec.Execute(context.Background(), plan)
 
 	if result.Err != nil {
@@ -227,7 +281,13 @@ func TestExecuteAuditStepsRecorded(t *testing.T) {
 }
 
 func TestNewRejectsInvalidQuarantine(t *testing.T) {
-	if _, err := New(QuarantineConfig{Root: "", Structure: QuarantineFlat}); err == nil {
+	if _, err := New(QuarantineConfig{Root: "", Structure: QuarantineFlat, SourceRoots: []string{t.TempDir()}}); err == nil {
 		t.Fatal("expected error for empty root")
+	}
+}
+
+func TestNewRequiresSourceRoots(t *testing.T) {
+	if _, err := New(QuarantineConfig{Root: t.TempDir(), Structure: QuarantineFlat}); err == nil {
+		t.Fatal("expected source-root validation error")
 	}
 }

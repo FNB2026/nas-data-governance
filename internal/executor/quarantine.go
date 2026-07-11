@@ -28,8 +28,9 @@ const (
 // whenever possible; cross-volume quarantine forces a copy instead of a
 // rename and requires the full copy-verify-delete pipeline (§41).
 type QuarantineConfig struct {
-	Root      string
-	Structure QuarantineStructure
+	Root        string
+	Structure   QuarantineStructure
+	SourceRoots []string
 }
 
 // PathFor computes the nominal quarantine destination for a source file.
@@ -86,6 +87,14 @@ func (c QuarantineConfig) Validate() error {
 	}
 	if !filepath.IsAbs(c.Root) {
 		return fmt.Errorf("executor: quarantine root must be absolute")
+	}
+	if len(c.SourceRoots) == 0 {
+		return fmt.Errorf("executor: at least one source root is required")
+	}
+	for _, root := range c.SourceRoots {
+		if root == "" || !filepath.IsAbs(root) {
+			return fmt.Errorf("executor: source roots must be absolute")
+		}
 	}
 	switch c.Structure {
 	case QuarantineFlat, QuarantineDated:

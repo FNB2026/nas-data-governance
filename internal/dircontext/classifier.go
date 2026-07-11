@@ -82,7 +82,7 @@ func buildChain(originalSegments []string) []domain.ChainNode {
 		start = len(originalSegments) - chainDepth
 	}
 	chain := make([]domain.ChainNode, 0, chainDepth)
-	for i := start; i < len(originalSegments); i++ {
+	for i := len(originalSegments) - 1; i >= start; i-- {
 		// Build the cumulative path for this ancestor.
 		path := "/" + strings.Join(originalSegments[:i+1], "/")
 		role, authority := roleForSegment(originalSegments[i])

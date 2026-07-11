@@ -8,7 +8,7 @@ import (
 )
 
 func TestPathForFlatStructure(t *testing.T) {
-	c := QuarantineConfig{Root: "/var/quarantine", Structure: QuarantineFlat}
+	c := QuarantineConfig{Root: "/var/quarantine", Structure: QuarantineFlat, SourceRoots: []string{"/data"}}
 	got := c.PathFor("/data/temp/report.pdf", time.Now())
 	want := "/var/quarantine/report.pdf"
 	if got != want {
@@ -17,7 +17,7 @@ func TestPathForFlatStructure(t *testing.T) {
 }
 
 func TestPathForDatedStructure(t *testing.T) {
-	c := QuarantineConfig{Root: "/var/quarantine", Structure: QuarantineDated}
+	c := QuarantineConfig{Root: "/var/quarantine", Structure: QuarantineDated, SourceRoots: []string{"/data"}}
 	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 	got := c.PathFor("/data/temp/report.pdf", now)
 	want := "/var/quarantine/2026-07/report.pdf"
@@ -73,26 +73,26 @@ func TestResolveCollisionIncrementsSuffix(t *testing.T) {
 }
 
 func TestValidateRejectsEmptyRoot(t *testing.T) {
-	if err := (QuarantineConfig{Root: "", Structure: QuarantineFlat}).Validate(); err == nil {
+	if err := (QuarantineConfig{Root: "", Structure: QuarantineFlat, SourceRoots: []string{"/data"}}).Validate(); err == nil {
 		t.Fatal("expected error for empty root")
 	}
 }
 
 func TestValidateRejectsRelativeRoot(t *testing.T) {
-	if err := (QuarantineConfig{Root: "relative/path", Structure: QuarantineFlat}).Validate(); err == nil {
+	if err := (QuarantineConfig{Root: "relative/path", Structure: QuarantineFlat, SourceRoots: []string{"/data"}}).Validate(); err == nil {
 		t.Fatal("expected error for relative root")
 	}
 }
 
 func TestValidateRejectsUnknownStructure(t *testing.T) {
-	if err := (QuarantineConfig{Root: "/var/q", Structure: "weird"}).Validate(); err == nil {
+	if err := (QuarantineConfig{Root: "/var/q", Structure: "weird", SourceRoots: []string{"/data"}}).Validate(); err == nil {
 		t.Fatal("expected error for unknown structure")
 	}
 }
 
 func TestValidateAcceptsKnownStructures(t *testing.T) {
 	for _, s := range []QuarantineStructure{QuarantineFlat, QuarantineDated} {
-		c := QuarantineConfig{Root: "/var/q", Structure: s}
+		c := QuarantineConfig{Root: "/var/q", Structure: s, SourceRoots: []string{"/data"}}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("structure %q: %v", s, err)
 		}

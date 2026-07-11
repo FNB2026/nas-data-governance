@@ -23,8 +23,10 @@ var ErrSymlinkRefused = errors.New("executor: symlink refused")
 // and was not created with O_EXCL by this call.
 var ErrDestinationExists = errors.New("executor: destination exists")
 
-// notSymlink returns ErrSymlinkRefused when path (or its parent) is a
-// symlink. The executor must never follow symlinks per AGENTS rule 4.
+// notSymlink rejects a symlink at the leaf. Task-root-relative ancestor
+// validation is performed by notSymlinkBelowRoot in the executor, which lets
+// macOS system aliases such as /var -> /private/var remain usable while still
+// refusing symlinks introduced inside a configured user-data root.
 func notSymlink(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -65,12 +67,22 @@ func CopyFile(src, dst string) (int64, error) {
 		}
 		return 0, err
 	}
-	defer out.Close()
+	success := false
+	defer func() {
+		_ = out.Close()
+		if !success {
+			_ = os.Remove(dst)
+		}
+	}()
 	n, err := io.Copy(out, in)
 	if err != nil {
 		return n, err
 	}
-	return n, out.Sync()
+	if err := out.Sync(); err != nil {
+		return n, err
+	}
+	success = true
+	return n, nil
 }
 
 // VerifyFile computes the SHA-256 of path and compares against expected.
@@ -111,12 +123,13 @@ func MoveFile(src, dst, expectedHash string) error {
 		_ = os.Remove(dst)
 		return fmt.Errorf("verify: %w", err)
 	}
-	if err := os.Remove(src); err != nil {
+	if err := SafeRemove(src); err != nil {
 		// Verification passed but source removal failed. This is the
 		// dangerous case flagged in the white paper: "复制成功不代表
 		// 移动成功". We leave both files in place and return an error
 		// so the caller can decide whether to retry the remove or
 		// treat the move as incomplete.
+		_ = os.Remove(dst) // output was created by CopyFile with O_EXCL.
 		return fmt.Errorf("delete source: %w", err)
 	}
 	return nil

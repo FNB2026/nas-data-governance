@@ -31,8 +31,8 @@ func TestParentChainCapturesUpToSixAncestors(t *testing.T) {
 	if len(c.ParentChain) != 6 {
 		t.Fatalf("expected chain capped at 6, got %d: %#v", len(c.ParentChain), c.ParentChain)
 	}
-	// Nearest first: the last chain node should be the immediate parent "g".
-	if c.ParentChain[len(c.ParentChain)-1].Name != "g" {
+	// Nearest first: the first chain node is the immediate parent "g".
+	if c.ParentChain[0].Name != "g" {
 		t.Fatalf("expected nearest first, got %#v", c.ParentChain)
 	}
 }
@@ -42,8 +42,8 @@ func TestParentChainRolesReflectEachSegment(t *testing.T) {
 	if len(c.ParentChain) != 2 {
 		t.Fatalf("expected 2 ancestors, got %d", len(c.ParentChain))
 	}
-	if c.ParentChain[1].Role != domain.RoleSensitive || c.ParentChain[1].Authority != 100 {
-		t.Fatalf("medical parent should be sensitive: %#v", c.ParentChain[1])
+	if c.ParentChain[0].Role != domain.RoleSensitive || c.ParentChain[0].Authority != 100 {
+		t.Fatalf("medical parent should be sensitive: %#v", c.ParentChain[0])
 	}
 }
 

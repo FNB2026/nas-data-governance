@@ -2,11 +2,18 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"nas-data-governance/internal/domain"
 )
+
+var errActionFailed = errors.New("executor: filesystem action failed")
+var errOutOfScope = errors.New("executor: action is outside configured source roots")
 
 // StepStatus is the outcome of one pipeline step.
 type StepStatus string
@@ -69,11 +76,15 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 		result.Err = fmt.Errorf("executor: plan state is %s, expected APPROVED", plan.State)
 		return result
 	}
+	if err := e.validatePlanScope(plan); err != nil {
+		result.Err = err
+		return result
+	}
 
 	// Step 1: stale-check every filesystem-touching action.
 	staleCount, err := e.staleCheckAll(ctx, plan, &result)
 	if err != nil {
-		result.Err = err
+		result.Err = errActionFailed
 		return result
 	}
 	if staleCount > 0 {
@@ -110,7 +121,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 		step, rollback, err := e.executeAction(ctx, action)
 		result.Steps = append(result.Steps, step)
 		if err != nil {
-			result.Err = err
+			result.Err = errActionFailed
 			e.rollbackAll(&result, &rollbacks)
 			_ = Transition(plan, domain.PlanRolledBack)
 			result.FinalState = plan.State
@@ -130,6 +141,68 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	return result
 }
 
+func (e *Executor) validatePlanScope(plan *domain.OperationPlan) error {
+	for _, action := range plan.Actions {
+		if !touchesFilesystem(action.Action) {
+			continue
+		}
+		if action.Path == "" || !filepath.IsAbs(action.Path) || action.File.Path != action.Path || action.File.ContentSHA256 == "" {
+			return errOutOfScope
+		}
+		root, ok := rootFor(action.Path, e.quarantine.SourceRoots)
+		if !ok {
+			return errOutOfScope
+		}
+		if err := notSymlinkBelowRoot(action.Path, root); err != nil {
+			return errActionFailed
+		}
+	}
+	return nil
+}
+
+func withinAnyRoot(path string, roots []string) bool {
+	_, ok := rootFor(path, roots)
+	return ok
+}
+
+func rootFor(path string, roots []string) (string, bool) {
+	for _, root := range roots {
+		rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return filepath.Clean(root), true
+		}
+	}
+	return "", false
+}
+
+// notSymlinkBelowRoot checks every existing component below an explicitly
+// approved task root. It deliberately does not inspect ancestors of root:
+// platforms may expose safe system aliases there (for example /var on macOS).
+func notSymlinkBelowRoot(path, root string) error {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return errOutOfScope
+	}
+	current := filepath.Clean(root)
+	if rel == "." {
+		return nil
+	}
+	for _, component := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return ErrSymlinkRefused
+		}
+	}
+	return nil
+}
+
 // staleCheckAll runs CheckStale on every filesystem-touching action and
 // appends one AuditStep summarizing the result. Returns the count of
 // stale files found (0 = all fresh).
@@ -143,7 +216,7 @@ func (e *Executor) staleCheckAll(ctx context.Context, plan *domain.OperationPlan
 		checked++
 		reason, err := CheckStale(action.File, true)
 		if err != nil {
-			return 0, fmt.Errorf("stale check: %w", err)
+			return 0, errActionFailed
 		}
 		if reason != StaleNone {
 			stale++
@@ -188,6 +261,10 @@ func (e *Executor) executeAction(ctx context.Context, action domain.PlannedActio
 // to its original path if a later action fails.
 func (e *Executor) executeQuarantine(action domain.PlannedAction) (AuditStep, func() error, error) {
 	nominal := e.quarantine.PathFor(action.Path, e.now())
+	if err := notSymlinkBelowRoot(nominal, e.quarantine.Root); err != nil {
+		return AuditStep{Name: "quarantine", Status: StepFailed,
+			Detail: map[string]any{"error_type": "unsafe_quarantine_path"}}, nil, err
+	}
 	dst, err := ResolveCollision(nominal)
 	if err != nil {
 		return AuditStep{Name: "quarantine", Status: StepFailed,
