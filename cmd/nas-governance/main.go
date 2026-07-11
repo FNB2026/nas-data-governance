@@ -10,6 +10,7 @@ import (
 	"nas-data-governance/internal/domain"
 	"nas-data-governance/internal/fingerprint"
 	idx "nas-data-governance/internal/index"
+	"nas-data-governance/internal/planner"
 	"nas-data-governance/internal/report"
 	"nas-data-governance/internal/scanner"
 )
@@ -25,6 +26,8 @@ func main() {
 		err = runScan(os.Args[2:])
 	case "duplicates":
 		err = runDuplicates(os.Args[2:])
+	case "plan":
+		err = runPlan(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -100,4 +103,33 @@ func runDuplicates(args []string) error {
 	return enc.Encode(report.DuplicateGroups(files))
 }
 
-func usage() { fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates> [options]") }
+func runPlan(args []string) error {
+	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+	path := fs.String("index", "./var/index.jsonl", "index file")
+	out := fs.String("out", "./var/plan.json", "draft plan output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	files, err := idx.Read(*path)
+	if err != nil {
+		return err
+	}
+	plans := planner.Build(report.DuplicateGroups(files))
+	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(*out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(plans); err != nil {
+		return err
+	}
+	fmt.Printf("created %d draft plans in %s (no filesystem operations executed)\n", len(plans), *out)
+	return nil
+}
+
+func usage() { fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan> [options]") }
