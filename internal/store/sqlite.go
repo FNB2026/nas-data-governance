@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"nas-data-governance/internal/domain"
@@ -186,7 +187,141 @@ func (s *SQLiteStore) SaveFormat(ctx context.Context, fileID int64, info domain.
 	return nil
 }
 
-// ---------------- operation_tasks ----------------
+// ---------------- rules (L1 infrastructure) ----------------
+
+func (s *SQLiteStore) SaveRule(ctx context.Context, r domain.Rule) error {
+	enabled := 0
+	if r.Enabled {
+		enabled = 1
+	}
+	var approvedAt, expiresAt any
+	if r.ApprovedAt != nil {
+		approvedAt = r.ApprovedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if r.ExpiresAt != nil {
+		expiresAt = r.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO rules(id, version, priority, enabled, definition_yaml, source, batch_id, confidence, status, approved_at, expires_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET version=excluded.version, priority=excluded.priority, enabled=excluded.enabled,
+		   definition_yaml=excluded.definition_yaml, source=excluded.source, batch_id=excluded.batch_id,
+		   confidence=excluded.confidence, status=excluded.status, approved_at=excluded.approved_at, expires_at=excluded.expires_at`,
+		r.ID, r.Version, r.Priority, enabled, r.Definition,
+		string(r.Source), nullIfEmpty(r.BatchID), r.Confidence, string(r.Status), approvedAt, expiresAt)
+	if err != nil {
+		return fmt.Errorf("store: save rule: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListRules(ctx context.Context, source domain.RuleSource, status domain.RuleStatus) ([]domain.Rule, error) {
+	q := `SELECT id, version, priority, enabled, definition_yaml, source, batch_id, confidence, status, approved_at, expires_at FROM rules`
+	args := []any{}
+	conds := []string{}
+	if source != "" {
+		conds = append(conds, "source = ?")
+		args = append(args, string(source))
+	}
+	if status != "" {
+		conds = append(conds, "status = ?")
+		args = append(args, string(status))
+	}
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += " ORDER BY priority DESC, id"
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list rules: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.Rule, 0)
+	for rows.Next() {
+		r, err := scanRule(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) UpdateRuleStatus(ctx context.Context, ruleID string, status domain.RuleStatus, approvedAt *time.Time) error {
+	var at any
+	if approvedAt != nil {
+		at = approvedAt.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE rules SET status = ?, approved_at = ? WHERE id = ?`,
+		string(status), at, ruleID)
+	if err != nil {
+		return fmt.Errorf("store: update rule status: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DisableBatch(ctx context.Context, batchID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE rules SET status = ?, enabled = 0 WHERE batch_id = ?`,
+		string(domain.RuleDisabled), batchID)
+	if err != nil {
+		return fmt.Errorf("store: disable batch: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SaveLearningBatch(ctx context.Context, b LearningBatch) error {
+	var completedAt any
+	if b.CompletedAt != nil {
+		completedAt = b.CompletedAt.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO learning_batches(id, source, started_at, completed_at, rule_count, status)
+		 VALUES(?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at, rule_count=excluded.rule_count, status=excluded.status`,
+		b.ID, b.Source, b.StartedAt.UTC().Format(time.RFC3339Nano), completedAt, b.RuleCount, b.Status)
+	if err != nil {
+		return fmt.Errorf("store: save learning batch: %w", err)
+	}
+	return nil
+}
+
+// scanRule reads a rule row. Uses sql.Scanner via rows.Scan.
+func scanRule(rows *sql.Rows) (domain.Rule, error) {
+	var r domain.Rule
+	var enabled int
+	var source, status, batchID, approvedAt, expiresAt sql.NullString
+	err := rows.Scan(&r.ID, &r.Version, &r.Priority, &enabled, &r.Definition,
+		&source, &batchID, &r.Confidence, &status, &approvedAt, &expiresAt)
+	if err != nil {
+		return r, fmt.Errorf("store: scan rule: %w", err)
+	}
+	r.Enabled = enabled != 0
+	r.Source = domain.RuleSource(source.String)
+	r.BatchID = batchID.String
+	r.Status = domain.RuleStatus(status.String)
+	if approvedAt.Valid && approvedAt.String != "" {
+		t, err := time.Parse(time.RFC3339Nano, approvedAt.String)
+		if err == nil {
+			r.ApprovedAt = &t
+		}
+	}
+	if expiresAt.Valid && expiresAt.String != "" {
+		t, err := time.Parse(time.RFC3339Nano, expiresAt.String)
+		if err == nil {
+			r.ExpiresAt = &t
+		}
+	}
+	return r, nil
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
 
 func (s *SQLiteStore) CreateTask(ctx context.Context, task domain.OperationTask) error {
 	_, err := s.db.ExecContext(ctx,

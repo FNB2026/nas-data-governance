@@ -50,6 +50,8 @@ func main() {
 		err = runRelations(os.Args[2:])
 	case "merge":
 		err = runMerge(os.Args[2:])
+	case "rules":
+		err = runRules(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -155,7 +157,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|rules> [options]")
 }
 
 // ---- approve ----
@@ -491,6 +493,152 @@ func runMerge(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "identified %d merge suggestions\n", len(suggestions))
+	return nil
+}
+
+// ---- rules ----
+
+// runRules manages the rule lifecycle: list drafts/approved/disabled,
+// approve a draft (entering probation), reject a draft, or disable a
+// whole batch. All operations are on the project's SQLite database only.
+func runRules(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("rules requires a subcommand: list|approve|reject|disable")
+	}
+	sub := args[0]
+	rest := args[1:]
+	switch sub {
+	case "list":
+		return runRulesList(rest)
+	case "approve":
+		return runRulesApprove(rest)
+	case "reject":
+		return runRulesReject(rest)
+	case "disable":
+		return runRulesDisable(rest)
+	default:
+		return fmt.Errorf("unknown rules subcommand: %s", sub)
+	}
+}
+
+func runRulesList(args []string) error {
+	fs := flag.NewFlagSet("rules list", flag.ContinueOnError)
+	dbPath := fs.String("db", "./var/governance.db", "database path")
+	status := fs.String("status", "", "filter by status (draft|probation|approved|disabled|rejected)")
+	source := fs.String("source", "", "filter by source (builtin|learned|user)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	rules, err := st.ListRules(ctx, domain.RuleSource(*source), domain.RuleStatus(*status))
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(rules); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "%d rules\n", len(rules))
+	return nil
+}
+
+func runRulesApprove(args []string) error {
+	fs := flag.NewFlagSet("rules approve", flag.ContinueOnError)
+	dbPath := fs.String("db", "./var/governance.db", "database path")
+	batch := fs.String("batch", "", "approve all drafts in a batch")
+	id := fs.String("id", "", "approve a single rule by ID")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *batch == "" && *id == "" {
+		return fmt.Errorf("rules approve requires --batch or --id")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	now := time.Now().UTC()
+	if *id != "" {
+		if err := st.UpdateRuleStatus(ctx, *id, domain.RuleProbation, &now); err != nil {
+			return err
+		}
+		fmt.Printf("rule %s → probation\n", *id)
+		return nil
+	}
+	// Approve all drafts in the batch.
+	rules, err := st.ListRules(ctx, domain.RuleSourceLearned, domain.RuleDraft)
+	if err != nil {
+		return err
+	}
+	count := 0
+	for _, r := range rules {
+		if r.BatchID != *batch {
+			continue
+		}
+		if err := st.UpdateRuleStatus(ctx, r.ID, domain.RuleProbation, &now); err != nil {
+			return err
+		}
+		count++
+	}
+	fmt.Printf("approved %d rules in batch %s → probation\n", count, *batch)
+	return nil
+}
+
+func runRulesReject(args []string) error {
+	fs := flag.NewFlagSet("rules reject", flag.ContinueOnError)
+	dbPath := fs.String("db", "./var/governance.db", "database path")
+	id := fs.String("id", "", "reject a single rule by ID")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return fmt.Errorf("rules reject requires --id")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.UpdateRuleStatus(ctx, *id, domain.RuleRejected, nil); err != nil {
+		return err
+	}
+	fmt.Printf("rule %s → rejected\n", *id)
+	return nil
+}
+
+func runRulesDisable(args []string) error {
+	fs := flag.NewFlagSet("rules disable", flag.ContinueOnError)
+	dbPath := fs.String("db", "./var/governance.db", "database path")
+	batch := fs.String("batch", "", "disable all rules in a batch")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *batch == "" {
+		return fmt.Errorf("rules disable requires --batch")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.DisableBatch(ctx, *batch); err != nil {
+		return err
+	}
+	fmt.Printf("disabled all rules in batch %s\n", *batch)
 	return nil
 }
 

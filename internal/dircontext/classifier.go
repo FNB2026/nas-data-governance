@@ -56,7 +56,10 @@ func classifySegments(segments []string) domain.DirectoryContext {
 			return domain.DirectoryContext{Role: domain.RoleSensitive, AuthorityLevel: 100, PrivacyLevel: "high", Protected: true, MatchedTerms: []string{term}}
 		}
 	}
-	for _, candidate := range roleSignals {
+	// activeSignals returns builtin first, then learned. Builtin protection
+	// roles (priority 90-100) always win because they appear first. Learned
+	// rules are capped at maxLearnedPriority (60) per K-008.
+	for _, candidate := range activeSignals() {
 		matched := make([]string, 0)
 		for _, term := range candidate.terms {
 			if matches(segments, term) {
@@ -106,7 +109,7 @@ func roleForSegment(name string) (domain.DirectoryRole, int) {
 			return domain.RoleSensitive, 100
 		}
 	}
-	for _, candidate := range roleSignals {
+	for _, candidate := range activeSignals() {
 		for _, term := range candidate.terms {
 			if matches(segments, term) {
 				return candidate.role, candidate.authority

@@ -8,12 +8,23 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"nas-data-governance/internal/domain"
 )
 
 // ErrNotFound is returned when a single-row lookup has no match.
 var ErrNotFound = errors.New("store: not found")
+
+// LearningBatch is the persisted record of one learning run.
+type LearningBatch struct {
+	ID          string
+	Source      string // stats | corpus | feedback
+	StartedAt   time.Time
+	CompletedAt *time.Time
+	RuleCount   int
+	Status      string // running | completed | failed
+}
 
 // Store is the persistence port used by scan/plan/execute layers.
 // All methods are context-aware so callers can cancel long operations.
@@ -56,4 +67,28 @@ type Store interface {
 	// AppendLog adds one audit entry. Used by the future executor.
 	AppendLog(ctx context.Context, planID, eventType string, detail map[string]any) error
 	ListLogs(ctx context.Context, planID string) ([]domain.OperationLog, error)
+
+	// ---------------- rules (L1 infrastructure) ----------------
+
+	// SaveRule inserts or replaces a rule by ID. For learned rules the
+	// caller sets Source=learned, Status=draft, BatchID, Confidence.
+	SaveRule(ctx context.Context, r domain.Rule) error
+
+	// ListRules returns rules filtered by source and/or status. Either
+	// may be empty to skip filtering on that dimension.
+	ListRules(ctx context.Context, source domain.RuleSource, status domain.RuleStatus) ([]domain.Rule, error)
+
+	// UpdateRuleStatus transitions a rule's lifecycle state. Used by
+	// the CLI approve/reject/disable commands. approvedAt is set when
+	// status becomes probation or approved.
+	UpdateRuleStatus(ctx context.Context, ruleID string, status domain.RuleStatus, approvedAt *time.Time) error
+
+	// DisableBatch sets status=disabled for all rules in a batch. Used
+	// for whole-batch rollback (K-008).
+	DisableBatch(ctx context.Context, batchID string) error
+
+	// ---------------- learning batches ----------------
+
+	// SaveLearningBatch inserts or updates a learning batch record.
+	SaveLearningBatch(ctx context.Context, b LearningBatch) error
 }

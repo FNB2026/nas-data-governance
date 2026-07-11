@@ -246,3 +246,41 @@ type MergeSuggestion struct {
 	Confidence float64  `json:"confidence"`
 	Evidence   []string `json:"evidence"`
 }
+
+// RuleSource identifies where a rule came from.
+type RuleSource string
+
+const (
+	RuleSourceBuiltin RuleSource = "builtin" // 硬编码内置规则
+	RuleSourceLearned RuleSource = "learned" // 学习产出
+	RuleSourceUser    RuleSource = "user"    // 用户显式声明
+)
+
+// RuleStatus is the lifecycle state of a learned rule.
+type RuleStatus string
+
+const (
+	RuleDraft     RuleStatus = "draft"     // 草案，待审批
+	RuleProbation RuleStatus = "probation" // 试用期，审批后观察 N 天
+	RuleApproved  RuleStatus = "approved"  // 正式生效
+	RuleDisabled  RuleStatus = "disabled" // 已禁用（可回滚启用）
+	RuleRejected  RuleStatus = "rejected" // 审批拒绝，归档不生效
+)
+
+// Rule is the persisted representation of a directory classification rule.
+// Builtin rules are loaded from code constants; learned rules from the DB.
+// Per K-008, learned rules have priority <= 60 and never override
+// protection rules (priority 90-100).
+type Rule struct {
+	ID          string      `json:"id"`
+	Version     int         `json:"version"`
+	Priority    int         `json:"priority"`
+	Enabled     bool        `json:"enabled"`
+	Source      RuleSource  `json:"source"`
+	BatchID     string      `json:"batch_id,omitempty"`
+	Confidence  float64     `json:"confidence"`
+	Status      RuleStatus  `json:"status"`
+	ApprovedAt  *time.Time  `json:"approved_at,omitempty"`
+	ExpiresAt   *time.Time  `json:"expires_at,omitempty"`
+	Definition  string      `json:"definition_yaml"`
+}
