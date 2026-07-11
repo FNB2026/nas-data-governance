@@ -138,10 +138,13 @@ const (
 )
 
 type PlannedAction struct {
-	Path    string           `json:"path"`
-	Action  OperationType    `json:"action"`
-	Reason  string           `json:"reason"`
-	Context DirectoryContext `json:"context"`
+	Path   string        `json:"path"`
+	Action OperationType `json:"action"`
+	Reason string        `json:"reason"`
+	// TargetPath is the destination for MOVE, COPY, and RENAME actions.
+	// Empty for DELETE, QUARANTINE, KEEP, SKIP, REVIEW.
+	TargetPath string `json:"target_path,omitempty"`
+	Context    DirectoryContext `json:"context"`
 	// File is the plan-time snapshot used by the executor's stale check.
 	// Empty for actions that don't touch the filesystem (REVIEW, SKIP).
 	File FileInstance `json:"file,omitempty"`

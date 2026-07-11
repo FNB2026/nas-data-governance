@@ -156,6 +156,22 @@ func (e *Executor) validatePlanScope(plan *domain.OperationPlan) error {
 		if err := notSymlinkBelowRoot(action.Path, root); err != nil {
 			return errActionFailed
 		}
+		// MOVE, COPY, and RENAME carry a target path that must also be
+		// within a configured source root — the executor never writes to
+		// paths outside the approved task area. QUARANTINE targets are
+		// validated separately in executeQuarantine via the quarantine root.
+		if action.TargetPath != "" {
+			if !filepath.IsAbs(action.TargetPath) {
+				return errOutOfScope
+			}
+			tRoot, ok := rootFor(action.TargetPath, e.quarantine.SourceRoots)
+			if !ok {
+				return errOutOfScope
+			}
+			if err := notSymlinkBelowRoot(action.TargetPath, tRoot); err != nil {
+				return errActionFailed
+			}
+		}
 	}
 	return nil
 }
@@ -246,6 +262,14 @@ func (e *Executor) executeAction(ctx context.Context, action domain.PlannedActio
 	switch action.Action {
 	case domain.OperationQuarantine:
 		return e.executeQuarantine(action)
+	case domain.OperationMove:
+		return e.executeMove(action)
+	case domain.OperationCopy:
+		return e.executeCopy(action)
+	case domain.OperationDelete:
+		return e.executeDelete(action)
+	case domain.OperationRename:
+		return e.executeRename(action)
 	case domain.OperationKeep, domain.OperationSkip, domain.OperationReview:
 		return AuditStep{Name: string(action.Action), Status: StepSkipped,
 			Detail: map[string]any{"reason": "non-filesystem action"}}, nil, nil
@@ -279,6 +303,109 @@ func (e *Executor) executeQuarantine(action domain.PlannedAction) (AuditStep, fu
 	}
 	return AuditStep{Name: "quarantine", Status: StepOK,
 		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+}
+
+// executeMove moves a file to action.TargetPath using the copy-verify-delete
+// pipeline (MoveFile). The rollback hook moves the file back to its original
+// path. After the source is removed, the source directory is cleaned up if
+// it became empty (best-effort, non-fatal).
+func (e *Executor) executeMove(action domain.PlannedAction) (AuditStep, func() error, error) {
+	if action.TargetPath == "" {
+		return AuditStep{Name: "move", Status: StepFailed,
+			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: move requires target_path")
+	}
+	if err := MoveFile(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
+		return AuditStep{Name: "move", Status: StepFailed,
+			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, nil, err
+	}
+	maybeCleanupEmptyDir(filepath.Dir(action.Path))
+	rollback := func() error {
+		return MoveFile(action.TargetPath, action.Path, action.File.ContentSHA256)
+	}
+	return AuditStep{Name: "move", Status: StepOK,
+		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+}
+
+// executeCopy copies a file to action.TargetPath and verifies integrity.
+// The source is NOT removed — use MOVE for copy+delete. The rollback hook
+// removes the copied destination.
+func (e *Executor) executeCopy(action domain.PlannedAction) (AuditStep, func() error, error) {
+	if action.TargetPath == "" {
+		return AuditStep{Name: "copy", Status: StepFailed,
+			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: copy requires target_path")
+	}
+	if _, err := CopyFile(action.Path, action.TargetPath); err != nil {
+		return AuditStep{Name: "copy", Status: StepFailed,
+			Detail: map[string]any{"error_type": "copy_failed", "bytes": action.File.Size}}, nil, err
+	}
+	if err := VerifyFile(action.TargetPath, action.File.ContentSHA256); err != nil {
+		return AuditStep{Name: "copy", Status: StepFailed,
+			Detail: map[string]any{"error_type": "verify_failed", "bytes": action.File.Size}}, nil, err
+	}
+	rollback := func() error {
+		return SafeRemove(action.TargetPath)
+	}
+	return AuditStep{Name: "copy", Status: StepOK,
+		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+}
+
+// executeDelete permanently removes a file. DELETE is irreversible — it
+// has no rollback hook. DELETE should only be used for files whose content
+// has been verified to exist elsewhere (e.g., after a successful COPY or
+// MOVE). The stale check has already confirmed the file hasn't changed.
+func (e *Executor) executeDelete(action domain.PlannedAction) (AuditStep, func() error, error) {
+	if err := SafeRemove(action.Path); err != nil {
+		return AuditStep{Name: "delete", Status: StepFailed,
+			Detail: map[string]any{"error_type": "delete_failed", "bytes": action.File.Size}}, nil, err
+	}
+	maybeCleanupEmptyDir(filepath.Dir(action.Path))
+	// No rollback: deletion is irreversible by design.
+	return AuditStep{Name: "delete", Status: StepOK,
+		Detail: map[string]any{"bytes": action.File.Size}}, nil, nil
+}
+
+// executeRename renames a file within the same directory (same-volume
+// rename). It uses os.Rename for atomicity, then verifies the destination
+// hash. The rollback hook renames back.
+func (e *Executor) executeRename(action domain.PlannedAction) (AuditStep, func() error, error) {
+	if action.TargetPath == "" {
+		return AuditStep{Name: "rename", Status: StepFailed,
+			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: rename requires target_path")
+	}
+	if err := notSymlink(action.Path); err != nil {
+		return AuditStep{Name: "rename", Status: StepFailed,
+			Detail: map[string]any{"error_type": "symlink_refused"}}, nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(action.TargetPath), 0o755); err != nil {
+		return AuditStep{Name: "rename", Status: StepFailed,
+			Detail: map[string]any{"error_type": "mkdir_failed"}}, nil, err
+	}
+	if err := os.Rename(action.Path, action.TargetPath); err != nil {
+		return AuditStep{Name: "rename", Status: StepFailed,
+			Detail: map[string]any{"error_type": "rename_failed", "bytes": action.File.Size}}, nil, err
+	}
+	if err := VerifyFile(action.TargetPath, action.File.ContentSHA256); err != nil {
+		// Rename succeeded but verify failed: rename back to restore.
+		_ = os.Rename(action.TargetPath, action.Path)
+		return AuditStep{Name: "rename", Status: StepFailed,
+			Detail: map[string]any{"error_type": "verify_failed", "bytes": action.File.Size}}, nil, err
+	}
+	rollback := func() error {
+		return os.Rename(action.TargetPath, action.Path)
+	}
+	return AuditStep{Name: "rename", Status: StepOK,
+		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+}
+
+// maybeCleanupEmptyDir removes dir if it contains no entries. This is a
+// best-effort cleanup after MOVE or DELETE — failures are silently ignored
+// because an empty directory is harmless and can be cleaned up later.
+func maybeCleanupEmptyDir(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) > 0 {
+		return
+	}
+	_ = os.Remove(dir) // best-effort; ignore error
 }
 
 // rollbackAll runs rollback functions in reverse order, appending one
