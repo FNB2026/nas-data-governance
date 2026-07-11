@@ -14,6 +14,7 @@ import (
 	"nas-data-governance/internal/domain"
 	"nas-data-governance/internal/executor"
 	"nas-data-governance/internal/fingerprint"
+	"nas-data-governance/internal/format"
 	idx "nas-data-governance/internal/index"
 	"nas-data-governance/internal/planner"
 	"nas-data-governance/internal/report"
@@ -38,6 +39,8 @@ func main() {
 		err = runApprove(os.Args[2:])
 	case "execute":
 		err = runExecute(os.Args[2:])
+	case "analyze":
+		err = runAnalyze(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -143,7 +146,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze> [options]")
 }
 
 // ---- approve ----
@@ -309,6 +312,106 @@ func runExecute(args []string) error {
 		return err
 	}
 	fmt.Printf("executed %d, skipped %d, failed %d — audit: %s\n", executed, skipped, failed, *out)
+	return nil
+}
+
+// ---- analyze ----
+
+// formatReportEntry is one row in the analyze output.
+type formatReportEntry struct {
+	Path      string            `json:"path"`
+	StorageID string            `json:"storage_id"`
+	Format    domain.FormatInfo `json:"format"`
+	Error     string            `json:"error,omitempty"`
+}
+
+// runAnalyze reads a scan index, runs header-only format analysis (K-006) on
+// each file, and writes a JSON report. When --db is provided, results are also
+// persisted to SQLite via store.SaveFormat; the file rows must already exist
+// (created by a prior scan). Analyze is read-only with respect to user data:
+// it only reads file headers and writes its own report/database.
+func runAnalyze(args []string) error {
+	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	index := fs.String("index", "./var/index.jsonl", "index file from scan")
+	out := fs.String("out", "./var/formats.json", "format analysis report output")
+	dbPath := fs.String("db", "", "SQLite database to persist results (optional)")
+	storageID := fs.String("storage-id", "", "filter files by storage ID (optional)")
+	limit := fs.Int("limit", 0, "max files to analyze (0 = all)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	files, err := idx.Read(*index)
+	if err != nil {
+		return err
+	}
+	if *storageID != "" {
+		filtered := make([]domain.FileInstance, 0, len(files))
+		for _, f := range files {
+			if f.StorageID == *storageID {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+	if *limit > 0 && len(files) > *limit {
+		files = files[:*limit]
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	var st *store.SQLiteStore
+	if *dbPath != "" {
+		st, err = store.Open(ctx, *dbPath)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+	}
+	entries := make([]formatReportEntry, 0, len(files))
+	analyzed, unrecognized, failed, persisted := 0, 0, 0, 0
+	for _, f := range files {
+		info, analyzeErr := format.Analyze(f.Path)
+		entry := formatReportEntry{Path: f.Path, StorageID: f.StorageID, Format: info}
+		if analyzeErr != nil {
+			failed++
+			entry.Error = analyzeErr.Error()
+		} else if info.Format == "" {
+			unrecognized++
+		} else {
+			analyzed++
+		}
+		// Persist to SQLite when configured. The file row must already exist
+		// (created by a prior scan with --db); missing rows are reported as
+		// warnings but do not stop analysis.
+		if st != nil && analyzeErr == nil && info.Format != "" {
+			fileID, lookupErr := st.FileID(ctx, f.StorageID, f.Path)
+			if lookupErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: no file row for %s: %v\n", f.Path, lookupErr)
+			} else if saveErr := st.SaveFormat(ctx, fileID, info); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: save format for %s: %v\n", f.Path, saveErr)
+			} else {
+				persisted++
+			}
+		}
+		entries = append(entries, entry)
+	}
+	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(*out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(entries); err != nil {
+		return err
+	}
+	fmt.Printf("analyzed %d files (%d recognized, %d unrecognized, %d failed) — report: %s\n",
+		len(entries), analyzed, unrecognized, failed, *out)
+	if st != nil {
+		fmt.Printf("persisted %d format records to %s\n", persisted, *dbPath)
+	}
 	return nil
 }
 

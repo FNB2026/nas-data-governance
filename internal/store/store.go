@@ -40,6 +40,11 @@ type Store interface {
 	// invalidated when the classifier changes.
 	SaveContext(ctx context.Context, fileID int64, c domain.DirectoryContext, ruleVersion string) error
 
+	// SaveFormat stores format analysis results for a file row. The format
+	// JSON blob captures all FormatInfo fields; format_name is denormalized
+	// for quick filtering by category.
+	SaveFormat(ctx context.Context, fileID int64, info domain.FormatInfo) error
+
 	// CreateTask inserts a new operation task and returns its row id.
 	CreateTask(ctx context.Context, task domain.OperationTask) error
 	GetTask(ctx context.Context, id string) (domain.OperationTask, error)

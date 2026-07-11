@@ -169,6 +169,23 @@ func (s *SQLiteStore) SaveContext(ctx context.Context, fileID int64, c domain.Di
 	return nil
 }
 
+// ---------------- file_formats ----------------
+
+func (s *SQLiteStore) SaveFormat(ctx context.Context, fileID int64, info domain.FormatInfo) error {
+	blob, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("store: marshal format: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO file_formats(file_id, format_name, category, format_json) VALUES(?, ?, ?, ?)
+		 ON CONFLICT(file_id) DO UPDATE SET format_name=excluded.format_name, category=excluded.category, format_json=excluded.format_json`,
+		fileID, info.Format, string(info.Category), string(blob))
+	if err != nil {
+		return fmt.Errorf("store: save format: %w", err)
+	}
+	return nil
+}
+
 // ---------------- operation_tasks ----------------
 
 func (s *SQLiteStore) CreateTask(ctx context.Context, task domain.OperationTask) error {

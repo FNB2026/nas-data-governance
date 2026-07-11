@@ -76,6 +76,48 @@ type FileInstance struct {
 	QuickHash     string    `json:"quick_hash,omitempty"`
 	ContentSHA256 string    `json:"content_sha256,omitempty"`
 	DiscoveredAt  time.Time `json:"discovered_at"`
+	// Format carries detected format metadata when format analysis has run.
+	// Empty until analyze is called; not populated by the scanner.
+	Format FormatInfo `json:"format,omitempty"`
+}
+
+// FormatCategory groups formats by their role in the asset lifecycle.
+type FormatCategory string
+
+const (
+	CategoryImage    FormatCategory = "image"
+	CategoryVideo    FormatCategory = "video"
+	CategoryAudio    FormatCategory = "audio"
+	CategoryDocument FormatCategory = "document"
+	CategoryArchive  FormatCategory = "archive"
+	CategoryCode     FormatCategory = "code"
+	CategoryOther    FormatCategory = "other"
+	CategoryUnknown  FormatCategory = "unknown"
+)
+
+// FormatInfo holds the result of lightweight format analysis.
+// Per K-006 (progressive analysis), this is header-only: no OCR, no media
+// decoding, no AI. The goal is to identify the real format and extract
+// cheap metadata that helps distinguish "same content, different encoding"
+// from true duplicates.
+type FormatInfo struct {
+	// Format is the canonical format name (e.g., "jpeg", "png", "mp4").
+	Format string `json:"format,omitempty"`
+	// Category groups the format for lifecycle decisions.
+	Category FormatCategory `json:"category,omitempty"`
+	// MIME is the best-guess MIME type.
+	MIME string `json:"mime,omitempty"`
+	// Width and Height apply to images and video frames.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+	// Duration is media duration in seconds (fractional).
+	Duration float64 `json:"duration,omitempty"`
+	// Pages applies to PDF and Office documents.
+	Pages int `json:"pages,omitempty"`
+	// Codec identifies the encoding used (e.g., "h264", "aac").
+	Codec string `json:"codec,omitempty"`
+	// ArchiveEntryCount is the number of entries in an archive.
+	ArchiveEntryCount int `json:"archive_entry_count,omitempty"`
 }
 
 type DuplicateGroup struct {
