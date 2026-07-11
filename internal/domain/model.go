@@ -198,3 +198,48 @@ const (
 	RiskHigh     RiskLevel = "high"
 	RiskCritical RiskLevel = "critical"
 )
+
+// RelationType classifies the relationship between two file instances.
+// Only "identical" (same size + same full hash) is safe for automated
+// dedup; the others default to review per K-002.
+type RelationType string
+
+const (
+	RelationIdentical  RelationType = "identical"  // 字节级完全重复
+	RelationDerivative RelationType = "derivative" // 原始与派生（同内容不同编码）
+	RelationVersion    RelationType = "version"    // 版本关系（命名模式）
+	RelationSimilar    RelationType = "similar"    // 视觉/听觉近似
+)
+
+// FileRelation describes a relationship between two file paths. Score is a
+// 0-1 confidence where applicable; 0 means N/A.
+type FileRelation struct {
+	Type     RelationType `json:"type"`
+	A        string       `json:"a"`
+	B        string       `json:"b"`
+	Score    float64      `json:"score,omitempty"`
+	Evidence []string     `json:"evidence,omitempty"`
+}
+
+// AssetGroup is a collection of files belonging to the same project, event,
+// or business matter. Clustering is path/anchor based (K-001/K-002); it is
+// read-only and never modifies the filesystem.
+type AssetGroup struct {
+	ID       string          `json:"id"`
+	Anchor   string          `json:"anchor,omitempty"`
+	RootPath string          `json:"root_path"`
+	Members  []FileInstance  `json:"members"`
+	Evidence []string        `json:"evidence"`
+}
+
+// MergeSuggestion proposes consolidating sibling directories that hold the
+// same business purpose. It is a read-only recommendation; execution still
+// requires plan approval (K-008).
+type MergeSuggestion struct {
+	ID         string   `json:"id"`
+	TargetDir  string   `json:"target_dir"`
+	SourceDirs []string `json:"source_dirs"`
+	Reason     string   `json:"reason"`
+	Confidence float64  `json:"confidence"`
+	Evidence   []string `json:"evidence"`
+}

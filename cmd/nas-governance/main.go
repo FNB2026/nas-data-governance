@@ -11,12 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"nas-data-governance/internal/assets"
 	"nas-data-governance/internal/domain"
 	"nas-data-governance/internal/executor"
 	"nas-data-governance/internal/fingerprint"
 	"nas-data-governance/internal/format"
 	idx "nas-data-governance/internal/index"
+	"nas-data-governance/internal/merge"
 	"nas-data-governance/internal/planner"
+	"nas-data-governance/internal/relations"
 	"nas-data-governance/internal/report"
 	"nas-data-governance/internal/scanner"
 	"nas-data-governance/internal/store"
@@ -41,6 +44,12 @@ func main() {
 		err = runExecute(os.Args[2:])
 	case "analyze":
 		err = runAnalyze(os.Args[2:])
+	case "group":
+		err = runGroup(os.Args[2:])
+	case "relations":
+		err = runRelations(os.Args[2:])
+	case "merge":
+		err = runMerge(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -146,7 +155,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge> [options]")
 }
 
 // ---- approve ----
@@ -412,6 +421,76 @@ func runAnalyze(args []string) error {
 	if st != nil {
 		fmt.Printf("persisted %d format records to %s\n", persisted, *dbPath)
 	}
+	return nil
+}
+
+// ---- group / relations / merge ----
+
+// runGroup reads a scan index and clusters files into asset groups by
+// business anchor or path proximity. Output is JSON to stdout (K-001/K-002).
+func runGroup(args []string) error {
+	fs := flag.NewFlagSet("group", flag.ContinueOnError)
+	path := fs.String("index", "./var/index.jsonl", "index file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	files, err := idx.Read(*path)
+	if err != nil {
+		return err
+	}
+	groups := assets.Group(files)
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(groups); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "identified %d asset groups\n", len(groups))
+	return nil
+}
+
+// runRelations reads a scan index and detects version + derivative
+// relationships between files. All relations are read-only observations;
+// none trigger deletion (K-002).
+func runRelations(args []string) error {
+	fs := flag.NewFlagSet("relations", flag.ContinueOnError)
+	path := fs.String("index", "./var/index.jsonl", "index file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	files, err := idx.Read(*path)
+	if err != nil {
+		return err
+	}
+	rels := relations.Relations(files)
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(rels); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "identified %d file relations\n", len(rels))
+	return nil
+}
+
+// runMerge reads a scan index and proposes directory consolidation
+// suggestions. Suggestions are read-only; no filesystem action is taken
+// (K-008). Each suggestion requires human review before a plan is created.
+func runMerge(args []string) error {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	path := fs.String("index", "./var/index.jsonl", "index file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	files, err := idx.Read(*path)
+	if err != nil {
+		return err
+	}
+	suggestions := merge.Suggest(files)
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(suggestions); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "identified %d merge suggestions\n", len(suggestions))
 	return nil
 }
 
