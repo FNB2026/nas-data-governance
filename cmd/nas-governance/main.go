@@ -528,29 +528,41 @@ func runMerge(args []string) error {
 
 // ---- learn ----
 
-// runLearn runs local statistical learning over the indexed file metadata
-// stored in the SQLite database. It is read-only with respect to user data:
-// it reads only the governance DB, never the user's file system (K-009).
+// runLearn runs local learning. Two sources are supported:
+//   - --source=stats (L2): reads indexed file metadata from the governance
+//     SQLite database. Read-only w.r.t. user data (K-009).
+//   - --source=corpus (L3): reads user-provided trusted documents from
+//     --corpus-dir (default var/corpus/). Only this directory is read,
+//     never the user's NAS data.
 //
-// By default it prints a stats summary (no writes). With --apply it also
-// persists directory-signal rule drafts (status=draft) to the rules table
-// for human review via the `rules` subcommand. Drafts never override
-// protection rules (priority <= 60, K-008).
+// By default it prints a summary (no writes). With --apply it also persists
+// directory-signal rule drafts (status=draft) to the rules table for human
+// review via the `rules` subcommand. Drafts never override protection rules
+// (priority <= 60, K-008).
 func runLearn(args []string) error {
 	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
-	dbPath := fs.String("db", "./var/governance.db", "governance database (must already hold scan results)")
-	source := fs.String("source", "stats", "learning source (only 'stats' supported in L2)")
+	dbPath := fs.String("db", "./var/governance.db", "governance database (for stats source or to persist drafts)")
+	source := fs.String("source", "stats", "learning source: stats | corpus")
+	corpusDir := fs.String("corpus-dir", "./var/corpus", "trusted corpus directory (source=corpus only)")
 	out := fs.String("out", "", "write full stats JSON to this path (optional)")
 	apply := fs.Bool("apply", false, "persist generated rule drafts to the database")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *source != "stats" {
-		return fmt.Errorf("learn: --source %q not supported (only 'stats' in L2)", *source)
+	switch *source {
+	case "stats":
+		return runLearnStats(args, *dbPath, *out, *apply)
+	case "corpus":
+		return runLearnCorpus(args, *dbPath, *corpusDir, *out, *apply)
+	default:
+		return fmt.Errorf("learn: --source %q not supported (use 'stats' or 'corpus')", *source)
 	}
+}
+
+func runLearnStats(args []string, dbPath, outPath string, apply bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	st, err := store.Open(ctx, *dbPath)
+	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return err
 	}
@@ -567,35 +579,79 @@ func runLearn(args []string) error {
 		fmt.Fprintf(os.Stderr, "  %-24s dirs=%-3d files=%-4d role=%s\n", ds.Name, ds.DirCount, ds.FileCount, ds.SuggestedRole)
 	}
 
-	if *out != "" {
-		if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+	if outPath != "" {
+		if err := writeJSONFile(outPath, stats); err != nil {
 			return err
 		}
-		f, err := os.Create(*out)
-		if err != nil {
-			return err
-		}
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(stats); err != nil {
-			_ = f.Close()
-			return err
-		}
-		_ = f.Close()
-		fmt.Fprintf(os.Stderr, "stats written to %s\n", *out)
+		fmt.Fprintf(os.Stderr, "stats written to %s\n", outPath)
 	}
-
-	if !*apply {
+	if !apply {
 		fmt.Fprintln(os.Stderr, "dry run: no drafts persisted (pass --apply to write drafts)")
 		return nil
 	}
-	batchID := learning.NewBatchID(*source, time.Now().UTC())
+	batchID := learning.NewBatchID("stats", time.Now().UTC())
 	rules, err := learning.GenerateDrafts(ctx, st, stats, batchID)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "persisted %d draft rules (batch %s) — review with `rules list --status draft`\n", len(rules), batchID)
 	return nil
+}
+
+func runLearnCorpus(args []string, dbPath, corpusDir, outPath string, apply bool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	stats, err := learning.LearnFromCorpus(ctx, learning.CorpusOptions{Dir: corpusDir})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "corpus: read %d files (%d skipped)\n", stats.FilesRead, stats.FilesSkipped)
+	fmt.Fprintf(os.Stderr, "role candidates: %d\n", len(stats.Terms))
+	for _, t := range stats.Terms {
+		fmt.Fprintf(os.Stderr, "  %-20s count=%-3d role=%s\n", t.Term, t.Count, t.SuggestedRole)
+	}
+	fmt.Fprintf(os.Stderr, "sensitive candidates: %d\n", len(stats.SensitiveCandidates))
+	for _, t := range stats.SensitiveCandidates {
+		fmt.Fprintf(os.Stderr, "  %-20s count=%-3d (sensitive)\n", t.Term, t.Count)
+	}
+
+	if outPath != "" {
+		if err := writeJSONFile(outPath, stats); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "stats written to %s\n", outPath)
+	}
+	if !apply {
+		fmt.Fprintln(os.Stderr, "dry run: no drafts persisted (pass --apply to write drafts)")
+		return nil
+	}
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	batchID := learning.NewBatchID("corpus", time.Now().UTC())
+	rules, err := learning.GenerateCorpusDrafts(ctx, st, stats, batchID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "persisted %d draft rules (batch %s) — review with `rules list --status draft`\n", len(rules), batchID)
+	return nil
+}
+
+// writeJSONFile writes v as indented JSON to path, creating parent dirs.
+func writeJSONFile(path string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 // ---- rules ----
