@@ -31,3 +31,16 @@
 - 已完成 L2：本地统计学习（learning 包）。`Learn()` 遍历 SQLite 索引统计目录名频次与共现，跳过敏感目录（K-009）与 builtin 已覆盖术语；`GenerateDrafts()` 生成 status=draft 规则草案并持久化，强制 priority≤60（K-008），保留已审批规则不被覆盖；co-occurrence 平局确定性打破（内置权威优先→术语字典序）；CLI `learn --db [--apply] [--out]` 子命令，默认只读干跑。
 - 已完成 L3：行业资料学习（corpus）。`LearnFromCorpus()` 读取受信目录 `var/corpus/` 的 TXT/MD/DOCX/PDF 资料提取文本（PDF 用纯 Go 库 dslipak/pdf，无 OCR/外部服务），CJK 2-4 字 n-gram 分词，跳过 builtin 已覆盖术语；行业敏感词（诊断/处方等）路由到 SensitiveCandidates 生成 RoleSensitive 草案；`GenerateCorpusDrafts()` 持久化 status=draft 规则，priority≤60（K-008），保留已审批规则不被覆盖；CLI `learn --source=corpus --corpus-dir [--apply] [--out]` 子命令，默认只读干跑。
 - 已完成 L4：决策反馈学习（feedback）。`LearnFromFeedback()` 遍历历史 operation_plans，统计保留副本与评分排名的偏差，生成权重调整建议（authority/stability/path_depth/role_bonus 四维度，单次 ±3 分上限）；检测 learned 规则在被拒绝 plan 的 evidence 中的出现率，超过阈值（默认 0.5）生成置信度降级建议（单次 ≤0.2）；`GenerateFeedbackDrafts()` 持久化权重调整规则草案 + 直接降级 draft/probation 规则的 confidence（approved 不动）；store 新增 ListTasks + ListAllPlans 跨任务遍历历史；CLI `learn --source=feedback --db [--apply] [--out]` 子命令，默认只读干跑。
+
+## M6 生产化收束（已完成）
+
+本里程碑把 M1–M5 的功能基座推向可在真实 NAS 上运行的生产形态，不改变"默认只读、保护优先"的安全边界。
+
+- P0-1 持久化执行日志与崩溃恢复（commit `633c9ac`）：新增 `execution_journal` 表（schema 003），记录每个文件系统动作的生命周期（pending→done/failed→rolled_back）与实际目标路径；`Executor` 注入 `Journal` 接口，`BeginJournal/MarkJournalDone/MarkJournalFailed/MarkJournalRolledBack` 在每个动作前后落盘；`Recover()` 在启动时扫描未完成的动作，对已完成但未校验的动作回滚、对中断的计划重置为 APPROVED；CLI `recover --db` 子命令。9 个新测试覆盖日志幂等、崩溃恢复场景与 nil journal 向后兼容。
+- P0-2 增量扫描与断点续扫（commit `c7a1ddc`）：新增 `scan_checkpoints` 表（schema 004）与 `file_instances.file_status` 列（active/missing）；扫描前从 DB 加载 `ListFileMetadata` 缓存，比较 size+mtime+inode 三元组复用既有 SHA-256（哈希缓存复用）；自定义 BFS 遍历替代 `filepath.WalkDir`，每轮迭代检查 `ctx.Err()` 支持优雅中断；单目录 `os.ReadDir` 失败记入 `Stats.Errors` 并 continue，不终止整个扫描；扫描后 `MarkFilesMissing` 标记已删除文件为 missing（非物理删除）；`ResumePath` 选项支持断点续扫。store 层 6 个测试 + scanner 层 11 个测试。
+- P0-3 真实 NAS 故障演练（commit `e3363d9`）：在 `t.TempDir()` 隔离环境中跑 4 个只读场景（崩溃恢复、中断续扫、stale 检测、权限错误容忍）；报告通过 `sanitize()` 函数脱敏，把 `os.TempDir()` 前缀替换为 `<tmp>`，不暴露机器 hash 与绝对路径；placeholder 死代码清理。
+- P1-4 任务队列与资源控制（commit `b1667d2`）：新增 `internal/runner` worker pool，semaphore 通道控制并发，`Submit/Wait/Run` API，context-aware，单失败不阻塞其他任务；files 切片 mutex 保护，计数器用 atomic；`domain.TaskState` 枚举（queued/running/completed/failed/cancelled）+ store `UpdateTaskState`；CLI `scan --workers N`、`analyze --workers N`。8 个测试。
+- P1-5 人工复核管理界面（commit `fd4124a`）：新增 `review` 子命令，4 个子动作：`plans`（审阅待批准计划）、`rules`（审阅 draft/probation 规则，支持 approve/reject）、`merges`（审阅合并建议）、`conflicts`（审阅冲突计划）；`bufio.Reader` 逐行确认，`filepath.Base()` 路径脱敏，REVIEW→SKIP 转换；填补 probation→approved CLI 缺口，规则全链路 draft→probation→approved 可在 CLI 完成。6 个测试。
+- P1-6 补齐底层测试（commit `c81df09`）：覆盖 6 个包此前未测试的分支——internal/index JSONL 往返与错误路径（7 测试）、planner 默认 REVIEW 与 Cache 角色 QUARANTINE（2 测试）、dircontext 六个目录角色正面测试（7 测试）、merge pickTarget 双后缀与中文 _副本/_temp/_old/_new（5 测试）、relations Audio 派生与 _old/_new/_backup/副本 版本标记（6 测试）、format WebP/HEIC/AVI/TAR/RAR/Bzip2 检测（7 测试）。新增 481 行测试，全量 `go test ./... -race` 17 包通过。
+
+验收：执行动作可崩溃恢复；扫描可中断续扫且不丢失既有哈希；并发受 worker pool 约束；人工复核覆盖计划/规则/合并/冲突四条线；底层测试覆盖此前未触达的分支。全部遵守 AGENTS.md 工程护栏（默认只读、不跟随符号链接、保护优先、审计不泄露路径）。
