@@ -56,6 +56,8 @@ func main() {
 		err = runLearn(os.Args[2:])
 	case "rules":
 		err = runRules(os.Args[2:])
+	case "recover":
+		err = runRecover(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -186,7 +188,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|learn|rules> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|learn|rules|recover> [options]")
 }
 
 // ---- approve ----
@@ -291,6 +293,10 @@ func runExecute(args []string) error {
 		}); err != nil {
 			return fmt.Errorf("create task: %w", err)
 		}
+		// Populate TaskID on each plan so the execution journal FK is valid.
+		for i := range plans {
+			plans[i].TaskID = taskID
+		}
 		if err := st.SavePlans(ctx, taskID, plans); err != nil {
 			return fmt.Errorf("save plans: %w", err)
 		}
@@ -300,7 +306,14 @@ func runExecute(args []string) error {
 		Structure:   executor.QuarantineFlat,
 		SourceRoots: sourceRoots,
 	}
-	exec, err := executor.New(qCfg)
+	// When a database is available, enable crash-recovery journaling
+	// so execution can be resumed or rolled back after a crash.
+	var exec *executor.Executor
+	if st != nil {
+		exec, err = executor.NewWithJournal(qCfg, st)
+	} else {
+		exec, err = executor.New(qCfg)
+	}
 	if err != nil {
 		return err
 	}
@@ -887,4 +900,56 @@ func persistAudit(ctx context.Context, st *store.SQLiteStore, result executor.Re
 			fmt.Fprintf(os.Stderr, "warning: failed to write audit log for plan %s: %v\n", result.PlanID, err)
 		}
 	}
+}
+
+// ---- recover ----
+
+func runRecover(args []string) error {
+	fs := flag.NewFlagSet("recover", flag.ContinueOnError)
+	dbPath := fs.String("db", "", "SQLite database (required)")
+	out := fs.String("out", "", "write recovery results to file (default: stdout)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dbPath == "" {
+		return fmt.Errorf("--db is required")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	exec := executor.NewForRecovery()
+	results := exec.Recover(ctx, st)
+
+	rolledBack, reset, errors := 0, 0, 0
+	for _, r := range results {
+		switch r.Action {
+		case executor.RecoveryRolledBack:
+			rolledBack++
+		case executor.RecoveryResetToApproved:
+			reset++
+		}
+		if len(r.Errors) > 0 {
+			errors++
+		}
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	if *out != "" {
+		f, err := os.Create(*out)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		enc = json.NewEncoder(f)
+	}
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(results); err != nil {
+		return err
+	}
+	fmt.Printf("recovery: %d rolled back, %d reset to approved, %d with errors\n", rolledBack, reset, errors)
+	return nil
 }

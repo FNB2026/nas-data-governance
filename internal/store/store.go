@@ -66,6 +66,12 @@ type Store interface {
 	// SavePlans replaces all plans for a task in one transaction.
 	SavePlans(ctx context.Context, taskID string, plans []domain.OperationPlan) error
 	ListPlans(ctx context.Context, taskID string) ([]domain.OperationPlan, error)
+	// GetPlan loads a single plan by its ID. Used by crash recovery (P0-1)
+	// to inspect a plan found in EXECUTING state after a restart.
+	GetPlan(ctx context.Context, planID string) (domain.OperationPlan, error)
+	// UpdatePlanState persists a plan's state transition. Used by crash
+	// recovery to mark a plan as ROLLED_BACK or reset to APPROVED.
+	UpdatePlanState(ctx context.Context, planID string, state domain.PlanState) error
 	// ListAllPlans returns plans across all tasks, ordered by task creation
 	// time then plan id. Used by feedback learning (L4) to scan the full
 	// decision history. Each plan carries RetainScore/RetainPath/Evidence;
@@ -100,4 +106,53 @@ type Store interface {
 
 	// SaveLearningBatch inserts or updates a learning batch record.
 	SaveLearningBatch(ctx context.Context, b LearningBatch) error
+
+	// ---------------- execution journal (P0-1 崩溃恢复) ----------------
+
+	// BeginJournal 为 plan 的所有 filesystem action 写入 pending 记录。
+	// 已存在的记录不重复写入（UNIQUE(plan_id, action_index) 幂等）。
+	// 仅记录 touchesFilesystem=true 的 action。
+	BeginJournal(ctx context.Context, taskID, planID string, actions []domain.PlannedAction) error
+
+	// MarkJournalDone 标记 (plan_id, action_index) 执行完成，并记录实际
+	// 目标路径。actualTargetPath 对 MOVE/COPY/RENAME 等于 action.TargetPath；
+	// 对 QUARANTINE/DELETE 是运行时解析出的隔离路径。回滚时需要此路径。
+	MarkJournalDone(ctx context.Context, planID string, actionIndex int, actualTargetPath string) error
+
+	// MarkJournalFailed 标记 (plan_id, action_index) 执行失败。
+	MarkJournalFailed(ctx context.Context, planID string, actionIndex int) error
+
+	// MarkJournalRolledBack 标记 (plan_id, action_index) 已回滚。
+	MarkJournalRolledBack(ctx context.Context, planID string, actionIndex int, rollbackErr error) error
+
+	// ListJournalDone 列出 plan 中 status=done 的记录（用于回滚）。
+	// 返回顺序按 action_index 升序；回滚时应倒序处理。
+	ListJournalDone(ctx context.Context, planID string) ([]JournalEntry, error)
+
+	// ListJournalPending 列出 plan 中 status=pending 的记录（用于继续执行）。
+	// 返回顺序按 action_index 升序。
+	ListJournalPending(ctx context.Context, planID string) ([]JournalEntry, error)
+
+	// ListJournalAll 列出 plan 的全部 journal 记录（用于恢复判断）。
+	ListJournalAll(ctx context.Context, planID string) ([]JournalEntry, error)
+
+	// ListExecutingPlans 列出 state=EXECUTING 的 plan（崩溃恢复入口）。
+	// 返回 plan_id 列表。
+	ListExecutingPlans(ctx context.Context) ([]string, error)
+}
+
+// JournalEntry 是 execution_journal 表的一行。
+type JournalEntry struct {
+	PlanID         string
+	TaskID         string
+	ActionIndex    int
+	ActionType     string // quarantine/move/copy/delete/rename
+	SourcePath     string
+	TargetPath     string // 空表示无目标
+	ContentSHA256  string
+	FileSize       int64
+	Status         string // pending/done/failed
+	RollbackStatus string // pending/done/failed（空表示未尝试）
+	StartedAt      *time.Time
+	CompletedAt    *time.Time
 }

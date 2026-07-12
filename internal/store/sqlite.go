@@ -483,6 +483,41 @@ func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan,
 	return out, rows.Err()
 }
 
+// GetPlan loads a single plan by its ID. Used by crash recovery (P0-1).
+// The denormalized state column is authoritative (it reflects
+// UpdatePlanState transitions); the State inside evidence_json may be
+// stale from the original SavePlans call.
+func (s *SQLiteStore) GetPlan(ctx context.Context, planID string) (domain.OperationPlan, error) {
+	var p domain.OperationPlan
+	var blob, state string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT evidence_json, state FROM operation_plans WHERE id = ?`, planID).Scan(&blob, &state)
+	if err == sql.ErrNoRows {
+		return p, ErrNotFound
+	}
+	if err != nil {
+		return p, fmt.Errorf("store: get plan: %w", err)
+	}
+	var env planEnvelope
+	if err := json.Unmarshal([]byte(blob), &env); err != nil {
+		return p, fmt.Errorf("store: unmarshal plan: %w", err)
+	}
+	p = env.Plan
+	p.State = domain.PlanState(state) // state column is authoritative
+	return p, nil
+}
+
+// UpdatePlanState persists a plan's state transition. Used by crash
+// recovery to mark a plan as ROLLED_BACK or reset to APPROVED.
+func (s *SQLiteStore) UpdatePlanState(ctx context.Context, planID string, state domain.PlanState) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE operation_plans SET state = ? WHERE id = ?`, string(state), planID)
+	if err != nil {
+		return fmt.Errorf("store: update plan state: %w", err)
+	}
+	return nil
+}
+
 // planEnvelope wraps an OperationPlan for JSON storage. The envelope key
 // future-proofs the blob against later embedding task-level metadata.
 type planEnvelope struct {
@@ -556,6 +591,159 @@ func (s *SQLiteStore) ListLogs(ctx context.Context, planID string) ([]domain.Ope
 		_ = json.Unmarshal([]byte(detailBlob), &l.Detail)
 		l.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// ---------------- execution journal (P0-1 崩溃恢复) ----------------
+
+// journalTouchesFilesystem mirrors executor.touchesFilesystem. Kept local
+// to avoid a cross-package dependency; the semantics are stable (KEEP/SKIP/
+// REVIEW are advisory-only and never touch files).
+func journalTouchesFilesystem(action domain.OperationType) bool {
+	switch action {
+	case domain.OperationKeep, domain.OperationSkip, domain.OperationReview:
+		return false
+	default:
+		return true
+	}
+}
+
+// BeginJournal 为 plan 的所有 filesystem action 写入 pending 记录。
+// 已存在的记录不重复写入（INSERT OR IGNORE），保证幂等。
+func (s *SQLiteStore) BeginJournal(ctx context.Context, taskID, planID string, actions []domain.PlannedAction) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for i, action := range actions {
+		if !journalTouchesFilesystem(action.Action) {
+			continue
+		}
+		_, err := s.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO execution_journal
+			  (plan_id, task_id, action_index, action_type, source_path, target_path, content_sha256, file_size, status, started_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+			planID, taskID, i, string(action.Action),
+			action.Path, nullIfEmpty(action.TargetPath),
+			action.File.ContentSHA256, action.File.Size, now)
+		if err != nil {
+			return fmt.Errorf("store: begin journal: %w", err)
+		}
+	}
+	return nil
+}
+
+// MarkJournalDone 标记 action 执行完成，并记录实际目标路径。
+// actualTargetPath 对 MOVE/COPY/RENAME 等于 plan 中的 TargetPath；对
+// QUARANTINE/DELETE 是运行时解析出的隔离路径，回滚时需要此路径。
+func (s *SQLiteStore) MarkJournalDone(ctx context.Context, planID string, actionIndex int, actualTargetPath string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE execution_journal SET status = 'done', target_path = ?, completed_at = ? WHERE plan_id = ? AND action_index = ?`,
+		nullIfEmpty(actualTargetPath), time.Now().UTC().Format(time.RFC3339Nano), planID, actionIndex)
+	if err != nil {
+		return fmt.Errorf("store: mark journal done: %w", err)
+	}
+	return nil
+}
+
+// MarkJournalFailed 标记 action 执行失败。
+func (s *SQLiteStore) MarkJournalFailed(ctx context.Context, planID string, actionIndex int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE execution_journal SET status = 'failed', completed_at = ? WHERE plan_id = ? AND action_index = ?`,
+		time.Now().UTC().Format(time.RFC3339Nano), planID, actionIndex)
+	if err != nil {
+		return fmt.Errorf("store: mark journal failed: %w", err)
+	}
+	return nil
+}
+
+// MarkJournalRolledBack 标记 action 已回滚。rollbackErr 非 nil 时记为 failed。
+func (s *SQLiteStore) MarkJournalRolledBack(ctx context.Context, planID string, actionIndex int, rollbackErr error) error {
+	status := "done"
+	if rollbackErr != nil {
+		status = "failed"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE execution_journal SET rollback_status = ? WHERE plan_id = ? AND action_index = ?`,
+		status, planID, actionIndex)
+	if err != nil {
+		return fmt.Errorf("store: mark journal rolled back: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListJournalDone(ctx context.Context, planID string) ([]JournalEntry, error) {
+	return s.listJournalByStatus(ctx, planID, "done")
+}
+
+func (s *SQLiteStore) ListJournalPending(ctx context.Context, planID string) ([]JournalEntry, error) {
+	return s.listJournalByStatus(ctx, planID, "pending")
+}
+
+func (s *SQLiteStore) ListJournalAll(ctx context.Context, planID string) ([]JournalEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT plan_id, task_id, action_index, action_type, source_path, target_path,
+		        content_sha256, file_size, status, rollback_status, started_at, completed_at
+		 FROM execution_journal WHERE plan_id = ? ORDER BY action_index`, planID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list journal all: %w", err)
+	}
+	return scanJournalEntries(rows)
+}
+
+func (s *SQLiteStore) listJournalByStatus(ctx context.Context, planID, status string) ([]JournalEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT plan_id, task_id, action_index, action_type, source_path, target_path,
+		        content_sha256, file_size, status, rollback_status, started_at, completed_at
+		 FROM execution_journal WHERE plan_id = ? AND status = ? ORDER BY action_index`,
+		planID, status)
+	if err != nil {
+		return nil, fmt.Errorf("store: list journal %s: %w", status, err)
+	}
+	return scanJournalEntries(rows)
+}
+
+func scanJournalEntries(rows *sql.Rows) ([]JournalEntry, error) {
+	defer rows.Close()
+	out := make([]JournalEntry, 0)
+	for rows.Next() {
+		var e JournalEntry
+		var targetPath, rollbackStatus, startedAt, completedAt sql.NullString
+		if err := rows.Scan(
+			&e.PlanID, &e.TaskID, &e.ActionIndex, &e.ActionType,
+			&e.SourcePath, &targetPath, &e.ContentSHA256, &e.FileSize,
+			&e.Status, &rollbackStatus, &startedAt, &completedAt,
+		); err != nil {
+			return nil, err
+		}
+		e.TargetPath = targetPath.String
+		e.RollbackStatus = rollbackStatus.String
+		if startedAt.Valid {
+			t, _ := time.Parse(time.RFC3339Nano, startedAt.String)
+			e.StartedAt = &t
+		}
+		if completedAt.Valid {
+			t, _ := time.Parse(time.RFC3339Nano, completedAt.String)
+			e.CompletedAt = &t
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListExecutingPlans 列出 state=EXECUTING 的 plan_id。
+func (s *SQLiteStore) ListExecutingPlans(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM operation_plans WHERE state = 'EXECUTING'`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list executing plans: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

@@ -10,11 +10,34 @@ import (
 	"time"
 
 	"nas-data-governance/internal/domain"
+	"nas-data-governance/internal/store"
 )
 
 var errActionFailed = errors.New("executor: filesystem action failed")
 var errOutOfScope = errors.New("executor: action is outside configured source roots")
 var errStaleDetected = errors.New("executor: stale plan detected")
+
+// Journal is the persistence port for crash-recovery logging. The executor
+// writes one entry per filesystem action before/during/after execution; on
+// restart, Recover() reads these entries to decide whether to continue or
+// roll back. A nil journal disables crash recovery (backward compatible).
+// store.SQLiteStore satisfies this interface structurally.
+type Journal interface {
+	BeginJournal(ctx context.Context, taskID, planID string, actions []domain.PlannedAction) error
+	MarkJournalDone(ctx context.Context, planID string, actionIndex int, actualTargetPath string) error
+	MarkJournalFailed(ctx context.Context, planID string, actionIndex int) error
+	MarkJournalRolledBack(ctx context.Context, planID string, actionIndex int, rollbackErr error) error
+	ListJournalDone(ctx context.Context, planID string) ([]store.JournalEntry, error)
+	ListJournalPending(ctx context.Context, planID string) ([]store.JournalEntry, error)
+	ListExecutingPlans(ctx context.Context) ([]string, error)
+}
+
+// rollbackEntry pairs a rollback function with its action index so the
+// journal can be marked during rollback.
+type rollbackEntry struct {
+	actionIndex int
+	fn          func() error
+}
 
 // StepStatus is the outcome of one pipeline step.
 type StepStatus string
@@ -50,15 +73,36 @@ type Result struct {
 type Executor struct {
 	quarantine QuarantineConfig
 	now        func() time.Time
+	journal    Journal // optional; nil disables crash-recovery logging
 }
 
 // New creates an executor with the given quarantine config. `now` defaults
 // to time.Now but can be overridden in tests for deterministic paths.
+// The returned executor has no journal (backward compatible).
 func New(q QuarantineConfig) (*Executor, error) {
 	if err := q.Validate(); err != nil {
 		return nil, err
 	}
 	return &Executor{quarantine: q, now: time.Now}, nil
+}
+
+// NewWithJournal creates an executor with crash-recovery journaling. Every
+// filesystem action is recorded in the journal before execution; on
+// success the actual target path is persisted; on failure/rollback the
+// status is updated. If journal is nil, behaves like New (no journaling).
+func NewWithJournal(q QuarantineConfig, journal Journal) (*Executor, error) {
+	if err := q.Validate(); err != nil {
+		return nil, err
+	}
+	return &Executor{quarantine: q, now: time.Now, journal: journal}, nil
+}
+
+// NewForRecovery creates an executor for crash recovery only. It does
+// not require a quarantine config because Recover() uses journal-recorded
+// paths (not the quarantine path generator) for rollback. Use this when
+// you only need to call Recover() at startup.
+func NewForRecovery() *Executor {
+	return &Executor{now: time.Now}
 }
 
 // Validate performs the complete read-only preflight used by CLI --dry-run:
@@ -110,6 +154,12 @@ func (e *Executor) Validate(ctx context.Context, plan *domain.OperationPlan) Res
 // already-executed actions are rolled back in reverse order before the
 // plan transitions to ROLLED_BACK. The returned Result.Steps is the full
 // audit trail; callers are responsible for persisting it.
+//
+// When a Journal is configured, each filesystem action is recorded before
+// execution (BeginJournal), marked done with its actual target path on
+// success (MarkJournalDone), and marked rolled back during rollback
+// (MarkJournalRolledBack). Journal errors are non-fatal: execution
+// proceeds with the in-memory rollback chain as fallback.
 func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Result {
 	result := Result{PlanID: plan.ID, Steps: make([]AuditStep, 0), FinalState: plan.State}
 
@@ -144,15 +194,28 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 		return result
 	}
 
-	// Step 2: execute actions in order.
+	// Step 2: persist pending journal entries before any filesystem write.
+	// This must happen BEFORE execution so a crash during execution leaves
+	// records that Recover() can inspect.
+	if e.journal != nil {
+		if jerr := e.journal.BeginJournal(ctx, plan.TaskID, plan.ID, plan.Actions); jerr != nil {
+			result.Steps = append(result.Steps, AuditStep{
+				Name: "journal_begin", Status: StepFailed,
+				Detail: map[string]any{"error_type": "journal_begin_failed"},
+			})
+			// Non-fatal: proceed with in-memory rollback only.
+		}
+	}
+
+	// Step 3: execute actions in order.
 	_ = Transition(plan, domain.PlanExecuting)
 	result.FinalState = plan.State
-	var rollbacks []func() error
-	for _, action := range plan.Actions {
+	var rollbacks []rollbackEntry
+	for i, action := range plan.Actions {
 		if err := ctx.Err(); err != nil {
 			result.Err = err
 			result.ErrorType = "cancelled"
-			e.rollbackAll(&result, &rollbacks)
+			e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
 			_ = Transition(plan, domain.PlanRolledBack)
 			result.FinalState = plan.State
 			return result
@@ -164,18 +227,24 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 			})
 			continue
 		}
-		step, rollback, err := e.executeAction(ctx, action)
+		step, actualTarget, rollback, err := e.executeAction(ctx, action)
 		result.Steps = append(result.Steps, step)
 		if err != nil {
+			if e.journal != nil {
+				_ = e.journal.MarkJournalFailed(ctx, plan.ID, i)
+			}
 			result.Err = errActionFailed
 			result.ErrorType = "action_failed"
-			e.rollbackAll(&result, &rollbacks)
+			e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
 			_ = Transition(plan, domain.PlanRolledBack)
 			result.FinalState = plan.State
 			return result
 		}
+		if e.journal != nil {
+			_ = e.journal.MarkJournalDone(ctx, plan.ID, i, actualTarget)
+		}
 		if rollback != nil {
-			rollbacks = append(rollbacks, rollback)
+			rollbacks = append(rollbacks, rollbackEntry{actionIndex: i, fn: rollback})
 		}
 	}
 
@@ -305,8 +374,9 @@ func (e *Executor) staleCheckAll(ctx context.Context, plan *domain.OperationPlan
 }
 
 // executeAction dispatches one action to its handler. Returns an audit
-// step, an optional rollback function, and an error.
-func (e *Executor) executeAction(ctx context.Context, action domain.PlannedAction) (AuditStep, func() error, error) {
+// step, the actual target path (for journal recovery), an optional rollback
+// function, and an error.
+func (e *Executor) executeAction(ctx context.Context, action domain.PlannedAction) (AuditStep, string, func() error, error) {
 	switch action.Action {
 	case domain.OperationQuarantine:
 		return e.executeQuarantine(action)
@@ -320,110 +390,112 @@ func (e *Executor) executeAction(ctx context.Context, action domain.PlannedActio
 		return e.executeRename(action)
 	case domain.OperationKeep, domain.OperationSkip, domain.OperationReview:
 		return AuditStep{Name: string(action.Action), Status: StepSkipped,
-			Detail: map[string]any{"reason": "non-filesystem action"}}, nil, nil
+			Detail: map[string]any{"reason": "non-filesystem action"}}, "", nil, nil
 	default:
 		return AuditStep{Name: string(action.Action), Status: StepFailed,
-				Detail: map[string]any{"error_type": "not_implemented"}}, nil,
+				Detail: map[string]any{"error_type": "not_implemented"}}, "", nil,
 			fmt.Errorf("executor: action %s not implemented", action.Action)
 	}
 }
 
 // executeQuarantine moves a source file into the quarantine area using
 // the copy-verify-delete pipeline. The rollback hook moves the file back
-// to its original path if a later action fails.
-func (e *Executor) executeQuarantine(action domain.PlannedAction) (AuditStep, func() error, error) {
+// to its original path if a later action fails. Returns the actual
+// quarantine destination path (may differ from nominal due to collision
+// resolution).
+func (e *Executor) executeQuarantine(action domain.PlannedAction) (AuditStep, string, func() error, error) {
 	nominal := e.quarantine.PathFor(action.Path, e.now())
 	if err := notSymlinkBelowRoot(nominal, e.quarantine.Root); err != nil {
 		return AuditStep{Name: "quarantine", Status: StepFailed,
-			Detail: map[string]any{"error_type": "unsafe_quarantine_path"}}, nil, err
+			Detail: map[string]any{"error_type": "unsafe_quarantine_path"}}, "", nil, err
 	}
 	dst, err := ResolveCollision(nominal)
 	if err != nil {
 		return AuditStep{Name: "quarantine", Status: StepFailed,
-			Detail: map[string]any{"error_type": "collision_unresolved"}}, nil, err
+			Detail: map[string]any{"error_type": "collision_unresolved"}}, "", nil, err
 	}
 	if err := MoveFile(action.Path, dst, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "quarantine", Status: StepFailed,
-			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, nil, err
+			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, "", nil, err
 	}
 	rollback := func() error {
 		return MoveFile(dst, action.Path, action.File.ContentSHA256)
 	}
 	return AuditStep{Name: "quarantine", Status: StepOK,
-		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+		Detail: map[string]any{"bytes": action.File.Size}}, dst, rollback, nil
 }
 
 // executeMove moves a file to action.TargetPath using the copy-verify-delete
 // pipeline (MoveFile). The rollback hook moves the file back to its original
 // path. After the source is removed, the source directory is cleaned up if
 // it became empty (best-effort, non-fatal).
-func (e *Executor) executeMove(action domain.PlannedAction) (AuditStep, func() error, error) {
+func (e *Executor) executeMove(action domain.PlannedAction) (AuditStep, string, func() error, error) {
 	if action.TargetPath == "" {
 		return AuditStep{Name: "move", Status: StepFailed,
-			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: move requires target_path")
+			Detail: map[string]any{"error_type": "missing_target"}}, "", nil, fmt.Errorf("executor: move requires target_path")
 	}
 	if err := MoveFile(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "move", Status: StepFailed,
-			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, nil, err
+			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, "", nil, err
 	}
 	e.maybeCleanupEmptyDir(filepath.Dir(action.Path))
 	rollback := func() error {
 		return MoveFile(action.TargetPath, action.Path, action.File.ContentSHA256)
 	}
 	return AuditStep{Name: "move", Status: StepOK,
-		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+		Detail: map[string]any{"bytes": action.File.Size}}, action.TargetPath, rollback, nil
 }
 
 // executeCopy copies a file to action.TargetPath and verifies integrity.
 // The source is NOT removed — use MOVE for copy+delete. The rollback hook
 // removes the copied destination.
-func (e *Executor) executeCopy(action domain.PlannedAction) (AuditStep, func() error, error) {
+func (e *Executor) executeCopy(action domain.PlannedAction) (AuditStep, string, func() error, error) {
 	if action.TargetPath == "" {
 		return AuditStep{Name: "copy", Status: StepFailed,
-			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: copy requires target_path")
+			Detail: map[string]any{"error_type": "missing_target"}}, "", nil, fmt.Errorf("executor: copy requires target_path")
 	}
 	if _, err := CopyAndVerify(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "copy", Status: StepFailed,
-			Detail: map[string]any{"error_type": "copy_or_verify_failed", "bytes": action.File.Size}}, nil, err
+			Detail: map[string]any{"error_type": "copy_or_verify_failed", "bytes": action.File.Size}}, "", nil, err
 	}
 	rollback := func() error {
 		return SafeRemove(action.TargetPath)
 	}
 	return AuditStep{Name: "copy", Status: StepOK,
-		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+		Detail: map[string]any{"bytes": action.File.Size}}, action.TargetPath, rollback, nil
 }
 
 // executeDelete implements DELETE as quarantine, never as permanent removal.
 // This keeps every destructive action recoverable as required by AGENTS rule
 // 7 and the white paper. Permanent purge belongs to a separate retention
 // workflow and is intentionally absent from this executor.
-func (e *Executor) executeDelete(action domain.PlannedAction) (AuditStep, func() error, error) {
-	step, rollback, err := e.executeQuarantine(action)
+func (e *Executor) executeDelete(action domain.PlannedAction) (AuditStep, string, func() error, error) {
+	step, actualTarget, rollback, err := e.executeQuarantine(action)
 	step.Name = "delete_to_quarantine"
 	if err != nil {
-		return step, nil, err
+		return step, "", nil, err
 	}
 	e.maybeCleanupEmptyDir(filepath.Dir(action.Path))
-	return step, rollback, nil
+	return step, actualTarget, rollback, nil
 }
 
 // executeRename uses the exclusive copy-verify-delete primitive. os.Rename
 // cannot be used safely here because it overwrites an existing destination on
 // Unix. The rollback hook restores the original path.
-func (e *Executor) executeRename(action domain.PlannedAction) (AuditStep, func() error, error) {
+func (e *Executor) executeRename(action domain.PlannedAction) (AuditStep, string, func() error, error) {
 	if action.TargetPath == "" {
 		return AuditStep{Name: "rename", Status: StepFailed,
-			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: rename requires target_path")
+			Detail: map[string]any{"error_type": "missing_target"}}, "", nil, fmt.Errorf("executor: rename requires target_path")
 	}
 	if err := MoveFile(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "rename", Status: StepFailed,
-			Detail: map[string]any{"error_type": "rename_failed", "bytes": action.File.Size}}, nil, err
+			Detail: map[string]any{"error_type": "rename_failed", "bytes": action.File.Size}}, "", nil, err
 	}
 	rollback := func() error {
 		return MoveFile(action.TargetPath, action.Path, action.File.ContentSHA256)
 	}
 	return AuditStep{Name: "rename", Status: StepOK,
-		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
+		Detail: map[string]any{"bytes": action.File.Size}}, action.TargetPath, rollback, nil
 }
 
 // maybeCleanupEmptyDir removes dir if it contains no entries. This is a
@@ -445,10 +517,16 @@ func (e *Executor) maybeCleanupEmptyDir(dir string) {
 }
 
 // rollbackAll runs rollback functions in reverse order, appending one
-// audit step per rollback attempt.
-func (e *Executor) rollbackAll(result *Result, rollbacks *[]func() error) {
+// audit step per rollback attempt. When a journal is configured, each
+// rollback is marked in the journal so Recover() can see the final state.
+func (e *Executor) rollbackAll(ctx context.Context, result *Result, planID string, rollbacks *[]rollbackEntry) {
 	for i := len(*rollbacks) - 1; i >= 0; i-- {
-		if err := (*rollbacks)[i](); err != nil {
+		entry := (*rollbacks)[i]
+		err := entry.fn()
+		if e.journal != nil {
+			_ = e.journal.MarkJournalRolledBack(ctx, planID, entry.actionIndex, err)
+		}
+		if err != nil {
 			result.Steps = append(result.Steps, AuditStep{
 				Name: "rollback", Status: StepFailed,
 				Detail: map[string]any{"error_type": "rollback_failed", "index": i},
