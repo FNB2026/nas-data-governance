@@ -96,6 +96,9 @@ type Store interface {
 	// ListTasks returns all operation tasks, oldest first. Used by feedback
 	// learning to traverse historical plans across all tasks.
 	ListTasks(ctx context.Context) ([]domain.OperationTask, error)
+	// UpdateTaskState transitions a task's state. Used by the runner/CLI
+	// to track task lifecycle (queued → running → completed/failed/cancelled).
+	UpdateTaskState(ctx context.Context, taskID string, state domain.TaskState) error
 
 	// SavePlans replaces all plans for a task in one transaction.
 	SavePlans(ctx context.Context, taskID string, plans []domain.OperationPlan) error

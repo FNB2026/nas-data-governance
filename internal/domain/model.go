@@ -171,6 +171,18 @@ type OperationTask struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// TaskState 类型化 operation_tasks.state 字段。此前为 ad-hoc 字符串，
+// P1-4 引入枚举常量以便 runner 和 CLI 一致引用。
+type TaskState string
+
+const (
+	TaskQueued    TaskState = "queued"    // 任务已创建，等待执行
+	TaskRunning   TaskState = "running"   // 任务正在执行（scan/analyze/execute）
+	TaskCompleted TaskState = "completed" // 任务成功完成
+	TaskFailed    TaskState = "failed"    // 任务失败
+	TaskCancelled TaskState = "cancelled" // 任务被用户取消（Ctrl+C）
+)
+
 // OperationLog is one audit entry appended during plan execution.
 type OperationLog struct {
 	ID        int64          `json:"id"`

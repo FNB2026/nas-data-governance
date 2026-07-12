@@ -4,3 +4,5 @@
 *.db-shm
 *.db-wal
 .DS_Store
+# build artifacts (binary at repo root, not the cmd/nas-governance source dir)
+/nas-governance

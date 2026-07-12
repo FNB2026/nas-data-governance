@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"nas-data-governance/internal/planner"
 	"nas-data-governance/internal/relations"
 	"nas-data-governance/internal/report"
+	"nas-data-governance/internal/runner"
 	"nas-data-governance/internal/scanner"
 	"nas-data-governance/internal/store"
 )
@@ -77,6 +80,7 @@ func runScan(args []string) error {
 	dbPath := fs.String("db", "", "SQLite database for file/context persistence (optional)")
 	fullScan := fs.Bool("full", false, "force full scan (ignore checkpoint, recompute all hashes)")
 	resume := fs.Bool("resume", false, "resume from last checkpoint if available")
+	workers := fs.Int("workers", 1, "number of concurrent hash workers (1 = serial, recommended 2-8)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -143,8 +147,17 @@ func runScan(args []string) error {
 		}
 	}
 
-	// Scan with incremental hash reuse.
+	// Scan with incremental hash reuse. When --workers > 1, hash computation
+	// is offloaded to a worker pool; the scanner callback submits tasks
+	// and we wait for all to complete after Scan returns.
 	var files []domain.FileInstance
+	var filesMu sync.Mutex
+	addFile := func(f domain.FileInstance) {
+		filesMu.Lock()
+		files = append(files, f)
+		filesMu.Unlock()
+	}
+	hashRunner := runner.New(*workers)
 	scanOpts := scanner.Options{
 		Root:          *root,
 		StorageID:     *storage,
@@ -160,28 +173,40 @@ func runScan(args []string) error {
 				cached.Inode == file.Inode {
 				file.QuickHash = cached.QuickHash
 				file.ContentSHA256 = cached.ContentSHA256
-				files = append(files, file)
+				addFile(file)
 				return nil
 			}
 		}
-		// File is new or changed: compute quick hash.
-		q, qerr := fingerprint.Quick(file.Path, file.Size)
-		if qerr != nil {
-			return qerr
-		}
-		file.QuickHash = q
-		files = append(files, file)
-		return nil
+		// File is new or changed: compute quick hash (possibly concurrent).
+		return hashRunner.Submit(ctx, func() error {
+			q, qerr := fingerprint.Quick(file.Path, file.Size)
+			if qerr != nil {
+				return qerr
+			}
+			file.QuickHash = q
+			addFile(file)
+			return nil
+		})
 	})
+	// Wait for all hash computations to finish before proceeding.
+	hashErrs := hashRunner.Wait()
 	if err != nil {
 		if checkpointID != 0 {
 			_ = st.CompleteCheckpoint(ctx, checkpointID, "aborted")
 		}
 		return err
 	}
+	if len(hashErrs) > 0 {
+		// Report hash errors but don't abort the scan (single-file failure
+		// is non-fatal, consistent with scanner's directory error handling).
+		for _, e := range hashErrs {
+			fmt.Fprintf(os.Stderr, "warning: hash error: %v\n", e)
+		}
+	}
 
 	// Second-stage hashing: only for files that share size+quick_hash
 	// with another file AND don't already have content_sha256 cached.
+	// Also concurrent when --workers > 1.
 	bySizeQuick := map[string][]int{}
 	for i, f := range files {
 		if f.ContentSHA256 == "" {
@@ -189,17 +214,28 @@ func runScan(args []string) error {
 			bySizeQuick[key] = append(bySizeQuick[key], i)
 		}
 	}
+	fullRunner := runner.New(*workers)
 	for _, indexes := range bySizeQuick {
 		if len(indexes) < 2 {
 			continue
 		}
 		for _, i := range indexes {
-			h, err := fingerprint.Full(files[i].Path)
-			if err != nil {
-				return err
-			}
-			files[i].ContentSHA256 = h
+			idx := i // capture for closure
+			fullRunner.Submit(ctx, func() error {
+				h, ferr := fingerprint.Full(files[idx].Path)
+				if ferr != nil {
+					return ferr
+				}
+				filesMu.Lock()
+				files[idx].ContentSHA256 = h
+				filesMu.Unlock()
+				return nil
+			})
 		}
+	}
+	fullErrs := fullRunner.Wait()
+	if len(fullErrs) > 0 {
+		return fmt.Errorf("full hash: %w", fullErrs[0])
 	}
 
 	// Write JSONL index.
@@ -492,6 +528,7 @@ func runAnalyze(args []string) error {
 	dbPath := fs.String("db", "", "SQLite database to persist results (optional)")
 	storageID := fs.String("storage-id", "", "filter files by storage ID (optional)")
 	limit := fs.Int("limit", 0, "max files to analyze (0 = all)")
+	workers := fs.Int("workers", 1, "number of concurrent analysis workers (1 = serial)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -521,34 +558,60 @@ func runAnalyze(args []string) error {
 		}
 		defer st.Close()
 	}
-	entries := make([]formatReportEntry, 0, len(files))
-	analyzed, unrecognized, failed, persisted := 0, 0, 0, 0
-	for _, f := range files {
-		info, analyzeErr := format.Analyze(f.Path)
-		entry := formatReportEntry{Path: f.Path, StorageID: f.StorageID, Format: info}
-		if analyzeErr != nil {
-			failed++
-			entry.Error = analyzeErr.Error()
-		} else if info.Format == "" {
-			unrecognized++
-		} else {
-			analyzed++
-		}
-		// Persist to SQLite when configured. The file row must already exist
-		// (created by a prior scan with --db); missing rows are reported as
-		// warnings but do not stop analysis.
-		if st != nil && analyzeErr == nil && info.Format != "" {
-			fileID, lookupErr := st.FileID(ctx, f.StorageID, f.Path)
-			if lookupErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: no file row for %s: %v\n", f.Path, lookupErr)
-			} else if saveErr := st.SaveFormat(ctx, fileID, info); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: save format for %s: %v\n", f.Path, saveErr)
+
+	// Concurrent format analysis via worker pool. Each worker reads file
+	// headers (read-only) and writes results to the shared entries slice.
+	// DB persistence is also done by the worker; SQLiteStore is concurrency-
+	// safe (MaxOpenConns=1 serializes writes).
+	entries := make([]formatReportEntry, len(files))
+	var entriesMu sync.Mutex
+	var analyzed, unrecognized, failed, persisted int32
+	ar := runner.New(*workers)
+	for i, f := range files {
+		idx := i
+		file := f
+		ar.Submit(ctx, func() error {
+			info, analyzeErr := format.Analyze(file.Path)
+			entry := formatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
+			if analyzeErr != nil {
+				entry.Error = analyzeErr.Error()
+				atomic.AddInt32(&failed, 1)
+			} else if info.Format == "" {
+				atomic.AddInt32(&unrecognized, 1)
 			} else {
-				persisted++
+				atomic.AddInt32(&analyzed, 1)
 			}
-		}
-		entries = append(entries, entry)
+			// Persist to SQLite when configured. The file row must already
+			// exist (created by a prior scan with --db); missing rows are
+			// reported as warnings but do not stop analysis.
+			if st != nil && analyzeErr == nil && info.Format != "" {
+				fileID, lookupErr := st.FileID(ctx, file.StorageID, file.Path)
+				if lookupErr != nil {
+					// Don't print path in warning (AGENTS rule 6).
+					fmt.Fprintf(os.Stderr, "warning: no file row for %s: %v\n", filepath.Base(file.Path), lookupErr)
+				} else if saveErr := st.SaveFormat(ctx, fileID, info); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: save format for %s: %v\n", filepath.Base(file.Path), saveErr)
+				} else {
+					atomic.AddInt32(&persisted, 1)
+				}
+			}
+			entriesMu.Lock()
+			entries[idx] = entry
+			entriesMu.Unlock()
+			return nil
+		})
 	}
+	ar.Wait()
+
+	// Compact entries (some may be zero-valued if Submit failed on cancel).
+	compact := entries[:0]
+	for _, e := range entries {
+		if e.Path != "" {
+			compact = append(compact, e)
+		}
+	}
+	entries = compact
+
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		return err
 	}

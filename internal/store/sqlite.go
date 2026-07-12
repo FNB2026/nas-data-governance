@@ -393,6 +393,16 @@ func (s *SQLiteStore) ListTasks(ctx context.Context) ([]domain.OperationTask, er
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) UpdateTaskState(ctx context.Context, taskID string, state domain.TaskState) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE operation_tasks SET state = ? WHERE id = ?`,
+		string(state), taskID)
+	if err != nil {
+		return fmt.Errorf("store: update task state: %w", err)
+	}
+	return nil
+}
+
 // ---------------- operation_plans ----------------
 
 // SavePlans replaces all plans for a task atomically. Each plan becomes one
