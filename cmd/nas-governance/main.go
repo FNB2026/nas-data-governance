@@ -62,6 +62,8 @@ func main() {
 		err = runRules(os.Args[2:])
 	case "recover":
 		err = runRecover(os.Args[2:])
+	case "review":
+		err = runReview(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -325,7 +327,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|learn|rules|recover> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|learn|rules|recover|review> [options]")
 }
 
 // ---- approve ----
