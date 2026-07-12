@@ -78,13 +78,20 @@ func Learn(ctx context.Context, st store.Store) (*Stats, error) {
 	sensitiveSkipped := 0
 
 	for _, storage := range storages {
+		// Normalize root: only segments BELOW the storage root are business
+		// directory names. Segments at or above root (system paths like
+		// /private/var/folders/...) must never become rule candidates or
+		// leak into rule IDs (K-009). Files whose path is not under root
+		// are skipped defensively.
+		rootClean := normalizeRoot(storage.RootPath)
+
 		files, err := st.ListFiles(ctx, storage.ID)
 		if err != nil {
 			return nil, fmt.Errorf("learning: list files for %s: %w", storage.ID, err)
 		}
 		for _, file := range files {
 			totalFiles++
-			segments := extractSegments(file.Path)
+			segments := extractSegmentsBelow(file.Path, rootClean)
 			if len(segments) == 0 {
 				continue
 			}
@@ -111,8 +118,12 @@ func Learn(ctx context.Context, st store.Store) (*Stats, error) {
 					dirParents[name] = map[string]bool{}
 				}
 
-				// Count unique parent paths.
-				parentPath := filepath.Dir(file.Path)
+				// Count unique parent paths. Use the relative path so the
+				// same business layout across two storages counts twice.
+				parentPath := filepath.ToSlash(filepath.Dir(file.Path))
+				if rootClean != "" {
+					parentPath = strings.TrimPrefix(parentPath, rootClean+"/")
+				}
 				if !dirParents[name][parentPath] {
 					dirParents[name][parentPath] = true
 					dirFreq[name].DirCount++
@@ -132,7 +143,7 @@ func Learn(ctx context.Context, st store.Store) (*Stats, error) {
 			}
 
 			// Track project code patterns (case-sensitive, original segments).
-			originalSegs := extractOriginalSegments(file.Path)
+			originalSegs := extractOriginalSegmentsBelow(file.Path, rootClean)
 			for _, seg := range originalSegs {
 				if projectCodePattern.MatchString(seg) {
 					pattern := generalizeProjectCode(seg)
@@ -177,22 +188,77 @@ func Learn(ctx context.Context, st store.Store) (*Stats, error) {
 	return stats, nil
 }
 
-// extractSegments returns lowercase path segments (excluding the file name).
-func extractSegments(path string) []string {
-	dir := filepath.Dir(filepath.ToSlash(path))
-	segments := strings.FieldsFunc(strings.ToLower(dir), func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	return segments
+// normalizeRoot cleans and slash-normalizes a storage root path. Returns
+// empty string when rootPath is empty (in which case the caller skips the
+// storage defensively — no segments are extracted, so no rules are learned
+// from a storage whose root is unknown).
+func normalizeRoot(rootPath string) string {
+	if rootPath == "" {
+		return ""
+	}
+	clean := filepath.Clean(filepath.ToSlash(rootPath))
+	if clean == "." || clean == "/" {
+		return ""
+	}
+	return clean
 }
 
-// extractOriginalSegments returns original-case path segments (for project code matching).
-func extractOriginalSegments(path string) []string {
-	dir := filepath.Dir(filepath.ToSlash(path))
-	segments := strings.FieldsFunc(dir, func(r rune) bool {
+// extractSegmentsBelow returns lowercase directory-name segments that
+// are strictly below rootClean. If rootClean is empty or the path is not
+// under root, returns nil (the file is skipped). The file name itself
+// is excluded — only directory segments are returned.
+//
+// This is the K-009 boundary: segments at or above the storage root
+// (system paths like /private/var/folders/...) never become rule
+// candidates and never leak into rule IDs.
+func extractSegmentsBelow(path, rootClean string) []string {
+	rel := relBelowRoot(path, rootClean)
+	if rel == "" {
+		return nil
+	}
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		// File is directly under root: no directory segments to learn from.
+		return nil
+	}
+	return strings.FieldsFunc(strings.ToLower(dir), func(r rune) bool {
 		return r == '/' || r == '\\'
 	})
-	return segments
+}
+
+// extractOriginalSegmentsBelow is the original-case variant used for
+// project code matching (project codes are uppercase by convention).
+func extractOriginalSegmentsBelow(path, rootClean string) []string {
+	rel := relBelowRoot(path, rootClean)
+	if rel == "" {
+		return nil
+	}
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return nil
+	}
+	return strings.FieldsFunc(dir, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+}
+
+// relBelowRoot returns the portion of path below rootClean as a
+// slash-normalized relative path. Returns empty string when path is not
+// under root (e.g., absolute path from a different storage) or when root
+// is empty.
+func relBelowRoot(path, rootClean string) string {
+	if rootClean == "" {
+		return ""
+	}
+	p := filepath.ToSlash(path)
+	// Case-insensitive prefix match is not needed on POSIX, but we use
+	// exact prefix match for simplicity and predictability. If the path
+	// does not start with rootClean + "/", it is outside this storage.
+	prefix := rootClean + "/"
+	if !strings.HasPrefix(p, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(p, prefix)
 }
 
 // suggestRole picks a role based on co-occurrence with builtin terms.

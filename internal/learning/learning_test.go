@@ -334,3 +334,92 @@ func TestGenerateDrafts_ReRunUpdatesDraft(t *testing.T) {
 		t.Errorf("expected exactly 1 deliverables draft after re-run, got %d", count)
 	}
 }
+
+// TestLearn_StatsExcludesSegmentsAboveRoot verifies that Learn() only
+// counts directory segments strictly below the storage's RootPath, so
+// system path segments (like /private/var/folders/...) never become rule
+// candidates or leak into rule IDs (K-009).
+//
+// Before the fix, Learn() extracted ALL segments of the absolute path,
+// producing noise drafts for macOS TempDir prefixes, user hashes, etc.
+func TestLearn_StatsExcludesSegmentsAboveRoot(t *testing.T) {
+	st := newLearnStore(t)
+	// RootPath is /vol (the default in newLearnStore). File paths include
+	// /vol as a prefix; segments above /vol (none here since /vol is the
+	// root) must not appear. We also verify that a file directly under
+	// root produces no dir stat (no directory segment to learn from).
+	paths := []string{
+		"/vol/归档/PRJ-2024-001/deliverables/a.txt",
+		"/vol/归档/PRJ-2024-002/deliverables/b.txt",
+		"/vol/归档/PRJ-2024-001/deliverables/c.txt",
+		"/vol/归档/PRJ-2024-002/deliverables/d.txt",
+		"/vol/归档/PRJ-2024-001/deliverables/e.txt",
+		"/vol/root-level.txt", // directly under root: no dir segments
+	}
+	seedFiles(t, st, "local", paths)
+
+	stats, err := Learn(context.Background(), st)
+	if err != nil {
+		t.Fatalf("Learn: %v", err)
+	}
+
+	// The only directory name that should be tracked (excluding builtin
+	// "归档" and project codes) is "deliverables". No system path segments.
+	for _, ds := range stats.DirStats {
+		if ds.Name != "deliverables" {
+			t.Errorf("unexpected dir stat %q (only 'deliverables' should be tracked below /vol)", ds.Name)
+		}
+	}
+
+	// Generate drafts and verify no rule ID contains path segments.
+	batchID := NewBatchID("stats", time.Date(2026, 7, 12, 14, 30, 0, 0, time.UTC))
+	rules, err := GenerateDrafts(context.Background(), st, stats, batchID)
+	if err != nil {
+		t.Fatalf("GenerateDrafts: %v", err)
+	}
+	for _, r := range rules {
+		// Rule IDs must not contain absolute path fragments.
+		if strings.Contains(r.ID, "/vol") || strings.Contains(r.ID, "private") || strings.Contains(r.ID, "var/") {
+			t.Errorf("rule ID %q leaked path segment (K-009)", r.ID)
+		}
+	}
+}
+
+// TestLearn_StatsSkipsFilesOutsideRoot verifies that files whose path is
+// not under the storage's RootPath are skipped (no segments extracted),
+// preventing cross-storage contamination.
+func TestLearn_StatsSkipsFilesOutsideRoot(t *testing.T) {
+	st := newLearnStore(t)
+	// RootPath is /vol. One file under /vol, one under /other.
+	paths := []string{
+		"/vol/归档/PRJ-2024-001/deliverables/a.txt",
+		"/vol/归档/PRJ-2024-002/deliverables/b.txt",
+		"/vol/归档/PRJ-2024-001/deliverables/c.txt",
+		"/vol/归档/PRJ-2024-002/deliverables/d.txt",
+		"/vol/归档/PRJ-2024-001/deliverables/e.txt",
+		// File outside root: should be skipped entirely.
+		"/other/归档/PRJ-2024-003/deliverables/foreign.txt",
+	}
+	seedFiles(t, st, "local", paths)
+
+	stats, err := Learn(context.Background(), st)
+	if err != nil {
+		t.Fatalf("Learn: %v", err)
+	}
+	// TotalFiles counts all files (even outside root), but dir stats only
+	// include segments from files under /vol.
+	if stats.TotalFiles != 6 {
+		t.Errorf("TotalFiles = %d, want 6", stats.TotalFiles)
+	}
+	// "deliverables" DirCount should be 2 (only the two /vol dirs), not 3.
+	ds, ok := findStat(stats, "deliverables")
+	if !ok {
+		t.Fatalf("expected dir stat for 'deliverables'")
+	}
+	if ds.DirCount != 2 {
+		t.Errorf("deliverables DirCount = %d, want 2 (file outside root must be skipped)", ds.DirCount)
+	}
+	if ds.FileCount != 5 {
+		t.Errorf("deliverables FileCount = %d, want 5 (file outside root must be skipped)", ds.FileCount)
+	}
+}
