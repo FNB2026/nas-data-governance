@@ -373,6 +373,26 @@ func (s *SQLiteStore) GetTask(ctx context.Context, id string) (domain.OperationT
 	return t, nil
 }
 
+func (s *SQLiteStore) ListTasks(ctx context.Context) ([]domain.OperationTask, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, root_path, state, created_at FROM operation_tasks ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list tasks: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.OperationTask, 0)
+	for rows.Next() {
+		var t domain.OperationTask
+		var createdAt string
+		if err := rows.Scan(&t.ID, &t.RootPath, &t.State, &createdAt); err != nil {
+			return nil, err
+		}
+		t.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // ---------------- operation_plans ----------------
 
 // SavePlans replaces all plans for a task atomically. Each plan becomes one
@@ -419,6 +439,33 @@ func (s *SQLiteStore) ListPlans(ctx context.Context, taskID string) ([]domain.Op
 		`SELECT evidence_json FROM operation_plans WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list plans: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.OperationPlan, 0)
+	for rows.Next() {
+		var blob string
+		if err := rows.Scan(&blob); err != nil {
+			return nil, err
+		}
+		var env planEnvelope
+		if err := json.Unmarshal([]byte(blob), &env); err != nil {
+			return nil, fmt.Errorf("store: unmarshal plan: %w", err)
+		}
+		out = append(out, env.Plan)
+	}
+	return out, rows.Err()
+}
+
+// ListAllPlans returns plans across all tasks, ordered by task creation
+// time then plan id. Used by feedback learning (L4).
+func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT p.evidence_json
+		 FROM operation_plans p
+		 JOIN operation_tasks t ON t.id = p.task_id
+		 ORDER BY t.created_at, p.id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list all plans: %w", err)
 	}
 	defer rows.Close()
 	out := make([]domain.OperationPlan, 0)

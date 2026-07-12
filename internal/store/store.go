@@ -59,10 +59,19 @@ type Store interface {
 	// CreateTask inserts a new operation task and returns its row id.
 	CreateTask(ctx context.Context, task domain.OperationTask) error
 	GetTask(ctx context.Context, id string) (domain.OperationTask, error)
+	// ListTasks returns all operation tasks, oldest first. Used by feedback
+	// learning to traverse historical plans across all tasks.
+	ListTasks(ctx context.Context) ([]domain.OperationTask, error)
 
 	// SavePlans replaces all plans for a task in one transaction.
 	SavePlans(ctx context.Context, taskID string, plans []domain.OperationPlan) error
 	ListPlans(ctx context.Context, taskID string) ([]domain.OperationPlan, error)
+	// ListAllPlans returns plans across all tasks, ordered by task creation
+	// time then plan id. Used by feedback learning (L4) to scan the full
+	// decision history. Each plan carries RetainScore/RetainPath/Evidence;
+	// paths are NOT used for learning — only score components and action
+	// types (K-009).
+	ListAllPlans(ctx context.Context) ([]domain.OperationPlan, error)
 
 	// AppendLog adds one audit entry. Used by the future executor.
 	AppendLog(ctx context.Context, planID, eventType string, detail map[string]any) error

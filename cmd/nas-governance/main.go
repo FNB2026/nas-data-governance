@@ -528,12 +528,16 @@ func runMerge(args []string) error {
 
 // ---- learn ----
 
-// runLearn runs local learning. Two sources are supported:
+// runLearn runs local learning. Three sources are supported:
 //   - --source=stats (L2): reads indexed file metadata from the governance
 //     SQLite database. Read-only w.r.t. user data (K-009).
 //   - --source=corpus (L3): reads user-provided trusted documents from
 //     --corpus-dir (default var/corpus/). Only this directory is read,
 //     never the user's NAS data.
+//   - --source=feedback (L4): reads historical plan decisions from the
+//     governance DB and proposes retention-score weight adjustments
+//     (±3 cap) plus rule confidence downgrades. Only structured fields
+//     are read, never paths (K-009).
 //
 // By default it prints a summary (no writes). With --apply it also persists
 // directory-signal rule drafts (status=draft) to the rules table for human
@@ -542,7 +546,7 @@ func runMerge(args []string) error {
 func runLearn(args []string) error {
 	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
 	dbPath := fs.String("db", "./var/governance.db", "governance database (for stats source or to persist drafts)")
-	source := fs.String("source", "stats", "learning source: stats | corpus")
+	source := fs.String("source", "stats", "learning source: stats | corpus | feedback")
 	corpusDir := fs.String("corpus-dir", "./var/corpus", "trusted corpus directory (source=corpus only)")
 	out := fs.String("out", "", "write full stats JSON to this path (optional)")
 	apply := fs.Bool("apply", false, "persist generated rule drafts to the database")
@@ -554,9 +558,52 @@ func runLearn(args []string) error {
 		return runLearnStats(args, *dbPath, *out, *apply)
 	case "corpus":
 		return runLearnCorpus(args, *dbPath, *corpusDir, *out, *apply)
+	case "feedback":
+		return runLearnFeedback(args, *dbPath, *out, *apply)
 	default:
-		return fmt.Errorf("learn: --source %q not supported (use 'stats' or 'corpus')", *source)
+		return fmt.Errorf("learn: --source %q not supported (use 'stats', 'corpus', or 'feedback')", *source)
 	}
+}
+
+func runLearnFeedback(args []string, dbPath, outPath string, apply bool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	stats, err := learning.LearnFromFeedback(ctx, st, learning.FeedbackOptions{})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "feedback: analyzed %d plans (%d rejected)\n", stats.PlansAnalyzed, stats.PlansRejected)
+	fmt.Fprintf(os.Stderr, "weight adjustments: %d\n", len(stats.WeightAdjustments))
+	for _, adj := range stats.WeightAdjustments {
+		fmt.Fprintf(os.Stderr, "  %-12s delta=%-3d  %s\n", adj.Component, adj.Delta, adj.Reason)
+	}
+	fmt.Fprintf(os.Stderr, "confidence downgrades: %d\n", len(stats.ConfidenceDowngrades))
+	for _, dg := range stats.ConfidenceDowngrades {
+		fmt.Fprintf(os.Stderr, "  %-28s rejection=%.0f%%  delta=%.2f  samples=%d\n", dg.RuleID, dg.ObservedRejection*100, dg.SuggestedDelta, dg.Samples)
+	}
+
+	if outPath != "" {
+		if err := writeJSONFile(outPath, stats); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "stats written to %s\n", outPath)
+	}
+	if !apply {
+		fmt.Fprintln(os.Stderr, "dry run: no drafts persisted (pass --apply to write drafts)")
+		return nil
+	}
+	batchID := learning.NewBatchID("feedback", time.Now().UTC())
+	rules, err := learning.GenerateFeedbackDrafts(ctx, st, stats, batchID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "persisted %d draft rules (batch %s) — review with `rules list --status draft`\n", len(rules), batchID)
+	return nil
 }
 
 func runLearnStats(args []string, dbPath, outPath string, apply bool) error {
