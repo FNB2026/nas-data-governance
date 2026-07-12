@@ -453,3 +453,89 @@ func TestDetectFromBytesShortHeader(t *testing.T) {
 	_, _ = detectFromBytes([]byte{})
 	_ = bytes.NewReader // keep import alive
 }
+
+// ---- P1-6: 补齐缺失格式检测测试 ----
+
+func TestDetectWebP(t *testing.T) {
+	// RIFF header + file size + WEBP
+	data := []byte("RIFF\x00\x00\x00\x00WEBP")
+	path := writeBytes(t, "test.webp", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "webp" || info.Category != domain.CategoryImage {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectHEIC(t *testing.T) {
+	// ftypheic signature at offset 4
+	data := []byte("\x00\x00\x00\x20ftypheic")
+	path := writeBytes(t, "test.heic", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "heic" || info.Category != domain.CategoryImage {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectAVI(t *testing.T) {
+	// AVI signature "AVI" at offset 0
+	data := []byte("AVI ")
+	path := writeBytes(t, "test.avi", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "avi" || info.Category != domain.CategoryVideo {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectTAR(t *testing.T) {
+	// tar magic "ustar" at offset 257
+	data := make([]byte, 300)
+	copy(data[257:], []byte("ustar"))
+	path := writeBytes(t, "test.tar", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "tar" || info.Category != domain.CategoryArchive {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectRAR(t *testing.T) {
+	data := []byte("Rar!\x1a\x07\x00")
+	path := writeBytes(t, "test.rar", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "rar" || info.Category != domain.CategoryArchive {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectBzip2(t *testing.T) {
+	data := []byte("BZh91AY&SY")
+	path := writeBytes(t, "test.bz2", data)
+	info, err := Detect(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if info.Format != "bzip2" || info.Category != domain.CategoryArchive {
+		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestDetectNonexistentFile(t *testing.T) {
+	_, err := Detect("/tmp/nas-governance-nonexistent-test-file-99999.bin")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}

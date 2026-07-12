@@ -167,3 +167,55 @@ func abs(f float64) float64 {
 	}
 	return f
 }
+
+// ---- P1-6: 补齐缺失分支测试 ----
+
+func TestNamesSimilarChineseCopy(t *testing.T) {
+	// 中文"_副本"后缀（正则要求 _ 或 - 前缀）
+	if !namesSimilar("/data/project", "/data/project_副本") {
+		t.Fatal("expected namesSimilar for _副本 suffix")
+	}
+}
+
+func TestNamesSimilarTempSuffix(t *testing.T) {
+	// temp 后缀
+	if !namesSimilar("/data/work", "/data/work_temp") {
+		t.Fatal("expected namesSimilar for _temp suffix")
+	}
+	if !namesSimilar("/data/work", "/data/work_tmp") {
+		t.Fatal("expected namesSimilar for _tmp suffix")
+	}
+}
+
+func TestNamesSimilarOldNewSuffix(t *testing.T) {
+	if !namesSimilar("/data/work", "/data/work_old") {
+		t.Fatal("expected namesSimilar for _old suffix")
+	}
+	if !namesSimilar("/data/work", "/data/work_new") {
+		t.Fatal("expected namesSimilar for _new suffix")
+	}
+}
+
+func TestPickTargetBothHaveSuffix(t *testing.T) {
+	// 两个目录都有后缀 → 选文件多的
+	names := map[string]map[string]struct{}{
+		"/d/a_backup": {"f1.txt": {}, "f2.txt": {}, "f3.txt": {}},
+		"/d/a_copy":  {"f1.txt": {}, "f2.txt": {}},
+	}
+	target, _ := pickTarget("/d/a_backup", "/d/a_copy", names)
+	if target != "/d/a_backup" {
+		t.Errorf("expected /d/a_backup (more files), got %s", target)
+	}
+}
+
+func TestPickTargetEqualFiles(t *testing.T) {
+	// 文件数相等时，选 a（>= 的等于分支）
+	names := map[string]map[string]struct{}{
+		"/d/alpha": {"f1.txt": {}},
+		"/d/beta":  {"f1.txt": {}},
+	}
+	target, _ := pickTarget("/d/alpha", "/d/beta", names)
+	if target != "/d/alpha" {
+		t.Errorf("expected /d/alpha (tiebreak to a), got %s", target)
+	}
+}

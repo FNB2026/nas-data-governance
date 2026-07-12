@@ -102,3 +102,50 @@ func TestVersionsDetectsCopyMarker(t *testing.T) {
 		t.Fatalf("expected 1 version relation, got %d", len(rels))
 	}
 }
+
+// ---- P1-6: 补齐缺失版本标记测试 ----
+
+func TestVersionsDetectsOldNewMarkers(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/d/report.pdf", ModifiedAt: vt("2024-01-01")},
+		{Path: "/d/report_old.pdf", ModifiedAt: vt("2024-01-02")},
+	}
+	rels := Versions(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 version relation (_old), got %d", len(rels))
+	}
+}
+
+func TestVersionsDetectsNewMarker(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/d/config.yaml", ModifiedAt: vt("2024-01-01")},
+		{Path: "/d/config_new.yaml", ModifiedAt: vt("2024-01-02")},
+	}
+	rels := Versions(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 version relation (_new), got %d", len(rels))
+	}
+}
+
+func TestVersionsDetectsBackupMarker(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/d/notes.txt", ModifiedAt: vt("2024-01-01")},
+		{Path: "/d/notes_backup.txt", ModifiedAt: vt("2024-01-02")},
+	}
+	rels := Versions(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 version relation (_backup), got %d", len(rels))
+	}
+}
+
+func TestVersionsDetectsChineseCopyMarker(t *testing.T) {
+	// 中文"_副本"标记（正则要求 _ 或 - 前缀）
+	files := []domain.FileInstance{
+		{Path: "/d/文档.pdf", ModifiedAt: vt("2024-01-01")},
+		{Path: "/d/文档_副本.pdf", ModifiedAt: vt("2024-01-02")},
+	}
+	rels := Versions(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 version relation (_副本), got %d", len(rels))
+	}
+}

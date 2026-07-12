@@ -125,3 +125,32 @@ func TestRelationsCombinesVersionAndDerivative(t *testing.T) {
 		t.Fatalf("expected 2 relations combined, got %d", len(rels))
 	}
 }
+
+// ---- P1-6: 补齐缺失分支测试 ----
+
+func TestDerivativesAudioPair(t *testing.T) {
+	// 音频派生关系：mp3 vs wav
+	files := []domain.FileInstance{
+		{Path: "/d/song.mp3", ModifiedAt: dt("2024-01-01")},
+		{Path: "/d/song.wav", ModifiedAt: dt("2024-01-02")},
+	}
+	rels := Derivatives(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 audio derivative relation, got %d", len(rels))
+	}
+	if rels[0].Type != domain.RelationDerivative {
+		t.Errorf("type = %s, want derivative", rels[0].Type)
+	}
+}
+
+func TestDerivativesAudioFlacPair(t *testing.T) {
+	// flac vs aac
+	files := []domain.FileInstance{
+		{Path: "/d/track.flac", ModifiedAt: dt("2024-01-01")},
+		{Path: "/d/track.aac", ModifiedAt: dt("2024-01-02")},
+	}
+	rels := Derivatives(files)
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 flac/aac derivative relation, got %d", len(rels))
+	}
+}

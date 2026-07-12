@@ -154,3 +154,42 @@ func TestAnchorsDivergeAllowsSameAnchor(t *testing.T) {
 		t.Fatal("same anchor must not diverge")
 	}
 }
+
+// TestBuildDefaultReviewForSameRoleNonTemporary 验证 buildGroup 的默认分支6：
+// 所有副本同角色、同锚点、非临时非缓存时，生成 REVIEW action。
+// 此前没有任何测试走到这个分支。
+func TestBuildDefaultReviewForSameRoleNonTemporary(t *testing.T) {
+	// 两个 RoleProjectWork 路径（"项目"触发），同锚点，非临时非缓存非保护
+	p := Build(group("/data/项目/report.pdf", "/data/项目/report-2.pdf"))[0]
+	if p.Actions[0].Action != domain.OperationReview {
+		t.Fatalf("expected REVIEW for same-role non-temporary duplicates, got %s", p.Actions[0].Action)
+	}
+	if p.Risk != domain.RiskHigh {
+		t.Fatalf("expected high risk for default review, got %s", p.Risk)
+	}
+	if len(p.Evidence) == 0 || p.Evidence[0] != "所有副本均位于同一目录角色：project_work" {
+		t.Fatalf("expected same-role evidence, got %#v", p.Evidence)
+	}
+}
+
+// TestBuildQuarantineForCacheRole 验证 Cache 角色也触发 QUARANTINE。
+// 此前只测了 Temporary 角色，Cache 角色未覆盖。
+func TestBuildQuarantineForCacheRole(t *testing.T) {
+	// "缓存" 触发 RoleCache (priority 10)
+	p := Build(group("/data/缓存/a.txt", "/data/缓存/b.txt"))[0]
+	if p.Actions[0].Action != domain.OperationKeep && p.Actions[1].Action != domain.OperationQuarantine {
+		// 至少一个应该是 Quarantine
+	}
+	hasQuarantine := false
+	for _, a := range p.Actions {
+		if a.Action == domain.OperationQuarantine {
+			hasQuarantine = true
+		}
+	}
+	if !hasQuarantine {
+		t.Fatalf("expected at least one QUARANTINE action for cache role, got %#v", p.Actions)
+	}
+	if p.Risk != domain.RiskMedium {
+		t.Fatalf("expected medium risk for cache quarantine, got %s", p.Risk)
+	}
+}

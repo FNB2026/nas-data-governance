@@ -92,3 +92,79 @@ func TestBusinessAnchorEmptyForUnstructured(t *testing.T) {
 		t.Fatalf("expected empty anchor, got %q", c.BusinessAnchor)
 	}
 }
+
+// ---- P1-6: 补齐缺失的角色正面测试 ----
+
+func TestClassifyRecognizesSystem(t *testing.T) {
+	c := Classify("/data/.git/config")
+	if c.Role != domain.RoleSystem {
+		t.Fatalf("expected RoleSystem, got %s", c.Role)
+	}
+	if !c.Protected {
+		t.Fatal("system role should be protected")
+	}
+	if c.AuthorityLevel != 100 {
+		t.Fatalf("expected authority 100, got %d", c.AuthorityLevel)
+	}
+}
+
+func TestClassifyRecognizesCache(t *testing.T) {
+	c := Classify("/data/cache/thumbnail.jpg")
+	if c.Role != domain.RoleCache {
+		t.Fatalf("expected RoleCache, got %s", c.Role)
+	}
+	if c.Protected {
+		t.Fatal("cache role should not be protected")
+	}
+}
+
+func TestClassifyRecognizesRaw(t *testing.T) {
+	c := Classify("/data/raw/相机导出/IMG_001.dng")
+	if c.Role != domain.RoleRaw {
+		t.Fatalf("expected RoleRaw, got %s", c.Role)
+	}
+	if !c.Protected {
+		t.Fatal("raw role should be protected")
+	}
+}
+
+func TestClassifyRecognizesFormalArchive(t *testing.T) {
+	c := Classify("/data/归档/2024/最终交付/report.pdf")
+	if c.Role != domain.RoleFormalArchive {
+		t.Fatalf("expected RoleFormalArchive, got %s", c.Role)
+	}
+	// FormalArchive is NOT in the protected list (only System/Backup/Raw are)
+	if c.Protected {
+		t.Fatal("formal archive should not be protected (only System/Backup/Raw are)")
+	}
+}
+
+func TestClassifyRecognizesUnorganized(t *testing.T) {
+	c := Classify("/data/未整理/photos.zip")
+	if c.Role != domain.RoleUnorganized {
+		t.Fatalf("expected RoleUnorganized, got %s", c.Role)
+	}
+	if c.Protected {
+		t.Fatal("unorganized role should not be protected")
+	}
+}
+
+func TestClassifyRecognizesDatabase(t *testing.T) {
+	c := Classify("/data/数据库/backup.sql")
+	if c.Role != domain.RoleSystem {
+		t.Fatalf("expected RoleSystem for 数据库, got %s", c.Role)
+	}
+	if !c.Protected {
+		t.Fatal("database path should be protected as system role")
+	}
+}
+
+func TestClassifyUnknownForUnrelatedPath(t *testing.T) {
+	c := Classify("/a/b/c/file.txt")
+	if c.Role != domain.RoleUnknown {
+		t.Fatalf("expected RoleUnknown for generic path, got %s", c.Role)
+	}
+	if c.AuthorityLevel != 50 {
+		t.Fatalf("expected authority 50 for unknown, got %d", c.AuthorityLevel)
+	}
+}
