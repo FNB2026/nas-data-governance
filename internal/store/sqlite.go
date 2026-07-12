@@ -747,3 +747,139 @@ func (s *SQLiteStore) ListExecutingPlans(ctx context.Context) ([]string, error) 
 	}
 	return out, rows.Err()
 }
+
+// ---------------- incremental scan (P0-2) ----------------
+
+// ListFileMetadata returns metadata for all active files in a storage.
+// Used by the incremental scanner to detect unchanged files and skip
+// hash recomputation.
+func (s *SQLiteStore) ListFileMetadata(ctx context.Context, storageID string) ([]FileMeta, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT path, size, mtime, device, inode, quick_hash, content_sha256
+		 FROM file_instances
+		 WHERE storage_id = ? AND file_status = 'active'
+		 ORDER BY path`, storageID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list file metadata: %w", err)
+	}
+	defer rows.Close()
+	out := make([]FileMeta, 0)
+	for rows.Next() {
+		var m FileMeta
+		var mtime string
+		var device, inode sql.NullInt64
+		var quickHash, contentSHA256 sql.NullString
+		if err := rows.Scan(&m.Path, &m.Size, &mtime, &device, &inode, &quickHash, &contentSHA256); err != nil {
+			return nil, err
+		}
+		m.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
+		if device.Valid {
+			m.Device = uint64(device.Int64)
+		}
+		if inode.Valid {
+			m.Inode = uint64(inode.Int64)
+		}
+		m.QuickHash = quickHash.String
+		m.ContentSHA256 = contentSHA256.String
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// MarkFilesMissing sets file_status='missing' for paths not seen in the
+// current scan. Uses a parameterized IN clause built safely.
+func (s *SQLiteStore) MarkFilesMissing(ctx context.Context, storageID string, paths []string) (int64, error) {
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	// Build a parameterized NOT IN clause: WHERE storage_id = ? AND path NOT IN (?, ?, ...)
+	// paths is the set of SEEN paths; everything else in this storage is missing.
+	placeholders := make([]string, len(paths))
+	args := make([]any, 0, len(paths)+1)
+	args = append(args, storageID)
+	for i, p := range paths {
+		placeholders[i] = "?"
+		args = append(args, p)
+	}
+	query := fmt.Sprintf(
+		`UPDATE file_instances SET file_status = 'missing'
+		 WHERE storage_id = ? AND file_status = 'active' AND path NOT IN (%s)`,
+		strings.Join(placeholders, ","))
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("store: mark files missing: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// MarkFileActive sets file_status='active' for a single path.
+func (s *SQLiteStore) MarkFileActive(ctx context.Context, storageID, path string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE file_instances SET file_status = 'active'
+		 WHERE storage_id = ? AND path = ?`, storageID, path)
+	if err != nil {
+		return fmt.Errorf("store: mark file active: %w", err)
+	}
+	return nil
+}
+
+// ---------------- scan checkpoints (P0-2) ----------------
+
+// StartCheckpoint creates a new scan checkpoint in 'running' state.
+func (s *SQLiteStore) StartCheckpoint(ctx context.Context, storageID string) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO scan_checkpoints(storage_id, last_scanned_path, scanned_count, status, started_at, updated_at)
+		 VALUES (?, '', 0, 'running', ?, ?)`,
+		storageID, now, now)
+	if err != nil {
+		return 0, fmt.Errorf("store: start checkpoint: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// UpdateCheckpoint updates the checkpoint's progress fields.
+func (s *SQLiteStore) UpdateCheckpoint(ctx context.Context, checkpointID int64, lastPath string, scannedCount int) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE scan_checkpoints SET last_scanned_path = ?, scanned_count = ?, updated_at = ?
+		 WHERE id = ?`,
+		lastPath, scannedCount, now, checkpointID)
+	if err != nil {
+		return fmt.Errorf("store: update checkpoint: %w", err)
+	}
+	return nil
+}
+
+// CompleteCheckpoint marks a checkpoint as 'completed' or 'aborted'.
+func (s *SQLiteStore) CompleteCheckpoint(ctx context.Context, checkpointID int64, status string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE scan_checkpoints SET status = ?, updated_at = ? WHERE id = ?`,
+		status, now, checkpointID)
+	if err != nil {
+		return fmt.Errorf("store: complete checkpoint: %w", err)
+	}
+	return nil
+}
+
+// LastCheckpoint returns the most recent incomplete checkpoint for a storage.
+func (s *SQLiteStore) LastCheckpoint(ctx context.Context, storageID string) (Checkpoint, error) {
+	var cp Checkpoint
+	var startedAt, updatedAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, storage_id, last_scanned_path, scanned_count, status, started_at, updated_at
+		 FROM scan_checkpoints
+		 WHERE storage_id = ? AND status = 'running'
+		 ORDER BY started_at DESC LIMIT 1`, storageID).
+		Scan(&cp.ID, &cp.StorageID, &cp.LastScannedPath, &cp.ScannedCount, &cp.Status, &startedAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return cp, ErrNotFound
+	}
+	if err != nil {
+		return cp, fmt.Errorf("store: last checkpoint: %w", err)
+	}
+	cp.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	cp.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	return cp, nil
+}

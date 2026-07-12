@@ -46,6 +46,40 @@ type Store interface {
 	// when absent. Used to attach directory_contexts.
 	FileID(ctx context.Context, storageID, path string) (int64, error)
 
+	// ---------------- incremental scan (P0-2) ----------------
+
+	// ListFileMetadata returns lightweight metadata for all active files
+	// in a storage. Used by the incremental scanner to detect unchanged
+	// files (same size + mtime + inode) and skip hash recomputation.
+	ListFileMetadata(ctx context.Context, storageID string) ([]FileMeta, error)
+
+	// MarkFilesMissing sets file_status='missing' for the given paths
+	// that were not seen during the current scan. Called after a scan
+	// completes to flag deleted files. Returns the count updated.
+	MarkFilesMissing(ctx context.Context, storageID string, paths []string) (int64, error)
+
+	// MarkFileActive sets file_status='active' for a single path. Called
+	// when an incremental scan encounters a previously-missing file that
+	// reappeared.
+	MarkFileActive(ctx context.Context, storageID, path string) error
+
+	// ---------------- scan checkpoints (P0-2) ----------------
+
+	// StartCheckpoint creates a new scan checkpoint in 'running' state.
+	// Returns the checkpoint ID.
+	StartCheckpoint(ctx context.Context, storageID string) (int64, error)
+
+	// UpdateCheckpoint updates the checkpoint's progress fields.
+	UpdateCheckpoint(ctx context.Context, checkpointID int64, lastPath string, scannedCount int) error
+
+	// CompleteCheckpoint marks a checkpoint as 'completed' or 'aborted'.
+	CompleteCheckpoint(ctx context.Context, checkpointID int64, status string) error
+
+	// LastCheckpoint returns the most recent incomplete checkpoint for a
+	// storage, or ErrNotFound if none exists. Used at scan start to
+	// decide whether to resume.
+	LastCheckpoint(ctx context.Context, storageID string) (Checkpoint, error)
+
 	// SaveContext upserts a directory context for the given file row.
 	// ruleVersion identifies the classifier revision so old contexts can be
 	// invalidated when the classifier changes.
@@ -155,4 +189,30 @@ type JournalEntry struct {
 	RollbackStatus string // pending/done/failed（空表示未尝试）
 	StartedAt      *time.Time
 	CompletedAt    *time.Time
+}
+
+// FileMeta is the lightweight metadata returned by ListFileMetadata.
+// It carries only the fields needed for incremental change detection
+// (size + mtime + inode) and hash cache reuse (quick_hash, content_sha256).
+// Path is included so callers can match scanned files to DB records.
+type FileMeta struct {
+	Path          string
+	Size          int64
+	ModifiedAt    time.Time
+	Device        uint64
+	Inode         uint64
+	QuickHash     string
+	ContentSHA256 string
+}
+
+// Checkpoint is one row of scan_checkpoints. It records where a scan
+// left off so it can be resumed after an interrupt.
+type Checkpoint struct {
+	ID             int64
+	StorageID      string
+	LastScannedPath string
+	ScannedCount   int
+	Status         string // running | completed | aborted
+	StartedAt      time.Time
+	UpdatedAt      time.Time
 }

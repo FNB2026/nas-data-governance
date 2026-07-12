@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -74,28 +75,119 @@ func runScan(args []string) error {
 	out := fs.String("out", "./var/index.jsonl", "index output")
 	storage := fs.String("storage", "local", "storage identifier")
 	dbPath := fs.String("db", "", "SQLite database for file/context persistence (optional)")
+	fullScan := fs.Bool("full", false, "force full scan (ignore checkpoint, recompute all hashes)")
+	resume := fs.Bool("resume", false, "resume from last checkpoint if available")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *root == "" {
 		return fmt.Errorf("--root is required")
 	}
-	var files []domain.FileInstance
-	err := scanner.Scan(scanner.Options{Root: *root, StorageID: *storage, ExcludedNames: scanner.DefaultExclusions()}, func(file domain.FileInstance) error {
-		q, err := fingerprint.Quick(file.Path, file.Size)
+	// signal-aware context so Ctrl+C can abort the scan gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	rootPath, err := filepath.Abs(*root)
+	if err != nil {
+		return err
+	}
+
+	// Open store early if --db is provided so we can use incremental mode.
+	var st *store.SQLiteStore
+	if *dbPath != "" {
+		st, err = store.Open(ctx, *dbPath)
 		if err != nil {
 			return err
+		}
+		defer st.Close()
+		if err := st.RegisterStorage(ctx, domain.Storage{
+			ID: *storage, RootPath: rootPath, Kind: "filesystem", CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Load existing file metadata for incremental hash reuse.
+	// Key: path → cached metadata. If size+mtime+inode match, skip hashing.
+	cache := map[string]store.FileMeta{}
+	if st != nil && !*fullScan {
+		existing, err := st.ListFileMetadata(ctx, *storage)
+		if err != nil {
+			return fmt.Errorf("load file metadata: %w", err)
+		}
+		for _, m := range existing {
+			cache[m.Path] = m
+		}
+	}
+
+	// Checkpoint: resume from the last incomplete scan if --resume.
+	var checkpointID int64
+	resumePath := ""
+	if st != nil {
+		if *resume && !*fullScan {
+			cp, err := st.LastCheckpoint(ctx, *storage)
+			if err == nil {
+				resumePath = cp.LastScannedPath
+				checkpointID = cp.ID
+				fmt.Printf("resuming from checkpoint %d (last path: %s, %d files scanned)\n",
+					cp.ID, cp.LastScannedPath, cp.ScannedCount)
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("load checkpoint: %w", err)
+			}
+		}
+		if checkpointID == 0 {
+			checkpointID, err = st.StartCheckpoint(ctx, *storage)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Scan with incremental hash reuse.
+	var files []domain.FileInstance
+	scanOpts := scanner.Options{
+		Root:          *root,
+		StorageID:     *storage,
+		ExcludedNames: scanner.DefaultExclusions(),
+		ResumePath:    resumePath,
+	}
+	stats, err := scanner.Scan(ctx, scanOpts, func(file domain.FileInstance) error {
+		// Incremental check: if size + mtime + inode are unchanged,
+		// reuse cached hashes instead of recomputing.
+		if cached, ok := cache[file.Path]; ok {
+			if cached.Size == file.Size &&
+				cached.ModifiedAt.Equal(file.ModifiedAt) &&
+				cached.Inode == file.Inode {
+				file.QuickHash = cached.QuickHash
+				file.ContentSHA256 = cached.ContentSHA256
+				files = append(files, file)
+				return nil
+			}
+		}
+		// File is new or changed: compute quick hash.
+		q, qerr := fingerprint.Quick(file.Path, file.Size)
+		if qerr != nil {
+			return qerr
 		}
 		file.QuickHash = q
 		files = append(files, file)
 		return nil
 	})
 	if err != nil {
+		if checkpointID != 0 {
+			_ = st.CompleteCheckpoint(ctx, checkpointID, "aborted")
+		}
 		return err
 	}
+
+	// Second-stage hashing: only for files that share size+quick_hash
+	// with another file AND don't already have content_sha256 cached.
 	bySizeQuick := map[string][]int{}
 	for i, f := range files {
-		bySizeQuick[fmt.Sprintf("%d:%s", f.Size, f.QuickHash)] = append(bySizeQuick[fmt.Sprintf("%d:%s", f.Size, f.QuickHash)], i)
+		if f.ContentSHA256 == "" {
+			key := fmt.Sprintf("%d:%s", f.Size, f.QuickHash)
+			bySizeQuick[key] = append(bySizeQuick[key], i)
+		}
 	}
 	for _, indexes := range bySizeQuick {
 		if len(indexes) < 2 {
@@ -109,26 +201,17 @@ func runScan(args []string) error {
 			files[i].ContentSHA256 = h
 		}
 	}
+
+	// Write JSONL index.
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		return err
 	}
 	if err := idx.Write(*out, files); err != nil {
 		return err
 	}
-	if *dbPath != "" {
-		ctx := context.Background()
-		st, err := store.Open(ctx, *dbPath)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		rootPath, err := filepath.Abs(*root)
-		if err != nil {
-			return err
-		}
-		if err := st.RegisterStorage(ctx, domain.Storage{ID: *storage, RootPath: rootPath, Kind: "filesystem", CreatedAt: time.Now().UTC()}); err != nil {
-			return err
-		}
+
+	// Persist to DB and mark missing files.
+	if st != nil {
 		ids, err := st.UpsertFiles(ctx, files)
 		if err != nil {
 			return err
@@ -138,8 +221,26 @@ func runScan(args []string) error {
 				return err
 			}
 		}
+		// Mark files not seen in this scan as missing.
+		seenPaths := make([]string, len(files))
+		for i, f := range files {
+			seenPaths[i] = f.Path
+		}
+		missing, _ := st.MarkFilesMissing(ctx, *storage, seenPaths)
+		// Complete checkpoint.
+		if checkpointID != 0 {
+			_ = st.CompleteCheckpoint(ctx, checkpointID, "completed")
+		}
+		fmt.Printf("indexed %d files into %s (%d missing marked, read-only scan)\n", len(files), *out, missing)
+		if e := stats.FormatErrors(); e != "" {
+			fmt.Fprintf(os.Stderr, "%s", e)
+		}
+		return nil
 	}
 	fmt.Printf("indexed %d files into %s (read-only scan)\n", len(files), *out)
+	if e := stats.FormatErrors(); e != "" {
+		fmt.Fprintf(os.Stderr, "%s", e)
+	}
 	return nil
 }
 

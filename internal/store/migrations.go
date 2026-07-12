@@ -38,6 +38,14 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("store: migration 2 alter rules: %w", err)
 	}
+	// Migration 004: add status column to file_instances for tracking
+	// missing (deleted) files during incremental scans. 'active' is the
+	// default for all pre-existing rows.
+	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{
+		{"file_status", "TEXT NOT NULL DEFAULT 'active'"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 4 alter file_instances: %w", err)
+	}
 	return nil
 }
 
