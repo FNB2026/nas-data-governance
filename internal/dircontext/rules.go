@@ -82,6 +82,37 @@ func activeSignals() []signal {
 	return out
 }
 
+// BuiltinTermRoles returns the mapping of builtin directory name terms
+// to their assigned roles. The learning module uses this to skip terms
+// already covered by builtin rules and to suggest roles based on
+// co-occurrence analysis.
+func BuiltinTermRoles() map[string]domain.DirectoryRole {
+	out := map[string]domain.DirectoryRole{}
+	defaultRules.mu.RLock()
+	defer defaultRules.mu.RUnlock()
+	for _, sig := range defaultRules.builtin {
+		for _, t := range sig.terms {
+			out[t] = sig.role
+		}
+	}
+	for _, t := range sensitiveTerms {
+		out[t] = domain.RoleSensitive
+	}
+	return out
+}
+
+// ContainsSensitiveTerm returns true if any segment matches a sensitive
+// term. Exported for the learning module to skip sensitive directories
+// per K-009 (privacy: sensitive directories must not enter learning samples).
+func ContainsSensitiveTerm(segments []string) bool {
+	for _, term := range sensitiveTerms {
+		if matches(segments, term) {
+			return true
+		}
+	}
+	return false
+}
+
 // learnedHash returns a short stable hash of the current learned signals.
 func learnedHash() string {
 	if len(defaultRules.learned) == 0 {

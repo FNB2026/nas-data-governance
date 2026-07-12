@@ -18,6 +18,7 @@ import (
 	"nas-data-governance/internal/fingerprint"
 	"nas-data-governance/internal/format"
 	idx "nas-data-governance/internal/index"
+	"nas-data-governance/internal/learning"
 	"nas-data-governance/internal/merge"
 	"nas-data-governance/internal/planner"
 	"nas-data-governance/internal/relations"
@@ -51,6 +52,8 @@ func main() {
 		err = runRelations(os.Args[2:])
 	case "merge":
 		err = runMerge(os.Args[2:])
+	case "learn":
+		err = runLearn(os.Args[2:])
 	case "rules":
 		err = runRules(os.Args[2:])
 	default:
@@ -183,7 +186,7 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|rules> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|duplicates|plan|approve|execute|analyze|group|relations|merge|learn|rules> [options]")
 }
 
 // ---- approve ----
@@ -520,6 +523,78 @@ func runMerge(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "identified %d merge suggestions\n", len(suggestions))
+	return nil
+}
+
+// ---- learn ----
+
+// runLearn runs local statistical learning over the indexed file metadata
+// stored in the SQLite database. It is read-only with respect to user data:
+// it reads only the governance DB, never the user's file system (K-009).
+//
+// By default it prints a stats summary (no writes). With --apply it also
+// persists directory-signal rule drafts (status=draft) to the rules table
+// for human review via the `rules` subcommand. Drafts never override
+// protection rules (priority <= 60, K-008).
+func runLearn(args []string) error {
+	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
+	dbPath := fs.String("db", "./var/governance.db", "governance database (must already hold scan results)")
+	source := fs.String("source", "stats", "learning source (only 'stats' supported in L2)")
+	out := fs.String("out", "", "write full stats JSON to this path (optional)")
+	apply := fs.Bool("apply", false, "persist generated rule drafts to the database")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *source != "stats" {
+		return fmt.Errorf("learn: --source %q not supported (only 'stats' in L2)", *source)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	stats, err := learning.Learn(ctx, st)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "learned from %d files (%d sensitive skipped, K-009)\n", stats.TotalFiles, stats.SensitiveSkipped)
+	fmt.Fprintf(os.Stderr, "dir stats above threshold: %d names\n", len(stats.DirStats))
+	fmt.Fprintf(os.Stderr, "project code patterns: %d\n", len(stats.ProjectCodes))
+	for _, ds := range stats.DirStats {
+		fmt.Fprintf(os.Stderr, "  %-24s dirs=%-3d files=%-4d role=%s\n", ds.Name, ds.DirCount, ds.FileCount, ds.SuggestedRole)
+	}
+
+	if *out != "" {
+		if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
+			return err
+		}
+		f, err := os.Create(*out)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(f)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(stats); err != nil {
+			_ = f.Close()
+			return err
+		}
+		_ = f.Close()
+		fmt.Fprintf(os.Stderr, "stats written to %s\n", *out)
+	}
+
+	if !*apply {
+		fmt.Fprintln(os.Stderr, "dry run: no drafts persisted (pass --apply to write drafts)")
+		return nil
+	}
+	batchID := learning.NewBatchID(*source, time.Now().UTC())
+	rules, err := learning.GenerateDrafts(ctx, st, stats, batchID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "persisted %d draft rules (batch %s) — review with `rules list --status draft`\n", len(rules), batchID)
 	return nil
 }
 
