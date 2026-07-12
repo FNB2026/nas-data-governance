@@ -2,7 +2,10 @@ module nas-data-governance
 
 go 1.26
 
-require modernc.org/sqlite v1.53.0
+require (
+	github.com/dslipak/pdf v0.0.2
+	modernc.org/sqlite v1.53.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

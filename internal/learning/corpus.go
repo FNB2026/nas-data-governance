@@ -14,6 +14,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/dslipak/pdf"
+
 	"nas-data-governance/internal/dircontext"
 	"nas-data-governance/internal/domain"
 	"nas-data-governance/internal/store"
@@ -81,6 +83,7 @@ const (
 	extTXT  = ".txt"
 	extMD   = ".md"
 	extDOCX = ".docx"
+	extPDF  = ".pdf"
 )
 
 // maxDocSourcesPerTerm caps how many source basenames we record per term, to
@@ -211,11 +214,38 @@ func extractText(path, ext string, maxBytes int64) (string, bool, error) {
 			return "", false, err
 		}
 		return text, true, nil
+	case extPDF:
+		text, err := extractPDFText(path, maxBytes)
+		if err != nil {
+			return "", false, err
+		}
+		return text, true, nil
 	default:
-		// PDF text extraction is intentionally deferred (requires a parser
-		// dependency); other formats are unsupported in L3.
+		// Unsupported format (e.g. image, binary, audio).
 		return "", false, nil
 	}
+}
+
+// extractPDFText opens a PDF via the pure-Go dslipak/pdf parser and
+// concatenates plain text from all pages. Encrypted or malformed PDFs
+// are reported as errors (the caller counts them as skipped).
+//
+// No OCR or external service is invoked (K-006/K-009). Scanned PDFs
+// without a text layer will yield empty strings — that is expected.
+func extractPDFText(path string, maxBytes int64) (string, error) {
+	r, err := pdf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open pdf: %w", err)
+	}
+	tr, err := r.GetPlainText()
+	if err != nil {
+		return "", fmt.Errorf("get pdf text: %w", err)
+	}
+	data, err := io.ReadAll(io.LimitReader(tr, maxBytes))
+	if err != nil {
+		return "", fmt.Errorf("read pdf text: %w", err)
+	}
+	return string(data), nil
 }
 
 // extractDocxText opens the OOXML zip and concatenates text from
