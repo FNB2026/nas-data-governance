@@ -1,6 +1,7 @@
 package planner
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -30,7 +31,13 @@ func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan
 	for i, file := range group.Files {
 		contexts[i] = dircontext.Classify(file.Path)
 	}
-	plan := domain.OperationPlan{ID: "dup-" + group.SHA256[:12], State: domain.PlanDraft, ContentSHA256: group.SHA256, Size: group.Size, Risk: domain.RiskHigh}
+	plan := domain.OperationPlan{ID: planID(group), State: domain.PlanDraft, ContentSHA256: group.SHA256, Size: group.Size, Risk: domain.RiskHigh}
+	if len(group.SHA256) != 64 {
+		plan.Risk = domain.RiskCritical
+		plan.Evidence = []string{"重复组缺少有效的完整 SHA-256", "无法证明字节级完全重复，禁止生成清理建议"}
+		plan.Actions = reviewActions(group.Files, contexts, "完整哈希无效，必须重新扫描并人工复核")
+		return plan
+	}
 	if anyProtected(contexts) {
 		plan.Risk = domain.RiskCritical
 		plan.Evidence = []string{"至少一个副本位于受保护目录（敏感、原始、备份或系统目录）", "白皮书要求保护范围不得参与普通自动去重"}
@@ -60,6 +67,18 @@ func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan
 	plan.Evidence = []string{fmt.Sprintf("所有副本均位于同一目录角色：%s", role), "完整 SHA-256 一致", "非临时/缓存资料仍可能承载版本或业务语境，需人工确认"}
 	plan.Actions = reviewActions(group.Files, contexts, "同职责重复：系统可建议，但必须人工确认")
 	return plan
+}
+
+func planID(group domain.DuplicateGroup) string {
+	if len(group.SHA256) >= 12 {
+		return "dup-" + group.SHA256[:12]
+	}
+	seed := group.SHA256
+	for _, file := range group.Files {
+		seed += "\x00" + file.Path
+	}
+	sum := sha256.Sum256([]byte(seed))
+	return fmt.Sprintf("dup-invalid-%x", sum[:6])
 }
 
 func anyProtected(contexts []domain.DirectoryContext) bool {

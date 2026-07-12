@@ -32,9 +32,9 @@ const minMembers = 2
 // detectable anchor are grouped by their first pathSegmentDepth directory
 // segments. Groups with fewer than minMembers members are discarded.
 func Group(files []domain.FileInstance) []domain.AssetGroup {
-	buckets := map[string][]domain.FileInstance{}   // cluster key -> files
-	evidence := map[string][]string{}               // cluster key -> reasons
-	anchors := map[string]string{}                  // cluster key -> anchor (if any)
+	buckets := map[string][]domain.FileInstance{} // cluster key -> files
+	evidence := map[string][]string{}             // cluster key -> reasons
+	anchors := map[string]string{}                // cluster key -> anchor (if any)
 
 	for _, f := range files {
 		ctx := dircontext.Classify(f.Path)

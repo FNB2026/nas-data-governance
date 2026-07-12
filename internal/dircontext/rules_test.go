@@ -23,7 +23,7 @@ func TestMergeLearnedAddsNewSignal(t *testing.T) {
 	t.Cleanup(ClearLearned)
 	r := domain.Rule{
 		ID: "learned-1", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleApproved,
+		Status:     domain.RuleApproved,
 		Definition: "match:\n  segment_contains: \"竣工图\"\neffect:\n  role: formal_archive\n  authority: 60",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -40,7 +40,7 @@ func TestLearnedRuleNeverOverridesProtection(t *testing.T) {
 	// priority 95. The learned rule must not change the matched term set.
 	r := domain.Rule{
 		ID: "learned-2", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleApproved,
+		Status:     domain.RuleApproved,
 		Definition: "match:\n  segment_contains: \"backup\"\neffect:\n  role: temporary\n  authority: 60",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -51,13 +51,37 @@ func TestLearnedRuleNeverOverridesProtection(t *testing.T) {
 	}
 }
 
+func TestBuiltinProtectionWinsOverCleanupSignal(t *testing.T) {
+	ClearLearned()
+	t.Cleanup(ClearLearned)
+	ctx := Classify("/data/原始素材/缓存/file.mov")
+	if ctx.Role != domain.RoleRaw || !ctx.Protected {
+		t.Fatalf("raw protection must win over cache cleanup: %#v", ctx)
+	}
+}
+
+func TestLearnedRuleCanRefineLowPriorityBuiltin(t *testing.T) {
+	ClearLearned()
+	t.Cleanup(ClearLearned)
+	r := domain.Rule{
+		ID: "learned-refine", Enabled: true, Source: domain.RuleSourceLearned,
+		Status:     domain.RuleApproved,
+		Definition: "match:\n  segment_contains: \"temp\"\neffect:\n  role: project_work\n  authority: 60",
+	}
+	MergeLearned([]domain.Rule{r})
+	ctx := Classify("/data/temp/file.txt")
+	if ctx.Role != domain.RoleProjectWork {
+		t.Fatalf("learned priority 60 should refine builtin temporary priority 20: %#v", ctx)
+	}
+}
+
 func TestLearnedPriorityCapped(t *testing.T) {
 	ClearLearned()
 	t.Cleanup(ClearLearned)
 	// Rule claims authority 200, must be capped at maxLearnedPriority (60).
 	r := domain.Rule{
 		ID: "learned-3", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleApproved,
+		Status:     domain.RuleApproved,
 		Definition: "match:\n  segment_contains: \"customdir\"\neffect:\n  role: project_work\n  authority: 200",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -75,7 +99,7 @@ func TestDisabledLearnedRuleIgnored(t *testing.T) {
 	t.Cleanup(ClearLearned)
 	r := domain.Rule{
 		ID: "learned-4", Enabled: false, Source: domain.RuleSourceLearned,
-		Status: domain.RuleApproved,
+		Status:     domain.RuleApproved,
 		Definition: "match:\n  segment_contains: \"disabledterm\"\neffect:\n  role: temporary\n  authority: 20",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -90,7 +114,7 @@ func TestDraftLearnedRuleIgnored(t *testing.T) {
 	t.Cleanup(ClearLearned)
 	r := domain.Rule{
 		ID: "learned-5", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleDraft,
+		Status:     domain.RuleDraft,
 		Definition: "match:\n  segment_contains: \"draftterm\"\neffect:\n  role: temporary\n  authority: 20",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -105,7 +129,7 @@ func TestProbationRuleApplies(t *testing.T) {
 	t.Cleanup(ClearLearned)
 	r := domain.Rule{
 		ID: "learned-6", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleProbation,
+		Status:     domain.RuleProbation,
 		Definition: "match:\n  segment_contains: \"probationterm\"\neffect:\n  role: project_work\n  authority: 60",
 	}
 	MergeLearned([]domain.Rule{r})
@@ -124,7 +148,7 @@ func TestRuleVersionChanges(t *testing.T) {
 	}
 	r := domain.Rule{
 		ID: "learned-7", Enabled: true, Source: domain.RuleSourceLearned,
-		Status: domain.RuleApproved,
+		Status:     domain.RuleApproved,
 		Definition: "match:\n  segment_contains: \"versiontest\"\neffect:\n  role: project_work\n  authority: 60",
 	}
 	MergeLearned([]domain.Rule{r})

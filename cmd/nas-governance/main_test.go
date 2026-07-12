@@ -109,6 +109,34 @@ func TestApproveThenExecuteEndToEnd(t *testing.T) {
 	}
 }
 
+func TestScanPersistsFilesForAnalyzeWorkflow(t *testing.T) {
+	tmp := t.TempDir()
+	dataRoot := filepath.Join(tmp, "data")
+	if err := os.MkdirAll(filepath.Join(dataRoot, "归档"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataRoot, "归档", "sample.pdf"), []byte("%PDF-1.4\n/Count 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(tmp, "index.jsonl")
+	dbPath := filepath.Join(tmp, "governance.db")
+	if err := runScan([]string{"-root", dataRoot, "-out", indexPath, "-storage", "test", "-db", dbPath}); err != nil {
+		t.Fatalf("scan with db: %v", err)
+	}
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := st.ListFiles(context.Background(), "test")
+	_ = st.Close()
+	if err != nil || len(files) != 1 {
+		t.Fatalf("persisted files: len=%d err=%v", len(files), err)
+	}
+	if err := runAnalyze([]string{"-index", indexPath, "-out", filepath.Join(tmp, "formats.json"), "-db", dbPath, "-storage-id", "test"}); err != nil {
+		t.Fatalf("analyze after scan --db: %v", err)
+	}
+}
+
 // TestApproveRejectsNonDraftPlan verifies the approve command enforces
 // state machine rules.
 func TestApproveRejectsNonDraftPlan(t *testing.T) {
@@ -176,6 +204,18 @@ func TestExecuteDryRunSkipsFilesystem(t *testing.T) {
 	entries, _ := os.ReadDir(qRoot)
 	if len(entries) != 0 {
 		t.Fatalf("quarantine should be empty after dry-run, got %d", len(entries))
+	}
+	f, err := os.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var results []executor.Result
+	if err := json.NewDecoder(f).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || len(results[0].Steps) < 2 || results[0].Steps[0].Name != "stale_check" || results[0].Steps[1].Name != "dry_run" {
+		t.Fatalf("dry-run must perform read-only preflight: %#v", results)
 	}
 }
 

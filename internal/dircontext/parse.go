@@ -8,11 +8,12 @@ import (
 
 // parseDirectorySignal parses a minimal YAML-like rule definition into a
 // signal. L1 only supports directory_signal rules with:
-//   match:
-//     segment_contains: "术语"
-//   effect:
-//     role: formal_archive
-//     authority: 90
+//
+//	match:
+//	  segment_contains: "术语"
+//	effect:
+//	  role: formal_archive
+//	  authority: 90
 //
 // This avoids a YAML dependency; the format is intentionally minimal. When
 // L2 produces real learned rules, they will use this same format.

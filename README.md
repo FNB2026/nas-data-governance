@@ -14,7 +14,7 @@
 ```bash
 make test
 make build
-./bin/nas-governance scan --root /path/to/read-only-sample --out ./var/index.jsonl
+./bin/nas-governance scan --root /path/to/read-only-sample --out ./var/index.jsonl --db ./var/governance.db
 ./bin/nas-governance duplicates --index ./var/index.jsonl
 ./bin/nas-governance plan --index ./var/index.jsonl --out ./var/plan.json
 ./bin/nas-governance approve --plan ./var/plan.json --out ./var/approved.json --all
@@ -44,9 +44,9 @@ docs/adr/                 架构决策记录
 
 ## 当前边界
 
-- 已有：只读扫描、排除规则、符号链接跳过、跨挂载点保护、JSONL 索引格式、完全重复报告、目录角色识别、上级目录链与业务锚点、可解释保留评分、草案计划、SQLite 持久化层、安全执行器（stale 复核、隔离区、跨卷复制-校验-删除源、回滚、审计日志）、CLI approve/execute 子命令、可选 SQLite 审计日志持久化。
+- 已有：只读扫描、JSONL/SQLite 索引、目录语境、完全重复报告、草案计划、安全执行器、格式分析、资产关系、目录合并建议与 L1 规则基础设施。`scan --db` 可直接写入后续 `analyze --db` 所需的文件和目录语境记录。
 - 执行前置条件：计划须处于 `APPROVED`；每个写操作必须位于显式配置的 `SourceRoots` 内；根目录内任意符号链接会被拒绝；执行失败不会把路径写入审计结果。
-- 预留：真实格式识别、MOVE/COPY/DELETE/RENAME 动作、空目录清理。
+- 预留：L2 本地统计学习、L3 行业资料学习、L4 决策反馈学习；外部 AI 继续关闭。
 - 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；跨备份域自动去重。
 
 详见 [知识地图](knowledge/maps/knowledge-map.md) 与 [开发路线](knowledge/maps/roadmap.md)。

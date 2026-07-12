@@ -101,6 +101,21 @@ func VerifyFile(path, expectedHash string) error {
 	return nil
 }
 
+// CopyAndVerify creates dst exclusively, verifies its complete SHA-256, and
+// removes the newly-created destination if verification fails. The source is
+// never removed. This is the safe primitive for COPY actions.
+func CopyAndVerify(src, dst, expectedHash string) (int64, error) {
+	n, err := CopyFile(src, dst)
+	if err != nil {
+		return n, err
+	}
+	if err := VerifyFile(dst, expectedHash); err != nil {
+		_ = os.Remove(dst) // dst was created by CopyFile with O_EXCL.
+		return n, fmt.Errorf("verify: %w", err)
+	}
+	return n, nil
+}
+
 // MoveFile performs the white-paper cross-volume move (§41):
 // copy → verify → delete source. The source is deleted only after the
 // destination hash matches expectedHash. If any step fails, the source is
@@ -114,14 +129,8 @@ func MoveFile(src, dst, expectedHash string) error {
 	if err := notSymlink(src); err != nil {
 		return err
 	}
-	if _, err := CopyFile(src, dst); err != nil {
+	if _, err := CopyAndVerify(src, dst, expectedHash); err != nil {
 		return fmt.Errorf("copy: %w", err)
-	}
-	if err := VerifyFile(dst, expectedHash); err != nil {
-		// Copy succeeded but verification failed: remove the bad copy
-		// so a retry starts clean. Source is untouched.
-		_ = os.Remove(dst)
-		return fmt.Errorf("verify: %w", err)
 	}
 	if err := SafeRemove(src); err != nil {
 		// Verification passed but source removal failed. This is the

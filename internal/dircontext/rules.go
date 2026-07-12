@@ -14,9 +14,9 @@ const maxLearnedPriority = 60
 // ruleSet holds builtin + learned signals. The zero value is ready to use
 // with only builtin rules; call MergeLearned to add learned rules.
 type ruleSet struct {
-	mu       sync.RWMutex
-	builtin  []signal
-	learned  []signal
+	mu      sync.RWMutex
+	builtin []signal
+	learned []signal
 }
 
 var defaultRules = &ruleSet{builtin: roleSignals}
@@ -68,15 +68,17 @@ func ClearLearned() {
 	defaultRules.mu.Unlock()
 }
 
-// activeSignals returns builtin followed by learned signals, highest
-// priority first. Builtin always takes precedence because sensitive terms
-// and protection roles (priority 90-100) must never be overridden.
+// activeSignals returns builtin and learned signals in one priority order.
+// Learned signals are capped at 60, so builtin protection roles at 90-100
+// always win while a learned directory-role rule can still refine low-priority
+// temporary/cache/unorganized matches.
 func activeSignals() []signal {
 	defaultRules.mu.RLock()
 	defer defaultRules.mu.RUnlock()
 	out := make([]signal, 0, len(defaultRules.builtin)+len(defaultRules.learned))
 	out = append(out, defaultRules.builtin...)
 	out = append(out, defaultRules.learned...)
+	selectionSort(out)
 	return out
 }
 

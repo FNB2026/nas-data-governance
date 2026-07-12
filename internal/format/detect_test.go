@@ -261,7 +261,7 @@ func TestExtractGIFDimensions(t *testing.T) {
 func TestExtractBMPDimensions(t *testing.T) {
 	// Minimal BMP: "BM" + 16 bytes + width(4B LE) + height(4B LE)
 	bmp := []byte("BM")
-	bmp = append(bmp, make([]byte, 16)...) // file header
+	bmp = append(bmp, make([]byte, 16)...)    // file header
 	bmp = append(bmp, 0x40, 0x01, 0x00, 0x00) // 320 (LE)
 	bmp = append(bmp, 0xF0, 0x00, 0x00, 0x00) // 240 (LE)
 	path := writeBytes(t, "test.bmp", bmp)
@@ -348,6 +348,32 @@ func TestExtractZipOOXMLXlsx(t *testing.T) {
 	info = ExtractMetadata(path, info)
 	if info.Format != "xlsx" {
 		t.Fatalf("expected xlsx, got %s", info.Format)
+	}
+}
+
+func TestZipMetadataCapsContentTypesExpansion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oversized.docx")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := zip.NewWriter(f)
+	ct, err := w.Create("[Content_Types].xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ct.Write(bytes.Repeat([]byte("x"), contentTypesLimit+1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info := extractZipMetadata(path, domain.FormatInfo{Format: "zip", Category: domain.CategoryArchive})
+	if info.Format != "zip" {
+		t.Fatalf("oversized content types must not be parsed: %#v", info)
 	}
 }
 

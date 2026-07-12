@@ -56,9 +56,8 @@ func classifySegments(segments []string) domain.DirectoryContext {
 			return domain.DirectoryContext{Role: domain.RoleSensitive, AuthorityLevel: 100, PrivacyLevel: "high", Protected: true, MatchedTerms: []string{term}}
 		}
 	}
-	// activeSignals returns builtin first, then learned. Builtin protection
-	// roles (priority 90-100) always win because they appear first. Learned
-	// rules are capped at maxLearnedPriority (60) per K-008.
+	// activeSignals is globally priority-sorted. Builtin protection roles at
+	// 90-100 always win; learned rules are capped at 60 per K-008.
 	for _, candidate := range activeSignals() {
 		matched := make([]string, 0)
 		for _, term := range candidate.terms {

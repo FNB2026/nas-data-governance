@@ -14,6 +14,7 @@ import (
 
 var errActionFailed = errors.New("executor: filesystem action failed")
 var errOutOfScope = errors.New("executor: action is outside configured source roots")
+var errStaleDetected = errors.New("executor: stale plan detected")
 
 // StepStatus is the outcome of one pipeline step.
 type StepStatus string
@@ -38,6 +39,7 @@ type Result struct {
 	PlanID     string           `json:"plan_id"`
 	FinalState domain.PlanState `json:"final_state"`
 	Steps      []AuditStep      `json:"steps"`
+	ErrorType  string           `json:"error_type,omitempty"`
 	// Err is non-nil when the pipeline failed. It never carries file
 	// paths; callers can correlate via PlanID and the plan's actions.
 	Err error `json:"-"`
@@ -59,6 +61,45 @@ func New(q QuarantineConfig) (*Executor, error) {
 	return &Executor{quarantine: q, now: time.Now}, nil
 }
 
+// Validate performs the complete read-only preflight used by CLI --dry-run:
+// approval state, source/target root boundaries, symlink checks, and the full
+// stale check including SHA-256. It never changes plan state or writes files.
+func (e *Executor) Validate(ctx context.Context, plan *domain.OperationPlan) Result {
+	result := Result{PlanID: plan.ID, Steps: make([]AuditStep, 0), FinalState: plan.State}
+	if plan.State != domain.PlanApproved {
+		result.Err = fmt.Errorf("executor: plan state is %s, expected APPROVED", plan.State)
+		result.ErrorType = "invalid_state"
+		return result
+	}
+	if err := ctx.Err(); err != nil {
+		result.Err = err
+		result.ErrorType = "cancelled"
+		return result
+	}
+	if err := e.validatePlanScope(plan); err != nil {
+		result.Err = err
+		result.ErrorType = "scope_validation_failed"
+		return result
+	}
+	stale, err := e.staleCheckAll(ctx, plan, &result)
+	if err != nil {
+		result.Err = errActionFailed
+		result.ErrorType = "stale_check_error"
+		return result
+	}
+	status := StepOK
+	if stale > 0 {
+		status = StepFailed
+		result.Err = errStaleDetected
+		result.ErrorType = "stale_detected"
+	}
+	result.Steps = append(result.Steps, AuditStep{
+		Name: "dry_run", Status: status,
+		Detail: map[string]any{"filesystem_writes": 0, "stale": stale},
+	})
+	return result
+}
+
 // Execute runs all actions in a plan through the pipeline:
 //
 //	APPROVED → stale-check → STALE_CHECKED → execute → VERIFIED
@@ -74,10 +115,12 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 
 	if plan.State != domain.PlanApproved {
 		result.Err = fmt.Errorf("executor: plan state is %s, expected APPROVED", plan.State)
+		result.ErrorType = "invalid_state"
 		return result
 	}
 	if err := e.validatePlanScope(plan); err != nil {
 		result.Err = err
+		result.ErrorType = "scope_validation_failed"
 		return result
 	}
 
@@ -85,6 +128,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	staleCount, err := e.staleCheckAll(ctx, plan, &result)
 	if err != nil {
 		result.Err = errActionFailed
+		result.ErrorType = "stale_check_error"
 		return result
 	}
 	if staleCount > 0 {
@@ -96,6 +140,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	}
 	if err := Transition(plan, domain.PlanStaleChecked); err != nil {
 		result.Err = err
+		result.ErrorType = "state_transition_failed"
 		return result
 	}
 
@@ -106,6 +151,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	for _, action := range plan.Actions {
 		if err := ctx.Err(); err != nil {
 			result.Err = err
+			result.ErrorType = "cancelled"
 			e.rollbackAll(&result, &rollbacks)
 			_ = Transition(plan, domain.PlanRolledBack)
 			result.FinalState = plan.State
@@ -122,6 +168,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 		result.Steps = append(result.Steps, step)
 		if err != nil {
 			result.Err = errActionFailed
+			result.ErrorType = "action_failed"
 			e.rollbackAll(&result, &rollbacks)
 			_ = Transition(plan, domain.PlanRolledBack)
 			result.FinalState = plan.State
@@ -135,6 +182,7 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	// All actions succeeded.
 	if err := Transition(plan, domain.PlanVerified); err != nil {
 		result.Err = err
+		result.ErrorType = "state_transition_failed"
 		return result
 	}
 	result.FinalState = plan.State
@@ -318,7 +366,7 @@ func (e *Executor) executeMove(action domain.PlannedAction) (AuditStep, func() e
 		return AuditStep{Name: "move", Status: StepFailed,
 			Detail: map[string]any{"error_type": "move_failed", "bytes": action.File.Size}}, nil, err
 	}
-	maybeCleanupEmptyDir(filepath.Dir(action.Path))
+	e.maybeCleanupEmptyDir(filepath.Dir(action.Path))
 	rollback := func() error {
 		return MoveFile(action.TargetPath, action.Path, action.File.ContentSHA256)
 	}
@@ -334,13 +382,9 @@ func (e *Executor) executeCopy(action domain.PlannedAction) (AuditStep, func() e
 		return AuditStep{Name: "copy", Status: StepFailed,
 			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: copy requires target_path")
 	}
-	if _, err := CopyFile(action.Path, action.TargetPath); err != nil {
+	if _, err := CopyAndVerify(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "copy", Status: StepFailed,
-			Detail: map[string]any{"error_type": "copy_failed", "bytes": action.File.Size}}, nil, err
-	}
-	if err := VerifyFile(action.TargetPath, action.File.ContentSHA256); err != nil {
-		return AuditStep{Name: "copy", Status: StepFailed,
-			Detail: map[string]any{"error_type": "verify_failed", "bytes": action.File.Size}}, nil, err
+			Detail: map[string]any{"error_type": "copy_or_verify_failed", "bytes": action.File.Size}}, nil, err
 	}
 	rollback := func() error {
 		return SafeRemove(action.TargetPath)
@@ -349,49 +393,34 @@ func (e *Executor) executeCopy(action domain.PlannedAction) (AuditStep, func() e
 		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
 }
 
-// executeDelete permanently removes a file. DELETE is irreversible — it
-// has no rollback hook. DELETE should only be used for files whose content
-// has been verified to exist elsewhere (e.g., after a successful COPY or
-// MOVE). The stale check has already confirmed the file hasn't changed.
+// executeDelete implements DELETE as quarantine, never as permanent removal.
+// This keeps every destructive action recoverable as required by AGENTS rule
+// 7 and the white paper. Permanent purge belongs to a separate retention
+// workflow and is intentionally absent from this executor.
 func (e *Executor) executeDelete(action domain.PlannedAction) (AuditStep, func() error, error) {
-	if err := SafeRemove(action.Path); err != nil {
-		return AuditStep{Name: "delete", Status: StepFailed,
-			Detail: map[string]any{"error_type": "delete_failed", "bytes": action.File.Size}}, nil, err
+	step, rollback, err := e.executeQuarantine(action)
+	step.Name = "delete_to_quarantine"
+	if err != nil {
+		return step, nil, err
 	}
-	maybeCleanupEmptyDir(filepath.Dir(action.Path))
-	// No rollback: deletion is irreversible by design.
-	return AuditStep{Name: "delete", Status: StepOK,
-		Detail: map[string]any{"bytes": action.File.Size}}, nil, nil
+	e.maybeCleanupEmptyDir(filepath.Dir(action.Path))
+	return step, rollback, nil
 }
 
-// executeRename renames a file within the same directory (same-volume
-// rename). It uses os.Rename for atomicity, then verifies the destination
-// hash. The rollback hook renames back.
+// executeRename uses the exclusive copy-verify-delete primitive. os.Rename
+// cannot be used safely here because it overwrites an existing destination on
+// Unix. The rollback hook restores the original path.
 func (e *Executor) executeRename(action domain.PlannedAction) (AuditStep, func() error, error) {
 	if action.TargetPath == "" {
 		return AuditStep{Name: "rename", Status: StepFailed,
 			Detail: map[string]any{"error_type": "missing_target"}}, nil, fmt.Errorf("executor: rename requires target_path")
 	}
-	if err := notSymlink(action.Path); err != nil {
-		return AuditStep{Name: "rename", Status: StepFailed,
-			Detail: map[string]any{"error_type": "symlink_refused"}}, nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(action.TargetPath), 0o755); err != nil {
-		return AuditStep{Name: "rename", Status: StepFailed,
-			Detail: map[string]any{"error_type": "mkdir_failed"}}, nil, err
-	}
-	if err := os.Rename(action.Path, action.TargetPath); err != nil {
+	if err := MoveFile(action.Path, action.TargetPath, action.File.ContentSHA256); err != nil {
 		return AuditStep{Name: "rename", Status: StepFailed,
 			Detail: map[string]any{"error_type": "rename_failed", "bytes": action.File.Size}}, nil, err
 	}
-	if err := VerifyFile(action.TargetPath, action.File.ContentSHA256); err != nil {
-		// Rename succeeded but verify failed: rename back to restore.
-		_ = os.Rename(action.TargetPath, action.Path)
-		return AuditStep{Name: "rename", Status: StepFailed,
-			Detail: map[string]any{"error_type": "verify_failed", "bytes": action.File.Size}}, nil, err
-	}
 	rollback := func() error {
-		return os.Rename(action.TargetPath, action.Path)
+		return MoveFile(action.TargetPath, action.Path, action.File.ContentSHA256)
 	}
 	return AuditStep{Name: "rename", Status: StepOK,
 		Detail: map[string]any{"bytes": action.File.Size}}, rollback, nil
@@ -400,7 +429,14 @@ func (e *Executor) executeRename(action domain.PlannedAction) (AuditStep, func()
 // maybeCleanupEmptyDir removes dir if it contains no entries. This is a
 // best-effort cleanup after MOVE or DELETE — failures are silently ignored
 // because an empty directory is harmless and can be cleaned up later.
-func maybeCleanupEmptyDir(dir string) {
+func (e *Executor) maybeCleanupEmptyDir(dir string) {
+	root, ok := rootFor(dir, e.quarantine.SourceRoots)
+	if !ok || filepath.Clean(dir) == filepath.Clean(root) {
+		return
+	}
+	if err := notSymlinkBelowRoot(dir, root); err != nil {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) > 0 {
 		return

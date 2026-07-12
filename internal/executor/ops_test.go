@@ -105,6 +105,23 @@ func TestVerifyFileDetectsMismatch(t *testing.T) {
 	}
 }
 
+func TestCopyAndVerifyRemovesDestinationOnHashMismatch(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "src")
+	dst := filepath.Join(t.TempDir(), "dst")
+	if err := os.WriteFile(src, []byte("real content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CopyAndVerify(src, dst, "wronghash"); err == nil {
+		t.Fatal("expected verification error")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source must survive verification failure: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("failed copy destination must be removed: %v", err)
+	}
+}
+
 func TestMoveFileCopiesAndDeletesSource(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "src")
 	dst := filepath.Join(t.TempDir(), "dst")

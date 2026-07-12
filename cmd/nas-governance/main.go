@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"nas-data-governance/internal/assets"
+	"nas-data-governance/internal/dircontext"
 	"nas-data-governance/internal/domain"
 	"nas-data-governance/internal/executor"
 	"nas-data-governance/internal/fingerprint"
@@ -67,6 +68,7 @@ func runScan(args []string) error {
 	root := fs.String("root", "", "root directory to scan")
 	out := fs.String("out", "./var/index.jsonl", "index output")
 	storage := fs.String("storage", "local", "storage identifier")
+	dbPath := fs.String("db", "", "SQLite database for file/context persistence (optional)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -107,6 +109,30 @@ func runScan(args []string) error {
 	}
 	if err := idx.Write(*out, files); err != nil {
 		return err
+	}
+	if *dbPath != "" {
+		ctx := context.Background()
+		st, err := store.Open(ctx, *dbPath)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		rootPath, err := filepath.Abs(*root)
+		if err != nil {
+			return err
+		}
+		if err := st.RegisterStorage(ctx, domain.Storage{ID: *storage, RootPath: rootPath, Kind: "filesystem", CreatedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		ids, err := st.UpsertFiles(ctx, files)
+		if err != nil {
+			return err
+		}
+		for i, id := range ids {
+			if err := st.SaveContext(ctx, id, dircontext.Classify(files[i].Path), dircontext.RuleVersion()); err != nil {
+				return err
+			}
+		}
 	}
 	fmt.Printf("indexed %d files into %s (read-only scan)\n", len(files), *out)
 	return nil
@@ -256,7 +282,7 @@ func runExecute(args []string) error {
 		}
 		defer st.Close()
 		// Create a task and save plans so operation_logs FK is satisfied.
-		taskID := fmt.Sprintf("task-%d", time.Now().Unix())
+		taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
 		if err := st.CreateTask(ctx, domain.OperationTask{
 			ID: taskID, RootPath: sourceRoots[0], State: "executing", CreatedAt: time.Now(),
 		}); err != nil {
@@ -289,12 +315,13 @@ func runExecute(args []string) error {
 			continue
 		}
 		if *dryRun {
-			skipped++
-			results = append(results, executor.Result{
-				PlanID:     p.ID,
-				FinalState: p.State,
-				Steps:      []executor.AuditStep{{Name: "dry_run", Status: executor.StepSkipped, Detail: map[string]any{"reason": "dry-run mode"}}},
-			})
+			result := exec.Validate(ctx, p)
+			results = append(results, result)
+			if result.Err != nil {
+				failed++
+			} else {
+				skipped++
+			}
 			continue
 		}
 		result := exec.Execute(ctx, p)
@@ -662,6 +689,12 @@ func readPlans(path string) ([]domain.OperationPlan, error) {
 // reported to stderr but do not stop execution — the audit JSON file is the
 // primary record, and the database is a secondary index for querying.
 func persistAudit(ctx context.Context, st *store.SQLiteStore, result executor.Result) {
+	if len(result.Steps) == 0 && result.Err != nil {
+		_ = st.AppendLog(ctx, result.PlanID, "pipeline_error", map[string]any{
+			"status": "failed", "final_state": string(result.FinalState), "error_type": result.ErrorType,
+		})
+		return
+	}
 	for _, step := range result.Steps {
 		detail := make(map[string]any)
 		for k, v := range step.Detail {
@@ -670,7 +703,7 @@ func persistAudit(ctx context.Context, st *store.SQLiteStore, result executor.Re
 		detail["status"] = string(step.Status)
 		detail["final_state"] = string(result.FinalState)
 		if result.Err != nil {
-			detail["error"] = result.Err.Error()
+			detail["error_type"] = result.ErrorType
 		}
 		if err := st.AppendLog(ctx, result.PlanID, step.Name, detail); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to write audit log for plan %s: %v\n", result.PlanID, err)

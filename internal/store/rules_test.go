@@ -87,6 +87,25 @@ func TestUpdateRuleStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateRuleStatusRejectsMissingAndIllegalTransition(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.UpdateRuleStatus(ctx, "missing", domain.RuleProbation, nil); err != ErrNotFound {
+		t.Fatalf("missing rule: got %v, want ErrNotFound", err)
+	}
+	r := domain.Rule{
+		ID: "rejected-rule", Version: 1, Priority: 50, Enabled: true,
+		Source: domain.RuleSourceLearned, Status: domain.RuleRejected,
+		Definition: "match:\n  segment_contains: \"x\"\neffect:\n  role: temporary\n  authority: 20",
+	}
+	if err := s.SaveRule(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateRuleStatus(ctx, r.ID, domain.RuleProbation, nil); err == nil {
+		t.Fatal("rejected rule must not be silently re-approved")
+	}
+}
+
 func TestDisableBatch(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

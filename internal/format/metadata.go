@@ -12,6 +12,11 @@ import (
 	"nas-data-governance/internal/domain"
 )
 
+// contentTypesLimit prevents a malicious ZIP/OOXML entry from expanding into
+// an unbounded allocation. Real [Content_Types].xml files are tiny; 1 MiB is
+// deliberately generous.
+const contentTypesLimit = 1 << 20
+
 // ExtractMetadata enriches a FormatInfo with cheap, header-only metadata.
 // It must be called after Detect. The path is opened again to extract
 // format-specific fields; no media decoding or OCR is performed (K-006).
@@ -228,8 +233,11 @@ func extractZipMetadata(path string, info domain.FormatInfo) domain.FormatInfo {
 			return info
 		}
 		defer rc.Close()
-		data, err := io.ReadAll(rc)
+		data, err := io.ReadAll(io.LimitReader(rc, contentTypesLimit+1))
 		if err != nil {
+			return info
+		}
+		if len(data) > contentTypesLimit {
 			return info
 		}
 		content := string(data)

@@ -248,6 +248,16 @@ func (s *SQLiteStore) ListRules(ctx context.Context, source domain.RuleSource, s
 }
 
 func (s *SQLiteStore) UpdateRuleStatus(ctx context.Context, ruleID string, status domain.RuleStatus, approvedAt *time.Time) error {
+	var current string
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM rules WHERE id = ?`, ruleID).Scan(&current); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("store: read rule status: %w", err)
+	}
+	if !legalRuleTransition(domain.RuleStatus(current), status) {
+		return fmt.Errorf("store: illegal rule status transition %s -> %s", current, status)
+	}
 	var at any
 	if approvedAt != nil {
 		at = approvedAt.UTC().Format(time.RFC3339Nano)
@@ -259,6 +269,19 @@ func (s *SQLiteStore) UpdateRuleStatus(ctx context.Context, ruleID string, statu
 		return fmt.Errorf("store: update rule status: %w", err)
 	}
 	return nil
+}
+
+func legalRuleTransition(from, to domain.RuleStatus) bool {
+	switch from {
+	case domain.RuleDraft:
+		return to == domain.RuleProbation || to == domain.RuleRejected || to == domain.RuleDisabled
+	case domain.RuleProbation:
+		return to == domain.RuleApproved || to == domain.RuleRejected || to == domain.RuleDisabled
+	case domain.RuleApproved:
+		return to == domain.RuleDisabled
+	default:
+		return false
+	}
 }
 
 func (s *SQLiteStore) DisableBatch(ctx context.Context, batchID string) error {

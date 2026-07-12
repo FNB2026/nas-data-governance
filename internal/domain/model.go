@@ -143,7 +143,7 @@ type PlannedAction struct {
 	Reason string        `json:"reason"`
 	// TargetPath is the destination for MOVE, COPY, and RENAME actions.
 	// Empty for DELETE, QUARANTINE, KEEP, SKIP, REVIEW.
-	TargetPath string `json:"target_path,omitempty"`
+	TargetPath string           `json:"target_path,omitempty"`
 	Context    DirectoryContext `json:"context"`
 	// File is the plan-time snapshot used by the executor's stale check.
 	// Empty for actions that don't touch the filesystem (REVIEW, SKIP).
@@ -228,11 +228,11 @@ type FileRelation struct {
 // or business matter. Clustering is path/anchor based (K-001/K-002); it is
 // read-only and never modifies the filesystem.
 type AssetGroup struct {
-	ID       string          `json:"id"`
-	Anchor   string          `json:"anchor,omitempty"`
-	RootPath string          `json:"root_path"`
-	Members  []FileInstance  `json:"members"`
-	Evidence []string        `json:"evidence"`
+	ID       string         `json:"id"`
+	Anchor   string         `json:"anchor,omitempty"`
+	RootPath string         `json:"root_path"`
+	Members  []FileInstance `json:"members"`
+	Evidence []string       `json:"evidence"`
 }
 
 // MergeSuggestion proposes consolidating sibling directories that hold the
@@ -263,8 +263,8 @@ const (
 	RuleDraft     RuleStatus = "draft"     // 草案，待审批
 	RuleProbation RuleStatus = "probation" // 试用期，审批后观察 N 天
 	RuleApproved  RuleStatus = "approved"  // 正式生效
-	RuleDisabled  RuleStatus = "disabled" // 已禁用（可回滚启用）
-	RuleRejected  RuleStatus = "rejected" // 审批拒绝，归档不生效
+	RuleDisabled  RuleStatus = "disabled"  // 已禁用（可回滚启用）
+	RuleRejected  RuleStatus = "rejected"  // 审批拒绝，归档不生效
 )
 
 // Rule is the persisted representation of a directory classification rule.
@@ -272,15 +272,15 @@ const (
 // Per K-008, learned rules have priority <= 60 and never override
 // protection rules (priority 90-100).
 type Rule struct {
-	ID          string      `json:"id"`
-	Version     int         `json:"version"`
-	Priority    int         `json:"priority"`
-	Enabled     bool        `json:"enabled"`
-	Source      RuleSource  `json:"source"`
-	BatchID     string      `json:"batch_id,omitempty"`
-	Confidence  float64     `json:"confidence"`
-	Status      RuleStatus  `json:"status"`
-	ApprovedAt  *time.Time  `json:"approved_at,omitempty"`
-	ExpiresAt   *time.Time  `json:"expires_at,omitempty"`
-	Definition  string      `json:"definition_yaml"`
+	ID         string     `json:"id"`
+	Version    int        `json:"version"`
+	Priority   int        `json:"priority"`
+	Enabled    bool       `json:"enabled"`
+	Source     RuleSource `json:"source"`
+	BatchID    string     `json:"batch_id,omitempty"`
+	Confidence float64    `json:"confidence"`
+	Status     RuleStatus `json:"status"`
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	Definition string     `json:"definition_yaml"`
 }

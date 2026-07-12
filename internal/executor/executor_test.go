@@ -388,7 +388,8 @@ func TestExecuteCopySuccess(t *testing.T) {
 
 func TestExecuteDeleteSuccess(t *testing.T) {
 	plan, src, srcDir := makeActionPlan(t, domain.OperationDelete, "delete me")
-	exec, _ := New(QuarantineConfig{Root: t.TempDir(), Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
+	qDir := t.TempDir()
+	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
 
 	result := exec.Execute(context.Background(), plan)
 	if result.Err != nil {
@@ -399,6 +400,10 @@ func TestExecuteDeleteSuccess(t *testing.T) {
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Fatalf("source should be removed, got err=%v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(qDir, filepath.Base(src)))
+	if err != nil || string(got) != "delete me" {
+		t.Fatalf("DELETE must quarantine recoverable content: got=%q err=%v", got, err)
 	}
 }
 
@@ -421,6 +426,39 @@ func TestExecuteRenameSuccess(t *testing.T) {
 	got, _ := os.ReadFile(dst)
 	if string(got) != "rename me" {
 		t.Fatalf("destination content mismatch: %q", got)
+	}
+}
+
+func TestExecuteRenameRefusesExistingDestination(t *testing.T) {
+	plan, src, srcDir := makeActionPlan(t, domain.OperationRename, "rename me")
+	dst := filepath.Join(srcDir, "existing.txt")
+	if err := os.WriteFile(dst, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan.Actions[0].TargetPath = dst
+	exec, _ := New(QuarantineConfig{Root: t.TempDir(), Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
+	result := exec.Execute(context.Background(), plan)
+	if result.Err == nil {
+		t.Fatal("expected rename collision failure")
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "keep me" {
+		t.Fatalf("existing destination was overwritten: %q", got)
+	}
+	if got, _ := os.ReadFile(src); string(got) != "rename me" {
+		t.Fatalf("source must survive collision: %q", got)
+	}
+}
+
+func TestDeleteDoesNotRemoveTaskRoot(t *testing.T) {
+	plan, _, srcDir := makeActionPlan(t, domain.OperationDelete, "root child")
+	exec, _ := New(QuarantineConfig{Root: t.TempDir(), Structure: QuarantineFlat, SourceRoots: []string{srcDir}})
+	result := exec.Execute(context.Background(), plan)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	info, err := os.Stat(srcDir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("task root must never be removed: info=%v err=%v", info, err)
 	}
 }
 
