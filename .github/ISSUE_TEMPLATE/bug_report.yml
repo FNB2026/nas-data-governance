@@ -1,0 +1,53 @@
+name: 缺陷报告
+description: 使用合成数据报告可复现的问题，不得上传真实 NAS 资料。
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先删除真实路径、文件名、数据库内容、索引、日志和截图中的敏感信息。安全问题请使用 Security Advisory 私密报告。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      placeholder: v1.0.0 或 commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      placeholder: 操作系统、架构、文件系统或 NAS/SMB 类型
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 最小复现
+      description: 仅使用临时目录和合成文件。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 请使用脱敏后的聚合错误信息。
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私与安全确认
+      options:
+        - label: 我没有提交真实路径、文件名、数据库、索引、日志、凭据或文件内容。
+          required: true
+        - label: 该问题不包含需要私密报告的安全漏洞。
+          required: true

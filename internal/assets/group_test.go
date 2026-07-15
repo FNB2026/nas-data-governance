@@ -67,10 +67,10 @@ func TestGroupByPathPrefixWhenNoAnchor(t *testing.T) {
 
 func TestGroupIgnoresSystemPathAboveScanRoot(t *testing.T) {
 	files := []domain.FileInstance{
-		{Path: "/Users/me/Downloads/mount/archive/client-a/a.txt"},
-		{Path: "/Users/me/Downloads/mount/archive/client-a/b.txt"},
-		{Path: "/Users/me/Downloads/mount/archive/client-b/a.txt"},
-		{Path: "/Users/me/Downloads/mount/archive/client-b/b.txt"},
+		{Path: "/synthetic/mount/archive/client-a/a.txt"},
+		{Path: "/synthetic/mount/archive/client-a/b.txt"},
+		{Path: "/synthetic/mount/archive/client-b/a.txt"},
+		{Path: "/synthetic/mount/archive/client-b/b.txt"},
 	}
 	groups := Group(files)
 	if len(groups) != 2 {

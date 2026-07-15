@@ -4,9 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - go.mod
-      - go.sum
   schedule:
     - cron: "23 2 * * 1"
   workflow_dispatch:
@@ -19,6 +16,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Scan complete Git history
+        shell: bash
+        run: |
+          version="8.28.0"
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}"
+          curl --fail --location --silent --show-error --output "$archive" "$url"
+          echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  $archive" | sha256sum --check --strict
+          tar -xzf "$archive" gitleaks
+          ./gitleaks git --no-banner --redact --log-opts="--all"
+
   govulncheck:
     name: Govulncheck
     runs-on: ubuntu-latest

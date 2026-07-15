@@ -17,6 +17,7 @@ make test
 make vet
 go test -race -count=1 ./...
 make build
+make public-check
 ```
 
 Go source files under `cmd/` and `internal/` must be formatted with `gofmt`. Changes to dependencies must leave `go.mod` and `go.sum` consistent after `go mod tidy`.
@@ -48,6 +49,14 @@ Use `t.TempDir()` and synthetic fixtures. Do not commit or paste:
 - user documents, media, metadata exports, credentials, or tokens.
 
 Any diagnostic output intended to contain sensitive paths must remain explicitly private, access-controlled, and excluded from normal logs.
+
+## Public Repository Boundary
+
+Before committing, run `make public-check` and review [the open-source boundary](docs/open-source-boundary.md).
+
+Contributors must not submit material they do not have the right to publish or license. In particular, do not add third-party documents, exported mind maps, customer examples, screenshots, media, production-derived fixtures, or copied rules without recorded provenance and explicit redistribution permission.
+
+Software contributions are accepted under Apache License 2.0. Original documentation contributions are accepted under CC BY 4.0 unless the file explicitly states otherwise. By submitting a contribution, you represent that you have the right to license it on those terms.
 
 ## Documentation
 

@@ -4,6 +4,16 @@
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.jsonl
+*.log
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+*-private.json
 .DS_Store
 # build artifacts (binary at repo root, not the cmd/nas-governance source dir)
 /nas-governance

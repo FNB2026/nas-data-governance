@@ -2,12 +2,17 @@
 
 面向个人、家庭和组织数字资产的本地化数据治理与归档工程基座。
 
-本仓库依据《NAS 数据整理与归档概念手册》建立。当前实现安全索引、目录语境、去重计划与受限的安全执行流水线：只读扫描、元数据采集、分层哈希、完全重复报告、可解释的目录角色、草案计划、审批与执行。任何文件写入只能通过显式批准的计划和配置了源根目录的执行器发生。
+本仓库实现安全索引、目录语境、去重计划与受限的安全执行流水线：只读扫描、元数据采集、分层哈希、完全重复报告、可解释的目录角色、草案计划、审批与执行。任何文件写入只能通过显式批准的计划和配置了源根目录的执行器发生。
 
-## 原始资料
+方法论与安全边界见脱敏后的 [NAS 数据治理与安全归档白皮书](docs/whitepaper.md)。公开范围、禁止提交的资料及发布检查清单见 [开源边界](docs/open-source-boundary.md)。
 
-- `NAS 数据整理与归档概念手册.docx`：本工程的概念与安全边界来源。
-- `文件资料分类大法2025.01.14.xmind`、`飞牛NAS2026.04.06.xmind`：待后续纳入目录语境、分类规则与 NAS 适配设计的补充材料。
+## 许可
+
+- 软件代码、构建文件和实现类 schema： [Apache License 2.0](LICENSE)。
+- 原创文档与白皮书： [CC BY 4.0](LICENSE-DOCS.md)。
+- 第三方组件：按 [第三方声明](THIRD_PARTY_NOTICES.md) 及随发布包提供的上游许可文本执行。
+
+用于内部研究的原始 DOCX、XMind、真实目录树和扫描资料不属于公开仓库，也不受上述文档许可授权。
 
 ## 快速开始
 
@@ -24,6 +29,7 @@ make build
 ./bin/nas-governance diagnose-formats --db ./var/governance.db --out ./var/format-review-private.json
 ./bin/nas-governance diagnose-governance --db ./var/governance.db --out ./var/governance-review-private.json
 ./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --legacy-log ./var/private-scan.log --out ./var/path-compat-private.json
+./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --failures-manifest ./var/index.jsonl.hash-failures.jsonl --out ./var/path-compat-private.json
 ./bin/nas-governance diagnose-merges --index ./var/index.jsonl --out ./var/merge-review-private.json
 ./bin/nas-governance group --index ./var/index.jsonl
 ./bin/nas-governance relations --index ./var/index.jsonl
@@ -51,7 +57,7 @@ make build
 
 `diagnose-governance` 也只读项目 SQLite：对完全重复组生成仅 DRAFT 的复核计划，对零字节文件区分占位标记/失败产物/潜在临时产物/无法解释空文件，并聚合大容量媒体的格式、编码、时长、尺寸、目录职责及版本/派生/侧车关系。该命令不写审批状态，不保存可执行任务，不调用执行器；任何非 DRAFT 结果都会被拒绝写入。
 
-`diagnose-paths` 只读取私有历史扫描日志、目录项和文件元数据，在显式任务根目录内检查原路径及 NFC/NFD 文件名变体。它不读取文件内容，不跟随符号链接、不跨挂载点、不越过任务根目录，结果固定为不可执行的 `0600` 私有报告。规范化匹配只能作为人工复核证据，不能触发自动重命名。
+`diagnose-paths` 可读取私有历史扫描日志或扫描产生的 `0600` 哈希失败清单，在显式任务根目录内检查原路径、NFC/NFD 文件名变体以及“目录项可见但无法只读打开”的状态。它只会为可访问性诊断尝试只读 Open 后立即关闭，不读取文件内容；不跟随符号链接、不跨挂载点、不越过任务根目录，结果固定为不可执行的 `0600` 私有报告。规范化特征只作为相关性证据，不能触发自动重命名或归因客户端/服务端根因。
 
 `diagnose-merges` 只读取索引并解释合并门控：兄弟目录总对数、有限后缀归一后的名称相似对，以及文件名 Jaccard 0.10/0.25/0.50 分档。生产 `merge` 阈值仍为 0.5；诊断中的近似目录对不会生成审批或执行任务。
 
@@ -98,3 +104,10 @@ docs/adr/                 架构决策记录
 - 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；跨备份域自动去重。
 
 详见 [知识地图](knowledge/maps/knowledge-map.md) 与 [开发路线](knowledge/maps/roadmap.md)。
+
+## 参与和支持
+
+- 提交改动前请阅读 [贡献指南](CONTRIBUTING.md) 和 [工程护栏](AGENTS.md)。
+- 普通使用问题和已脱敏的缺陷请按 [支持说明](SUPPORT.md) 处理。
+- 安全问题必须遵循 [安全政策](SECURITY.md)，不要在公开 Issue 中提交真实路径、文件名、数据库、索引或日志。
+- 本地及 CI 的公开边界检查：`make public-check`。

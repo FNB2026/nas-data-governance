@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞私密报告
+    url: https://github.com/FNB2026/nas-data-governance/security/advisories/new
+    about: 路径泄露、越界访问、误删除、凭据暴露等安全问题请勿提交公开 Issue。
