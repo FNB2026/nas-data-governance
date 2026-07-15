@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"nas-data-governance/internal/domain"
@@ -170,6 +171,73 @@ func TestDetectWAV(t *testing.T) {
 	}
 	if info.Format != "wav" {
 		t.Fatalf("got %s", info.Format)
+	}
+}
+
+func TestDetectAIFF(t *testing.T) {
+	header := append([]byte("FORM"), make([]byte, 4)...)
+	header = append(header, []byte("AIFFCOMM")...)
+	path := writeBytes(t, "test.aif", header)
+	info, err := Analyze(path)
+	if err != nil || info.Format != "aiff" || info.Category != domain.CategoryAudio {
+		t.Fatalf("got %#v err=%v", info, err)
+	}
+}
+
+func TestDetectPSDAsProtectedProjectSource(t *testing.T) {
+	path := writeBytes(t, "project.psd", append([]byte("8BPS"), make([]byte, 20)...))
+	info, err := Analyze(path)
+	if err != nil || info.Format != "psd" || info.Role != domain.FormatRoleProjectSource || !info.Protected {
+		t.Fatalf("got %#v err=%v", info, err)
+	}
+}
+
+func TestDetectOLELegacyOffice(t *testing.T) {
+	header := append([]byte("\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"), make([]byte, 32)...)
+	for name, want := range map[string]string{"old.doc": "doc", "old.xls": "xls"} {
+		path := writeBytes(t, name, header)
+		info, err := Analyze(path)
+		if err != nil || info.Format != want || info.Category != domain.CategoryDocument {
+			t.Fatalf("%s: got %#v err=%v", name, info, err)
+		}
+	}
+}
+
+func TestAnalyzeClassifiesSidecarWithoutMagic(t *testing.T) {
+	path := writeBytes(t, "audio.wav.peak", []byte("proprietary cache"))
+	info, err := Analyze(path)
+	if err != nil || info.Role != domain.FormatRoleRegenerableCache || !info.Protected || !info.Regenerable {
+		t.Fatalf("got %#v err=%v", info, err)
+	}
+}
+
+func TestAnalyzeRejectsSidecarSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real.peak")
+	if err := os.WriteFile(target, []byte("cache"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "linked.peak")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Analyze(link); err == nil {
+		t.Fatal("sidecar symlink must be rejected")
+	}
+}
+
+func TestAnalyzeRejectsOrdinarySymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.pdf")
+	if err := os.WriteFile(target, []byte("%PDF-1.4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.pdf")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Analyze(link); err == nil || !strings.Contains(err.Error(), "symlink rejected") {
+		t.Fatalf("expected ordinary symlink rejection, got %v", err)
 	}
 }
 
@@ -483,8 +551,8 @@ func TestDetectHEIC(t *testing.T) {
 }
 
 func TestDetectAVI(t *testing.T) {
-	// AVI signature "AVI" at offset 0
-	data := []byte("AVI ")
+	// AVI is a RIFF subtype at offset 8.
+	data := []byte("RIFF\x00\x00\x00\x00AVI ")
 	path := writeBytes(t, "test.avi", data)
 	info, err := Detect(path)
 	if err != nil {
@@ -492,6 +560,27 @@ func TestDetectAVI(t *testing.T) {
 	}
 	if info.Format != "avi" || info.Category != domain.CategoryVideo {
 		t.Fatalf("got %#v", info)
+	}
+}
+
+func TestRIFFSubtypeRequiresRIFFContainer(t *testing.T) {
+	for _, data := range [][]byte{
+		[]byte("xxxx\x00\x00\x00\x00WAVE"),
+		[]byte("xxxx\x00\x00\x00\x00WEBP"),
+		[]byte("xxxx\x00\x00\x00\x00AVI "),
+	} {
+		if _, err := detectFromBytes(data); err != ErrUnrecognized {
+			t.Fatalf("invalid RIFF container matched: %q err=%v", data, err)
+		}
+	}
+}
+
+func TestDetectM4ABeforeGenericISOBaseMedia(t *testing.T) {
+	data := []byte("\x00\x00\x00\x20ftypM4A ")
+	path := writeBytes(t, "test.m4a", data)
+	info, err := Detect(path)
+	if err != nil || info.Format != "m4a" || info.Category != domain.CategoryAudio {
+		t.Fatalf("got %#v err=%v", info, err)
 	}
 }
 

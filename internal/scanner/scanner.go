@@ -42,6 +42,11 @@ type ErrorEntry struct {
 	Error error
 }
 
+type scanPathKey struct {
+	storageID string
+	path      string
+}
+
 // Scan walks the filesystem tree starting at opts.Root and calls visit
 // for each regular file. It accepts a context for cancellation.
 //
@@ -54,6 +59,11 @@ type ErrorEntry struct {
 //     different device are skipped (AGENTS rule 4).
 //   - Resume: when ResumePath is set, files whose path sorts before
 //     ResumePath are skipped (for checkpoint recovery).
+//   - Path idempotency: a (storage_id, path) pair is visited at most once.
+//     This defensively contains duplicate enumeration without assigning the
+//     cause to a filesystem or protocol. Hard links — same inode at a different
+//     path — are distinct instances and are NOT deduplicated, because the key
+//     excludes inode by design.
 func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) error) (Stats, error) {
 	root, err := filepath.Abs(opts.Root)
 	if err != nil {
@@ -66,6 +76,9 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	rootDev, _ := deviceAndInode(rootInfo)
 
 	stats := Stats{}
+	// seen guards (storage_id, path) idempotency across the whole scan.
+	// Sized for typical directory volumes; grows as needed.
+	seen := make(map[scanPathKey]struct{}, 4096)
 	type dirEntry struct {
 		path string
 		dev  uint64
@@ -127,6 +140,12 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 				continue
 			}
 
+			// Idempotency: skip if this (storage_id, path) was already visited.
+			// Key excludes inode so hard links at different paths remain distinct.
+			if markPathSeen(seen, opts.StorageID, path) {
+				continue
+			}
+
 			stats.FilesScanned++
 			if err := visit(domain.FileInstance{
 				StorageID: opts.StorageID, Path: path, Name: entry.Name(), Size: info.Size(),
@@ -149,6 +168,18 @@ func deviceAndInode(info fs.FileInfo) (uint64, uint64) {
 	return uint64(stat.Dev), uint64(stat.Ino)
 }
 
+// markPathSeen records a (storage_id, path) pair and reports whether it was
+// already present. Inode is intentionally excluded: hard links (same inode at
+// a different path) are distinct file instances and must NOT be merged.
+func markPathSeen(seen map[scanPathKey]struct{}, storageID, path string) bool {
+	key := scanPathKey{storageID: storageID, path: path}
+	if _, ok := seen[key]; ok {
+		return true
+	}
+	seen[key] = struct{}{}
+	return false
+}
+
 func DefaultExclusions() map[string]bool {
 	names := []string{".data-governance-trash", "@eaDir", ".snapshot", "#recycle"}
 	m := make(map[string]bool, len(names))
@@ -158,20 +189,12 @@ func DefaultExclusions() map[string]bool {
 	return m
 }
 
-// FormatErrors returns a human-readable summary of non-fatal scan errors.
-// Returns an empty string when there are no errors.
+// FormatErrors returns a path-free summary suitable for ordinary logs.
+// Detailed paths remain available only in Stats.Errors for an explicitly
+// private diagnostic layer. Returns an empty string when there are no errors.
 func (s Stats) FormatErrors() string {
 	if len(s.Errors) == 0 {
 		return ""
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d non-fatal errors:\n", len(s.Errors))
-	for i, e := range s.Errors {
-		if i >= 10 {
-			fmt.Fprintf(&b, "  ... and %d more\n", len(s.Errors)-10)
-			break
-		}
-		fmt.Fprintf(&b, "  %s: %v\n", e.Path, e.Error)
-	}
-	return b.String()
+	return fmt.Sprintf("%d non-fatal errors; paths omitted", len(s.Errors))
 }

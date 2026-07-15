@@ -126,6 +126,27 @@ func TestRelationsCombinesVersionAndDerivative(t *testing.T) {
 	}
 }
 
+func TestVersionsDoNotTreatTrackNumbersAsVersions(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/session/音频 02-1.wav"},
+		{Path: "/session/音频 02-2.wav"},
+		{Path: "/session/音频 02-3.wav"},
+	}
+	if got := Versions(files); len(got) != 0 {
+		t.Fatalf("numbered audio tracks are not versions: %#v", got)
+	}
+}
+
+func TestVersionsRequireExplicitMarker(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/d/report.pdf", ModifiedAt: dt("2024-01-01")},
+		{Path: "/d/report_v2.pdf", ModifiedAt: dt("2024-01-02")},
+	}
+	if got := Versions(files); len(got) != 1 {
+		t.Fatalf("expected explicit v marker relation, got %d", len(got))
+	}
+}
+
 // ---- P1-6: 补齐缺失分支测试 ----
 
 func TestDerivativesAudioPair(t *testing.T) {

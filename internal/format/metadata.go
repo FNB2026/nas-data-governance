@@ -6,10 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 
 	"nas-data-governance/internal/domain"
+	"nas-data-governance/internal/filepolicy"
 )
 
 // contentTypesLimit prevents a malicious ZIP/OOXML entry from expanding into
@@ -40,8 +42,18 @@ func ExtractMetadata(path string, info domain.FormatInfo) domain.FormatInfo {
 		return extractPDFPages(path, info)
 	case "zip":
 		return extractZipMetadata(path, info)
-	case "mp4", "mov", "m4v", "mkv":
-		return extractVideoMetadata(path, info)
+	case "wav":
+		return extractWAVMetadata(path, info)
+	case "aiff":
+		return extractAIFFMetadata(path, info)
+	case "flac":
+		return extractFLACMetadata(path, info)
+	case "mp4", "mov", "m4v", "m4a":
+		return extractISOBaseMediaMetadata(path, info)
+	case "avi":
+		return extractAVIMetadata(path, info)
+	case "mpeg":
+		return extractMPEGMetadata(path, info)
 	case "mp3":
 		return extractMP3Duration(path, info)
 	default:
@@ -266,48 +278,6 @@ func classifyOOXML(contentTypes string, info domain.FormatInfo) domain.FormatInf
 	return info
 }
 
-// --- Video (MP4/MOV/MKV) ---
-// Video metadata extraction is limited to scanning the moov atom for
-// duration. This is a best-effort heuristic; a full implementation would
-// use a proper MP4 parser.
-func extractVideoMetadata(path string, info domain.FormatInfo) domain.FormatInfo {
-	f, err := os.Open(path)
-	if err != nil {
-		return info
-	}
-	defer f.Close()
-	// Read up to 1MB looking for the mvhd atom.
-	buf := make([]byte, 1024*1024)
-	n, _ := io.ReadFull(f, buf)
-	buf = buf[:n]
-	// Search for "mvhd" atom.
-	idx := bytes.Index(buf, []byte("mvhd"))
-	if idx < 0 || idx+24 > len(buf) {
-		return info
-	}
-	// Version is at idx+4; we assume version 0 for simplicity.
-	version := buf[idx+4]
-	var timescale, duration uint32
-	if version == 1 {
-		// 64-bit duration: skip 8+8+8 bytes (version+flags+creation+modification)
-		if idx+32 > len(buf) {
-			return info
-		}
-		timescale = binary.BigEndian.Uint32(buf[idx+28 : idx+32])
-		// 64-bit duration is at idx+32, but we only read 32 bits for safety.
-	} else {
-		if idx+24 > len(buf) {
-			return info
-		}
-		timescale = binary.BigEndian.Uint32(buf[idx+12 : idx+16])
-		duration = binary.BigEndian.Uint32(buf[idx+16 : idx+20])
-	}
-	if timescale > 0 && duration > 0 {
-		info.Duration = float64(duration) / float64(timescale)
-	}
-	return info
-}
-
 // --- MP3 ---
 // MP3 duration estimation from frame headers. This is a rough heuristic;
 // a full implementation would parse every frame.
@@ -363,10 +333,24 @@ func extractMP3Duration(path string, info domain.FormatInfo) domain.FormatInfo {
 // It returns the full FormatInfo for a file. If detection fails, the
 // returned info has Category=unknown.
 func Analyze(path string) (domain.FormatInfo, error) {
+	stat, err := os.Lstat(path)
+	if err != nil {
+		return domain.FormatInfo{}, err
+	}
+	if stat.Mode()&fs.ModeSymlink != 0 {
+		return domain.FormatInfo{}, errors.New("format: symlink rejected; path omitted")
+	}
+	if !stat.Mode().IsRegular() {
+		return domain.FormatInfo{}, errors.New("format: non-regular file rejected; path omitted")
+	}
+	if filepolicy.ExtensionOnly(path) {
+		return filepolicy.Apply(path, domain.FormatInfo{Format: "unknown", Category: domain.CategoryUnknown}), nil
+	}
 	info, err := Detect(path)
 	if err != nil && !errors.Is(err, ErrUnrecognized) {
 		return info, err
 	}
+	info = filepolicy.Apply(path, info)
 	// Even if unrecognized, return the info (with unknown category).
 	// ExtractMetadata is skipped for unrecognized formats.
 	if info.Format == "unknown" || info.Format == "" {

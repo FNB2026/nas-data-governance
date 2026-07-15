@@ -193,3 +193,22 @@ func TestBuildQuarantineForCacheRole(t *testing.T) {
 		t.Fatalf("expected medium risk for cache quarantine, got %s", p.Risk)
 	}
 }
+
+func TestBuildProtectsSidecarEvenInsideCacheDirectory(t *testing.T) {
+	p := Build(group("/data/缓存/audio.wav.peak", "/data/缓存/copy.wav.peak"))[0]
+	if p.Risk != domain.RiskCritical {
+		t.Fatalf("sidecar must be critical review, got %s", p.Risk)
+	}
+	for _, action := range p.Actions {
+		if action.Action != domain.OperationReview {
+			t.Fatalf("sidecar must never be ordinary quarantine: %#v", action)
+		}
+	}
+}
+
+func TestBuildProtectsProjectSource(t *testing.T) {
+	p := Build(group("/data/temp/session.cpr", "/data/temp/session-copy.cpr"))[0]
+	if p.Risk != domain.RiskCritical || p.Actions[0].Action != domain.OperationReview {
+		t.Fatalf("project source must be protected: %#v", p)
+	}
+}

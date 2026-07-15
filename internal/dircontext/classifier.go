@@ -19,9 +19,9 @@ var roleSignals = []signal{
 	{domain.RoleBackup, 95, []string{"backup", "bak", "备份", "冷备", "镜像", "snapshot", "快照", "同步"}},
 	{domain.RoleCache, 10, []string{"cache", "缓存", "thumbnail", "缩略图", "proxy", "代理", "transcode", "转码", "preview", "预览", "render", "渲染"}},
 	{domain.RoleTemporary, 20, []string{"temp", "tmp", "临时", "中转", "待发送", "待上传", "待处理", "下载", "导出"}},
-	{domain.RoleRaw, 90, []string{"raw", "原始", "原件", "源文件", "master", "source", "相机导出", "原始素材"}},
-	{domain.RoleFormalArchive, 90, []string{"归档", "存档", "正式", "已完成", "已结项", "已完结", "最终交付", "档案", "archive", "final"}},
-	{domain.RoleProjectWork, 65, []string{"项目", "project", "客户", "client", "需求", "交付", "工程", "work"}},
+	{domain.RoleRaw, 90, []string{"raw", "原始", "原件", "源文件", "master", "source", "相机导出", "原始素材", "素材", "录音", "母带"}},
+	{domain.RoleFormalArchive, 90, []string{"归档", "存档", "正式", "已完成", "已结项", "已完结", "最终交付", "档案", "成品", "作品", "发布版", "播出版", "archive", "final"}},
+	{domain.RoleProjectWork, 65, []string{"项目", "project", "客户", "client", "需求", "交付", "工程", "制作", "后期", "剪辑", "设计", "广告", "节目", "工作文件", "work"}},
 	{domain.RoleUnorganized, 45, []string{"未整理", "待整理", "杂项", "未知", "新建文件夹", "汇总", "收集", "inbox"}},
 }
 

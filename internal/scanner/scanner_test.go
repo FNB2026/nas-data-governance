@@ -277,8 +277,8 @@ func TestFormatErrorsNonEmpty(t *testing.T) {
 	if !strings.Contains(out, "1 non-fatal errors") {
 		t.Fatalf("expected error count in output, got %q", out)
 	}
-	if !strings.Contains(out, "/foo") {
-		t.Fatalf("expected path in output, got %q", out)
+	if strings.Contains(out, "/foo") || !strings.Contains(out, "paths omitted") {
+		t.Fatalf("sensitive path leaked in output: %q", out)
 	}
 }
 
@@ -288,4 +288,63 @@ func padZero(n int, width int) string {
 		s = "0" + s
 	}
 	return s
+}
+
+func TestMarkPathSeenUsesExactStoragePathPair(t *testing.T) {
+	cases := []struct {
+		name            string
+		storageID, path string
+		wantAlreadySeen bool
+	}{
+		{"first pair", "s1", "/a/b.txt", false},
+		{"same pair again", "s1", "/a/b.txt", true},
+		{"different path", "s1", "/a/c.txt", false},
+		{"different storage", "s2", "/a/b.txt", false},
+		{"empty values first", "", "", false},
+		{"empty values again", "", "", true},
+	}
+	seen := make(map[scanPathKey]struct{})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := markPathSeen(seen, c.storageID, c.path); got != c.wantAlreadySeen {
+				t.Fatalf("markPathSeen(%q,%q)=%v want %v",
+					c.storageID, c.path, got, c.wantAlreadySeen)
+			}
+		})
+	}
+}
+
+// TestScanDoesNotMergeHardLinks verifies that hard links — same inode at
+// different paths — are NOT deduplicated. They are distinct file instances
+// and must each be visited. This guards against an earlier design that
+// keyed on inode.
+func TestScanDoesNotMergeHardLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hard links not supported on Windows")
+	}
+	root := t.TempDir()
+	original := filepath.Join(root, "original.txt")
+	writeFile(t, original, "shared content")
+	link := filepath.Join(root, "link.txt")
+	if err := os.Link(original, link); err != nil {
+		t.Skipf("hard link not supported: %v", err)
+	}
+
+	stats, files := collectFiles(t, Options{Root: root})
+
+	if stats.FilesScanned != 2 {
+		t.Fatalf("expected 2 files (hard link distinct), got %d", stats.FilesScanned)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 collected files, got %d", len(files))
+	}
+	// Both files must have the same inode but different paths.
+	if files[0].Inode != files[1].Inode {
+		t.Fatalf("expected same inode for hard link pair, got %d vs %d",
+			files[0].Inode, files[1].Inode)
+	}
+	paths := map[string]bool{files[0].Path: true, files[1].Path: true}
+	if !paths[original] || !paths[link] {
+		t.Fatalf("expected both original and link paths, got %v", paths)
+	}
 }

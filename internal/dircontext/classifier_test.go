@@ -168,3 +168,33 @@ func TestClassifyUnknownForUnrelatedPath(t *testing.T) {
 		t.Fatalf("expected authority 50 for unknown, got %d", c.AuthorityLevel)
 	}
 }
+
+func TestP1MediaProductionRolesAreConservativeAndExplainable(t *testing.T) {
+	tests := []struct {
+		path      string
+		role      domain.DirectoryRole
+		protected bool
+	}{
+		{"/data/现场录音/take.wav", domain.RoleRaw, true},
+		{"/data/视频素材/clip.mov", domain.RoleRaw, true},
+		{"/data/节目后期/timeline.prproj", domain.RoleProjectWork, false},
+		{"/data/播出版/final.mp4", domain.RoleFormalArchive, false},
+	}
+	for _, test := range tests {
+		ctx := Classify(test.path)
+		if ctx.Role != test.role || ctx.Protected != test.protected {
+			t.Fatalf("%s: %#v", test.path, ctx)
+		}
+	}
+	// A generic music library can be source, reference, or deliverable. Keep
+	// it unknown instead of inventing storage duty from one ambiguous word.
+	if ctx := Classify("/data/音乐/song.flac"); ctx.Role != domain.RoleUnknown {
+		t.Fatalf("ambiguous music directory must remain unknown: %#v", ctx)
+	}
+}
+
+func TestRuleVersionChangesWithP1Builtins(t *testing.T) {
+	if got := RuleVersion(); got != "builtin-v2" {
+		t.Fatalf("rule version=%q", got)
+	}
+}

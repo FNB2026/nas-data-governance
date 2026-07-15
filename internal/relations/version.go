@@ -15,7 +15,7 @@ import (
 
 // versionSuffix captures the trailing token that marks a file as a version
 // of some base name: _v1, -final, (2), 副本, _draft2, etc.
-var versionSuffix = regexp.MustCompile(`(?i)([_-]v?\d+$|[_-]final\d*$|[_-]draft\d*$|[_-]copy\d*$|[_-]副本$|[_-]old$|[_-]new$|[_-]backup$|\(\d+\)$)`)
+var versionSuffix = regexp.MustCompile(`(?i)([_-]v\d+$|[_-]final\d*$|[_-]draft\d*$|[_-]copy\d*$|[_-]副本$|[_-]old$|[_-]new$|[_-]backup$|\(\d+\)$)`)
 
 // Versions scans a file list for version relationships within the same
 // directory. Two files are versions when their name stems share a common
@@ -28,6 +28,7 @@ func Versions(files []domain.FileInstance) []domain.FileRelation {
 	// Group by (dir, baseName, ext) so versions must share all three.
 	type key struct{ dir, base, ext string }
 	buckets := map[key][]domain.FileInstance{}
+	markedBuckets := map[key]bool{}
 
 	for _, f := range files {
 		dir := filepath.ToSlash(filepath.Dir(f.Path))
@@ -37,6 +38,7 @@ func Versions(files []domain.FileInstance) []domain.FileRelation {
 		}
 		ext := filepath.Ext(name)
 		stem := strings.TrimSuffix(name, ext)
+		marked := versionSuffix.MatchString(stem)
 		base := versionSuffix.ReplaceAllString(stem, "")
 		base = strings.TrimRight(base, "-_ ")
 		if base == "" {
@@ -44,12 +46,17 @@ func Versions(files []domain.FileInstance) []domain.FileRelation {
 			continue
 		}
 		k := key{dir, strings.ToLower(base), strings.ToLower(ext)}
+		// Unmarked originals are retained so report.pdf can pair with
+		// report_v2.pdf. Buckets are emitted only when a marked member exists.
 		buckets[k] = append(buckets[k], f)
+		if marked {
+			markedBuckets[k] = true
+		}
 	}
 
 	relations := make([]domain.FileRelation, 0)
 	for k, members := range buckets {
-		if len(members) < 2 {
+		if len(members) < 2 || !markedBuckets[k] {
 			continue
 		}
 		// Sort for stable pair ordering (older first).

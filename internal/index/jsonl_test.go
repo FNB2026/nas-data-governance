@@ -3,6 +3,7 @@ package index
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,16 +14,16 @@ import (
 func makeFile(path, hash string, size int64) domain.FileInstance {
 	return domain.FileInstance{
 		StorageID:     "test",
-		Path:         path,
-		Name:         filepath.Base(path),
-		Size:         size,
-		Mode:         0o644,
-		ModifiedAt:   time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
-		Device:       1,
-		Inode:        100,
-		QuickHash:    hash,
+		Path:          path,
+		Name:          filepath.Base(path),
+		Size:          size,
+		Mode:          0o644,
+		ModifiedAt:    time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
+		Device:        1,
+		Inode:         100,
+		QuickHash:     hash,
 		ContentSHA256: hash,
-		DiscoveredAt: time.Date(2024, 1, 16, 8, 0, 0, 0, time.UTC),
+		DiscoveredAt:  time.Date(2024, 1, 16, 8, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -61,6 +62,27 @@ func TestWriteReadRoundTrip(t *testing.T) {
 		if !got[i].ModifiedAt.Equal(want.ModifiedAt) {
 			t.Errorf("file[%d].ModifiedAt = %v, want %v", i, got[i].ModifiedAt, want.ModifiedAt)
 		}
+	}
+}
+
+func TestWalkReportsMalformedLineWithoutContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.jsonl")
+	if err := os.WriteFile(path, []byte("{}\nprivate-secret-not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	visited := 0
+	err := Walk(path, func(domain.FileInstance) error {
+		visited++
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("expected line-numbered error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "private-secret") {
+		t.Fatalf("malformed content leaked: %v", err)
+	}
+	if visited != 1 {
+		t.Fatalf("visited=%d, want 1", visited)
 	}
 }
 

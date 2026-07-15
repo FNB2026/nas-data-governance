@@ -1,6 +1,8 @@
 package assets
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +62,19 @@ func TestGroupByPathPrefixWhenNoAnchor(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected a 2-member path-prefix group, got %d groups", len(groups))
+	}
+}
+
+func TestGroupIgnoresSystemPathAboveScanRoot(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/Users/me/Downloads/mount/archive/client-a/a.txt"},
+		{Path: "/Users/me/Downloads/mount/archive/client-a/b.txt"},
+		{Path: "/Users/me/Downloads/mount/archive/client-b/a.txt"},
+		{Path: "/Users/me/Downloads/mount/archive/client-b/b.txt"},
+	}
+	groups := Group(files)
+	if len(groups) != 2 {
+		t.Fatalf("expected groups below common scan root, got %d", len(groups))
 	}
 }
 
@@ -136,5 +151,48 @@ func TestEmptyInput(t *testing.T) {
 	groups := Group(nil)
 	if len(groups) != 0 {
 		t.Fatalf("expected 0 groups for nil input, got %d", len(groups))
+	}
+}
+
+func TestOversizedGroupIsSplitAndRequiresReview(t *testing.T) {
+	files := make([]domain.FileInstance, maxGroupMembers+25)
+	for i := range files {
+		files[i] = domain.FileInstance{
+			Path:      fmt.Sprintf("/data/2024/project/same-dir/file-%05d.wav", i),
+			StorageID: "s1", ModifiedAt: time.Unix(int64(i), 0),
+		}
+	}
+	groups := Group(files)
+	if len(groups) < 2 {
+		t.Fatalf("oversized bucket must split, got %d group(s)", len(groups))
+	}
+	total := 0
+	for _, group := range groups {
+		total += len(group.Members)
+		if len(group.Members) > maxGroupMembers {
+			t.Fatalf("group %s has %d members, cap=%d", group.ID, len(group.Members), maxGroupMembers)
+		}
+		if !group.ReviewRequired || group.ReviewReason == "" {
+			t.Fatalf("split group must require review: %#v", group)
+		}
+	}
+	if total != len(files) {
+		t.Fatalf("split lost members: got %d want %d", total, len(files))
+	}
+}
+
+func TestGroupEvidenceDoesNotDuplicateSensitiveMemberPaths(t *testing.T) {
+	files := []domain.FileInstance{
+		{Path: "/private/customer/project/a.pdf"},
+		{Path: "/private/customer/project/b.pdf"},
+	}
+	groups := Group(files)
+	if len(groups) != 1 {
+		t.Fatalf("expected one group, got %d", len(groups))
+	}
+	for _, evidence := range groups[0].Evidence {
+		if strings.Contains(evidence, "/private/customer/project") {
+			t.Fatalf("evidence duplicated a sensitive member path: %q", evidence)
+		}
 	}
 }

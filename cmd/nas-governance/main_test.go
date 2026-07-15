@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,26 @@ import (
 	"nas-data-governance/internal/executor"
 	"nas-data-governance/internal/store"
 )
+
+func TestScanErrorSummariesOmitSensitivePaths(t *testing.T) {
+	var out bytes.Buffer
+	reportHashErrors(&out, []error{fmt.Errorf("open /private/client/secret.wav: denied")})
+	reportScanErrors(&out, 2)
+	if bytes.Contains(out.Bytes(), []byte("/private")) || bytes.Contains(out.Bytes(), []byte("secret.wav")) {
+		t.Fatalf("sensitive path leaked: %s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("paths omitted")) {
+		t.Fatalf("expected explicit omission notice: %s", out.String())
+	}
+}
+
+func TestAnalyzePersistenceErrorSummariesOmitSensitivePaths(t *testing.T) {
+	var out bytes.Buffer
+	reportAnalyzePersistenceErrors(&out, 2, 3)
+	if bytes.Contains(out.Bytes(), []byte("secret")) || !bytes.Contains(out.Bytes(), []byte("source paths omitted")) {
+		t.Fatalf("unexpected persistence warning: %s", out.String())
+	}
+}
 
 // TestApproveThenExecuteEndToEnd verifies the full CLI pipeline:
 // plan.json → approve → execute → audit.json
@@ -134,6 +155,119 @@ func TestScanPersistsFilesForAnalyzeWorkflow(t *testing.T) {
 	}
 	if err := runAnalyze([]string{"-index", indexPath, "-out", filepath.Join(tmp, "formats.json"), "-db", dbPath, "-storage-id", "test"}); err != nil {
 		t.Fatalf("analyze after scan --db: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(tmp, "formats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != privateFileMode {
+		t.Fatalf("format report mode=%o, want %o", info.Mode().Perm(), privateFileMode)
+	}
+}
+
+func TestAnalyzeResumeReusesDatabaseWithoutSourceRead(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "sample.pdf")
+	if err := os.WriteFile(source, []byte("%PDF-1.4\n/Count 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(tmp, "index.jsonl")
+	dbPath := filepath.Join(tmp, "governance.db")
+	if err := runScan([]string{"--root", root, "--out", indexPath, "--storage", "resume-test", "--db", dbPath}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAnalyze([]string{"--index", indexPath, "--out", filepath.Join(tmp, "first.json"), "--db", dbPath, "--batch-size", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	resumedReport := filepath.Join(tmp, "resumed.json")
+	if err := runAnalyze([]string{"--index", indexPath, "--out", resumedReport, "--db", dbPath, "--resume"}); err != nil {
+		t.Fatalf("resume should not read removed source: %v", err)
+	}
+	var entries []formatReportEntry
+	readJSONFile(t, resumedReport, &entries)
+	if len(entries) != 1 || entries[0].Format.Format != "pdf" || entries[0].Error != "" {
+		t.Fatalf("unexpected resumed report: %#v", entries)
+	}
+}
+
+func TestAnalyzeResumeRequiresDatabase(t *testing.T) {
+	if err := runAnalyze([]string{"--resume"}); err == nil {
+		t.Fatal("expected --resume without --db to fail")
+	}
+	if err := runAnalyze([]string{"--refresh-metadata"}); err == nil {
+		t.Fatal("expected --refresh-metadata without --resume to fail")
+	}
+}
+
+func TestNeedsMetadataRefreshOnlyRetriesSupportedGaps(t *testing.T) {
+	if !needsMetadataRefresh(domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}) {
+		t.Fatal("wav duration gap should refresh")
+	}
+	if !needsMetadataRefresh(domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, Duration: 2}) {
+		t.Fatal("mp4 dimension gap should refresh")
+	}
+	if needsMetadataRefresh(domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, Width: 1920, Height: 1080}) {
+		t.Fatal("mpeg with supported dimensions filled must not retry for unsupported duration")
+	}
+	if needsMetadataRefresh(domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo}) {
+		t.Fatal("unsupported flv metadata must not retry forever")
+	}
+}
+
+func TestAnalyzeRefreshMetadataUpdatesPersistedMediaOnly(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wav := make([]byte, 44)
+	copy(wav[:4], "RIFF")
+	copy(wav[8:12], "WAVE")
+	copy(wav[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(wav[16:20], 16)
+	binary.LittleEndian.PutUint16(wav[20:22], 1)
+	binary.LittleEndian.PutUint32(wav[24:28], 48000)
+	binary.LittleEndian.PutUint32(wav[28:32], 96000)
+	copy(wav[36:40], "data")
+	binary.LittleEndian.PutUint32(wav[40:44], 192000)
+	source := filepath.Join(root, "sample.wav")
+	if err := os.WriteFile(source, wav, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	indexPath, dbPath := filepath.Join(tmp, "index.jsonl"), filepath.Join(tmp, "governance.db")
+	if err := runScan([]string{"--root", root, "--out", indexPath, "--storage", "metadata", "--db", dbPath}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.FileID(context.Background(), "metadata", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveFormat(context.Background(), id, domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	if err := runAnalyze([]string{"--index", indexPath, "--out", filepath.Join(tmp, "formats.json"), "--db", dbPath, "--resume", "--refresh-metadata"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := st.ListFormats(context.Background(), "metadata")
+	_ = st.Close()
+	if err != nil || len(records) != 1 || records[0].Info.Duration != 2 || records[0].Info.Codec != "pcm" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
 

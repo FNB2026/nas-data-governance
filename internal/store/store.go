@@ -26,6 +26,14 @@ type LearningBatch struct {
 	Status      string // running | completed | failed
 }
 
+// FormatRecord binds analyzed metadata to a stable storage/path identity.
+// Paths remain inside the project-owned private database/report layer.
+type FormatRecord struct {
+	StorageID string
+	Path      string
+	Info      domain.FormatInfo
+}
+
 // Store is the persistence port used by scan/plan/execute layers.
 // All methods are context-aware so callers can cancel long operations.
 type Store interface {
@@ -41,6 +49,7 @@ type Store interface {
 	// UpsertFiles inserts or replaces file instances by (storage_id, path).
 	// Returns the database row IDs so callers can attach contexts.
 	UpsertFiles(ctx context.Context, files []domain.FileInstance) ([]int64, error)
+	// ListFiles returns all files when storageID is empty.
 	ListFiles(ctx context.Context, storageID string) ([]domain.FileInstance, error)
 	// FileID resolves the row id for (storage_id, path); returns ErrNotFound
 	// when absent. Used to attach directory_contexts.
@@ -89,6 +98,12 @@ type Store interface {
 	// JSON blob captures all FormatInfo fields; format_name is denormalized
 	// for quick filtering by category.
 	SaveFormat(ctx context.Context, fileID int64, info domain.FormatInfo) error
+	// SaveFormatsByPath persists one validated batch in a transaction and
+	// returns (saved, missing file rows). It avoids one transaction per file.
+	SaveFormatsByPath(ctx context.Context, records []FormatRecord) (int, int, error)
+	// ListFormats returns persisted formats, optionally filtered by storage.
+	// Analyze resume uses it to skip already completed NAS reads.
+	ListFormats(ctx context.Context, storageID string) ([]FormatRecord, error)
 
 	// CreateTask inserts a new operation task and returns its row id.
 	CreateTask(ctx context.Context, task domain.OperationTask) error
@@ -211,11 +226,11 @@ type FileMeta struct {
 // Checkpoint is one row of scan_checkpoints. It records where a scan
 // left off so it can be resumed after an interrupt.
 type Checkpoint struct {
-	ID             int64
-	StorageID      string
+	ID              int64
+	StorageID       string
 	LastScannedPath string
-	ScannedCount   int
-	Status         string // running | completed | aborted
-	StartedAt      time.Time
-	UpdatedAt      time.Time
+	ScannedCount    int
+	Status          string // running | completed | aborted
+	StartedAt       time.Time
+	UpdatedAt       time.Time
 }

@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/dslipak/pdf v0.0.2
+	golang.org/x/text v0.28.0
 	modernc.org/sqlite v1.53.0
 )
 

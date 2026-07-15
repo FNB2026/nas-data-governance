@@ -143,8 +143,8 @@ func TestRuleVersionChanges(t *testing.T) {
 	ClearLearned()
 	t.Cleanup(ClearLearned)
 	v1 := RuleVersion()
-	if v1 != "builtin-v1" {
-		t.Errorf("no learned rules: version = %s, want builtin-v1", v1)
+	if v1 != "builtin-v2" {
+		t.Errorf("no learned rules: version = %s, want builtin-v2", v1)
 	}
 	r := domain.Rule{
 		ID: "learned-7", Enabled: true, Source: domain.RuleSourceLearned,

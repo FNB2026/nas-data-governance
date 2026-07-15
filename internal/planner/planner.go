@@ -10,6 +10,7 @@ import (
 
 	"nas-data-governance/internal/dircontext"
 	"nas-data-governance/internal/domain"
+	"nas-data-governance/internal/filepolicy"
 )
 
 // Build creates reviewable recommendations only. It never touches the filesystem.
@@ -36,6 +37,15 @@ func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan
 		plan.Risk = domain.RiskCritical
 		plan.Evidence = []string{"重复组缺少有效的完整 SHA-256", "无法证明字节级完全重复，禁止生成清理建议"}
 		plan.Actions = reviewActions(group.Files, contexts, "完整哈希无效，必须重新扫描并人工复核")
+		return plan
+	}
+	if anyDependencyProtected(group.Files) {
+		plan.Risk = domain.RiskCritical
+		plan.Evidence = []string{
+			"重复组包含项目源文件、元数据侧车或可再生缓存",
+			"侧车依赖尚未验证；保护规则优先于缓存或临时目录清理规则",
+		}
+		plan.Actions = reviewActions(group.Files, contexts, "项目/侧车依赖必须验证并人工复核")
 		return plan
 	}
 	if anyProtected(contexts) {
@@ -67,6 +77,15 @@ func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan
 	plan.Evidence = []string{fmt.Sprintf("所有副本均位于同一目录角色：%s", role), "完整 SHA-256 一致", "非临时/缓存资料仍可能承载版本或业务语境，需人工确认"}
 	plan.Actions = reviewActions(group.Files, contexts, "同职责重复：系统可建议，但必须人工确认")
 	return plan
+}
+
+func anyDependencyProtected(files []domain.FileInstance) bool {
+	for _, file := range files {
+		if filepolicy.IsDependencyProtected(file.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 func planID(group domain.DuplicateGroup) string {

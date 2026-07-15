@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,72 @@ func TestInitIsIdempotent(t *testing.T) {
 	// IF NOT EXISTS precisely so re-runs are safe.
 	if err := s.Init(context.Background()); err != nil {
 		t.Fatalf("re-init: %v", err)
+	}
+}
+
+func TestOpenReadOnlyAllowsQueriesAndRejectsWrites(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "只读 database.db")
+	writable, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writable.RegisterStorage(ctx, domain.Storage{ID: "s1", RootPath: "/source", Kind: "test", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writable.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnly, err := OpenReadOnly(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open read-only: %v", err)
+	}
+	defer readOnly.Close()
+	storages, err := readOnly.ListStorages(ctx)
+	if err != nil || len(storages) != 1 || storages[0].ID != "s1" {
+		t.Fatalf("read from read-only store: storages=%#v err=%v", storages, err)
+	}
+	if err := readOnly.RegisterStorage(ctx, domain.Storage{ID: "s2", RootPath: "/other", Kind: "test", CreatedAt: time.Now()}); err == nil {
+		t.Fatal("read-only store unexpectedly allowed a write")
+	}
+}
+
+func TestOpenReadOnlyRejectsURIPathDelimiters(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "unsafe#name.db")
+	if _, err := OpenReadOnly(context.Background(), dbPath); err == nil {
+		t.Fatal("expected URI delimiter path to be rejected")
+	}
+}
+
+func TestOpenReadOnlyRejectsDatabaseSymlink(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "real.db")
+	writable, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writable.Close(); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(dir, "linked.db")
+	if err := os.Symlink(dbPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenReadOnly(ctx, linkPath); err == nil {
+		t.Fatal("expected database symlink to be rejected")
+	}
+}
+
+func TestOpenReadOnlyDoesNotCreateMissingDatabase(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "missing.db")
+	if _, err := OpenReadOnly(ctx, dbPath); err == nil {
+		t.Fatal("expected missing read-only database to fail")
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("read-only open created a database: %v", err)
 	}
 }
 
@@ -84,6 +152,70 @@ func TestUpsertFilesReturnsStableIDs(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Size != 99 {
 		t.Fatalf("unexpected files: %#v", got)
+	}
+}
+
+func TestListFilesWithoutStorageReturnsAllStorages(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"s1", "s2"} {
+		if err := s.RegisterStorage(ctx, domain.Storage{ID: id, RootPath: "/" + id, Kind: "test", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.UpsertFiles(ctx, []domain.FileInstance{{StorageID: id, Path: "/" + id + "/a", Name: "a", ModifiedAt: time.Now(), DiscoveredAt: time.Now()}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := s.ListFiles(ctx, "")
+	if err != nil || len(files) != 2 || files[0].StorageID != "s1" || files[1].StorageID != "s2" {
+		t.Fatalf("files=%#v err=%v", files, err)
+	}
+}
+
+func TestUpsertFilesPreservesHighBitSMBIdentifiers(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.RegisterStorage(ctx, domain.Storage{ID: "smb", RootPath: "/share", Kind: "smb", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	wantDevice := uint64(1<<63) + 17
+	wantInode := uint64(1<<63) + 99
+	files := []domain.FileInstance{{
+		StorageID: "smb", Path: "/share/a", Name: "a", Size: 1,
+		Device: wantDevice, Inode: wantInode, ModifiedAt: time.Now(), DiscoveredAt: time.Now(),
+	}}
+	if _, err := s.UpsertFiles(ctx, files); err != nil {
+		t.Fatalf("upsert high-bit SMB identifiers: %v", err)
+	}
+	got, err := s.ListFiles(ctx, "smb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Device != wantDevice || got[0].Inode != wantInode {
+		t.Fatalf("identifier round trip: got %#v", got)
+	}
+	meta, err := s.ListFileMetadata(ctx, "smb")
+	if err != nil || len(meta) != 1 || meta[0].Device != wantDevice || meta[0].Inode != wantInode {
+		t.Fatalf("metadata identifier round trip: %#v err=%v", meta, err)
+	}
+}
+
+func TestUpsertFilesErrorOmitsSensitivePath(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER reject_file BEFORE INSERT ON file_instances BEGIN SELECT RAISE(ABORT, 'rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	secretPath := "/private/client/phone-number-recording.mp3"
+	_, err := s.UpsertFiles(ctx, []domain.FileInstance{{
+		StorageID: "s", Path: secretPath, Name: "phone-number-recording.mp3",
+		ModifiedAt: time.Now(), DiscoveredAt: time.Now(),
+	}})
+	if err == nil {
+		t.Fatal("expected forced upsert error")
+	}
+	if strings.Contains(err.Error(), secretPath) || strings.Contains(err.Error(), "phone-number") {
+		t.Fatalf("sensitive path leaked in store error: %v", err)
 	}
 }
 
@@ -226,5 +358,41 @@ func TestSaveContextRoundTrip(t *testing.T) {
 	}
 	if got.Role != domain.RoleSensitive || !got.Protected || len(got.ParentChain) != 2 || got.BusinessAnchor != "2024" {
 		t.Fatalf("round-trip mismatch: %#v", got)
+	}
+}
+
+func TestSaveFormatsByPathAndListFormats(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.RegisterStorage(ctx, domain.Storage{ID: "s1", RootPath: "/", Kind: "local", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.UpsertFiles(ctx, []domain.FileInstance{
+		{StorageID: "s1", Path: "/a.aif", Name: "a.aif", ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+		{StorageID: "s1", Path: "/b.xmp", Name: "b.xmp", ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []FormatRecord{
+		{StorageID: "s1", Path: "/a.aif", Info: domain.FormatInfo{Format: "aiff", Category: domain.CategoryAudio}},
+		{StorageID: "s1", Path: "/b.xmp", Info: domain.FormatInfo{Format: "xmp", Category: domain.CategoryOther, Role: domain.FormatRoleMetadataSidecar, Protected: true}},
+		{StorageID: "s1", Path: "/missing", Info: domain.FormatInfo{Format: "unknown", Category: domain.CategoryUnknown}},
+	}
+	saved, missing, err := s.SaveFormatsByPath(ctx, records)
+	if err != nil || saved != 2 || missing != 1 {
+		t.Fatalf("saved=%d missing=%d err=%v", saved, missing, err)
+	}
+	got, err := s.ListFormats(ctx, "s1")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+	if got[1].Info.Role != domain.FormatRoleMetadataSidecar || !got[1].Info.Protected {
+		t.Fatalf("policy metadata did not round trip: %#v", got[1])
+	}
+	// Idempotent update in one transaction.
+	records[0].Info.MIME = "audio/aiff"
+	if saved, missing, err := s.SaveFormatsByPath(ctx, records[:1]); err != nil || saved != 1 || missing != 0 {
+		t.Fatalf("repeat saved=%d missing=%d err=%v", saved, missing, err)
 	}
 }

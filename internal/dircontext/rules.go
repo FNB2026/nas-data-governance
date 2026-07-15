@@ -28,9 +28,9 @@ func RuleVersion() string {
 	defaultRules.mu.RLock()
 	defer defaultRules.mu.RUnlock()
 	if len(defaultRules.learned) == 0 {
-		return "builtin-v1"
+		return "builtin-v2"
 	}
-	return "builtin-v1+learned-" + learnedHash()
+	return "builtin-v2+learned-" + learnedHash()
 }
 
 // MergeLearned replaces the learned signal set with the given rules. Rules

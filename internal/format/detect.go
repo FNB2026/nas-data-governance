@@ -45,10 +45,7 @@ var detectors = []detector{
 	{0, []byte("BM"), domain.FormatInfo{Format: "bmp", Category: domain.CategoryImage, MIME: "image/bmp"}},
 	{0, []byte("II*\x00"), domain.FormatInfo{Format: "tiff", Category: domain.CategoryImage, MIME: "image/tiff"}},
 	{0, []byte("MM\x00*"), domain.FormatInfo{Format: "tiff", Category: domain.CategoryImage, MIME: "image/tiff"}},
-	// RIFF-based formats: WebP and WAV both start with "RIFF" but differ
-	// at offset 8 ("WEBP" vs "WAVE"). Check the subtype first.
-	{8, []byte("WEBP"), domain.FormatInfo{Format: "webp", Category: domain.CategoryImage, MIME: "image/webp"}},
-	{8, []byte("WAVE"), domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio, MIME: "audio/wav"}},
+	{0, []byte("8BPS"), domain.FormatInfo{Format: "psd", Category: domain.CategoryImage, MIME: "image/vnd.adobe.photoshop"}},
 	// HEIC: ftyp box with heic brand
 	{4, []byte("ftypheic"), domain.FormatInfo{Format: "heic", Category: domain.CategoryImage, MIME: "image/heic"}},
 	{4, []byte("ftypheix"), domain.FormatInfo{Format: "heic", Category: domain.CategoryImage, MIME: "image/heic"}},
@@ -58,12 +55,12 @@ var detectors = []detector{
 	{4, []byte("ftypisom"), domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, MIME: "video/mp4"}},
 	{4, []byte("ftypmp42"), domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, MIME: "video/mp4"}},
 	{4, []byte("ftypM4V "), domain.FormatInfo{Format: "m4v", Category: domain.CategoryVideo, MIME: "video/x-m4v"}},
+	{4, []byte("ftypM4A "), domain.FormatInfo{Format: "m4a", Category: domain.CategoryAudio, MIME: "audio/mp4"}},
 	// Generic ftyp (ISO base media) — checked after specific brands.
 	{4, []byte("ftyp"), domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, MIME: "video/mp4"}},
 	{0, []byte("\x00\x00\x01\xBA"), domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, MIME: "video/mpeg"}},
 	{0, []byte("\x1A\x45\xDF\xA3"), domain.FormatInfo{Format: "mkv", Category: domain.CategoryVideo, MIME: "video/x-matroska"}},
 	{0, []byte("FLV"), domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo, MIME: "video/x-flv"}},
-	{0, []byte("AVI"), domain.FormatInfo{Format: "avi", Category: domain.CategoryVideo, MIME: "video/x-msvideo"}},
 
 	// --- Audio ---
 	{0, []byte("\xFF\xFB"), domain.FormatInfo{Format: "mp3", Category: domain.CategoryAudio, MIME: "audio/mpeg"}},
@@ -72,10 +69,9 @@ var detectors = []detector{
 	{0, []byte("ID3"), domain.FormatInfo{Format: "mp3", Category: domain.CategoryAudio, MIME: "audio/mpeg"}},
 	{0, []byte("fLaC"), domain.FormatInfo{Format: "flac", Category: domain.CategoryAudio, MIME: "audio/flac"}},
 	{0, []byte("OggS"), domain.FormatInfo{Format: "ogg", Category: domain.CategoryAudio, MIME: "audio/ogg"}},
-	{4, []byte("ftypM4A "), domain.FormatInfo{Format: "m4a", Category: domain.CategoryAudio, MIME: "audio/mp4"}},
-
 	// --- Documents ---
 	{0, []byte("%PDF"), domain.FormatInfo{Format: "pdf", Category: domain.CategoryDocument, MIME: "application/pdf"}},
+	{0, []byte("\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"), domain.FormatInfo{Format: "ole", Category: domain.CategoryDocument, MIME: "application/x-ole-storage"}},
 
 	// --- Archives and Office ---
 	// Office OOXML is ZIP-based; detect via internal [Content_Types].xml.
@@ -112,6 +108,20 @@ func Detect(path string) (domain.FormatInfo, error) {
 // detectFromBytes matches header against known signatures. Exported via
 // Detect; separated for testing.
 func detectFromBytes(header []byte) (domain.FormatInfo, error) {
+	if len(header) >= 12 && (bytes.Equal(header[:4], []byte("RIFF")) || bytes.Equal(header[:4], []byte("RF64"))) {
+		switch string(header[8:12]) {
+		case "WEBP":
+			return domain.FormatInfo{Format: "webp", Category: domain.CategoryImage, MIME: "image/webp"}, nil
+		case "WAVE":
+			return domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio, MIME: "audio/wav"}, nil
+		case "AVI ":
+			return domain.FormatInfo{Format: "avi", Category: domain.CategoryVideo, MIME: "video/x-msvideo"}, nil
+		}
+	}
+	if len(header) >= 12 && bytes.Equal(header[:4], []byte("FORM")) &&
+		(bytes.Equal(header[8:12], []byte("AIFF")) || bytes.Equal(header[8:12], []byte("AIFC"))) {
+		return domain.FormatInfo{Format: "aiff", Category: domain.CategoryAudio, MIME: "audio/aiff"}, nil
+	}
 	for _, d := range detectors {
 		if d.offset+d.lenSig() > len(header) {
 			continue

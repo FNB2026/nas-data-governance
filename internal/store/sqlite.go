@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +38,39 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenReadOnly opens an existing project database without applying migrations
+// or allowing writes. It is intended for diagnostic/reporting commands whose
+// database boundary must remain strictly read-only.
+func OpenReadOnly(ctx context.Context, path string) (*SQLiteStore, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve read-only path: %w", err)
+	}
+	// modernc/sqlite passes file: DSNs to SQLite's URI parser. Reject URI
+	// delimiters instead of risking mode=ro being parsed as part of a filename.
+	if strings.ContainsAny(absPath, "?#") {
+		return nil, fmt.Errorf("store: read-only path contains unsupported URI delimiter")
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("store: inspect read-only database: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("store: read-only database must not be a symbolic link")
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", filepath.ToSlash(absPath))
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: open read-only: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: open read-only: %w", err)
+	}
+	return &SQLiteStore{db: db}, nil
 }
 
 func (s *SQLiteStore) Close() error { return s.db.Close() }
@@ -98,16 +133,16 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 		return nil, fmt.Errorf("store: prepare upsert: %w", err)
 	}
 	defer prep.Close()
-	for _, f := range files {
+	for row, f := range files {
 		var id int64
 		err := prep.QueryRowContext(ctx,
 			f.StorageID, f.Path, f.Name, f.Size, f.Mode,
 			f.ModifiedAt.UTC().Format(time.RFC3339Nano),
-			f.Device, f.Inode, f.QuickHash, f.ContentSHA256,
+			sqliteUint64(f.Device), sqliteUint64(f.Inode), f.QuickHash, f.ContentSHA256,
 			f.DiscoveredAt.UTC().Format(time.RFC3339Nano),
 		).Scan(&id)
 		if err != nil {
-			return nil, fmt.Errorf("store: upsert file %q: %w", f.Path, err)
+			return nil, fmt.Errorf("store: upsert file row %d: %w", row+1, err)
 		}
 		ids = append(ids, id)
 	}
@@ -118,9 +153,16 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 }
 
 func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain.FileInstance, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at
-		FROM file_instances WHERE storage_id = ? ORDER BY path`, storageID)
+		FROM file_instances`
+	var rows *sql.Rows
+	var err error
+	if storageID == "" {
+		rows, err = s.db.QueryContext(ctx, query+` ORDER BY storage_id, path`)
+	} else {
+		rows, err = s.db.QueryContext(ctx, query+` WHERE storage_id = ? ORDER BY path`, storageID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("store: list files: %w", err)
 	}
@@ -129,16 +171,24 @@ func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain
 	for rows.Next() {
 		var f domain.FileInstance
 		var mtime, discoveredAt string
+		var device, inode int64
 		if err := rows.Scan(&f.StorageID, &f.Path, &f.Name, &f.Size, &f.Mode, &mtime,
-			&f.Device, &f.Inode, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
+			&device, &inode, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
 			return nil, err
 		}
+		f.Device, f.Inode = uint64(device), uint64(inode)
 		f.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
 		f.DiscoveredAt, _ = time.Parse(time.RFC3339Nano, discoveredAt)
 		out = append(out, f)
 	}
 	return out, rows.Err()
 }
+
+// SQLite INTEGER is signed, while Unix device and inode identifiers are
+// uint64. SMB clients may synthesize identifiers with the high bit set. A
+// bit-preserving cast stores those values as negative INTEGERs and converts
+// them back on read without losing identity information.
+func sqliteUint64(v uint64) int64 { return int64(v) }
 
 func (s *SQLiteStore) FileID(ctx context.Context, storageID, path string) (int64, error) {
 	var id int64
@@ -170,6 +220,41 @@ func (s *SQLiteStore) SaveContext(ctx context.Context, fileID int64, c domain.Di
 	return nil
 }
 
+// SaveContexts persists a batch in one transaction. It is used by index
+// import so large indexes do not create one SQLite transaction per file.
+func (s *SQLiteStore) SaveContexts(ctx context.Context, fileIDs []int64, contexts []domain.DirectoryContext, ruleVersion string) error {
+	if len(fileIDs) != len(contexts) {
+		return fmt.Errorf("store: context batch length mismatch")
+	}
+	if len(fileIDs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin context batch: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO directory_contexts(file_id, context_json, rule_version) VALUES(?, ?, ?)
+		ON CONFLICT(file_id) DO UPDATE SET context_json=excluded.context_json, rule_version=excluded.rule_version`)
+	if err != nil {
+		return fmt.Errorf("store: prepare context batch: %w", err)
+	}
+	defer stmt.Close()
+	for i, c := range contexts {
+		blob, err := json.Marshal(c)
+		if err != nil {
+			return fmt.Errorf("store: marshal context: %w", err)
+		}
+		if _, err := stmt.ExecContext(ctx, fileIDs[i], string(blob), ruleVersion); err != nil {
+			return fmt.Errorf("store: save context batch: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit context batch: %w", err)
+	}
+	return nil
+}
+
 // ---------------- file_formats ----------------
 
 func (s *SQLiteStore) SaveFormat(ctx context.Context, fileID int64, info domain.FormatInfo) error {
@@ -185,6 +270,87 @@ func (s *SQLiteStore) SaveFormat(ctx context.Context, fileID int64, info domain.
 		return fmt.Errorf("store: save format: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLiteStore) SaveFormatsByPath(ctx context.Context, records []FormatRecord) (int, int, error) {
+	if len(records) == 0 {
+		return 0, 0, nil
+	}
+	blobs := make([][]byte, len(records))
+	for i, record := range records {
+		if record.StorageID == "" || record.Path == "" || record.Info.Format == "" {
+			return 0, 0, fmt.Errorf("store: incomplete format batch record %d", i)
+		}
+		blob, err := json.Marshal(record.Info)
+		if err != nil {
+			return 0, 0, fmt.Errorf("store: marshal format batch: %w", err)
+		}
+		blobs[i] = blob
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: begin format batch: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	lookup, err := tx.PrepareContext(ctx, `SELECT id FROM file_instances WHERE storage_id = ? AND path = ?`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: prepare format lookup: %w", err)
+	}
+	defer lookup.Close()
+	upsert, err := tx.PrepareContext(ctx, `INSERT INTO file_formats(file_id, format_name, category, format_json) VALUES(?, ?, ?, ?)
+		ON CONFLICT(file_id) DO UPDATE SET format_name=excluded.format_name, category=excluded.category, format_json=excluded.format_json`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: prepare format batch: %w", err)
+	}
+	defer upsert.Close()
+	saved, missing := 0, 0
+	for i, record := range records {
+		var fileID int64
+		if err := lookup.QueryRowContext(ctx, record.StorageID, record.Path).Scan(&fileID); err != nil {
+			if err == sql.ErrNoRows {
+				missing++
+				continue
+			}
+			return 0, 0, fmt.Errorf("store: lookup format batch row: %w", err)
+		}
+		if _, err := upsert.ExecContext(ctx, fileID, record.Info.Format, string(record.Info.Category), string(blobs[i])); err != nil {
+			return 0, 0, fmt.Errorf("store: save format batch: %w", err)
+		}
+		saved++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("store: commit format batch: %w", err)
+	}
+	return saved, missing, nil
+}
+
+func (s *SQLiteStore) ListFormats(ctx context.Context, storageID string) ([]FormatRecord, error) {
+	query := `SELECT f.storage_id, f.path, x.format_json
+		FROM file_formats x JOIN file_instances f ON f.id=x.file_id`
+	var args []any
+	if storageID != "" {
+		query += ` WHERE f.storage_id = ?`
+		args = append(args, storageID)
+	}
+	query += ` ORDER BY f.storage_id, f.path`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list formats: %w", err)
+	}
+	defer rows.Close()
+	var out []FormatRecord
+	for rows.Next() {
+		var record FormatRecord
+		var blob string
+		if err := rows.Scan(&record.StorageID, &record.Path, &blob); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(blob), &record.Info); err != nil {
+			return nil, fmt.Errorf("store: decode persisted format: %w", err)
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
 }
 
 // ---------------- rules (L1 infrastructure) ----------------

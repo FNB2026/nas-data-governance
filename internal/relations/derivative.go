@@ -165,6 +165,7 @@ func Derivatives(files []domain.FileInstance) []domain.FileRelation {
 // come from report.DuplicateGroups via content hash.
 func Relations(files []domain.FileInstance) []domain.FileRelation {
 	out := append(Versions(files), Derivatives(files)...)
+	out = append(out, Sidecars(files)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].A != out[j].A {
 			return out[i].A < out[j].A

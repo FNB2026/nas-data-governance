@@ -5,10 +5,61 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"nas-data-governance/internal/domain"
+	idx "nas-data-governance/internal/index"
 	"nas-data-governance/internal/store"
 )
+
+func TestEndToEnd_ImportIndexIsIdempotentAndPreservesSMBInode(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "index.jsonl")
+	dbPath := filepath.Join(tmp, "governance.db")
+	files := []domain.FileInstance{
+		{StorageID: "smb", Path: "/mount/archive/a.txt", Name: "a.txt", Size: 1, Device: 1<<63 + 1, Inode: 1<<63 + 2, ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+		{StorageID: "smb", Path: "/mount/archive/team/b.txt", Name: "b.txt", Size: 2, Device: 1<<63 + 3, Inode: 1<<63 + 4, ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+	}
+	if err := idx.Write(indexPath, files); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := runImportIndex([]string{"-index", indexPath, "-db", dbPath, "-batch-size", "1"}); err != nil {
+			t.Fatalf("import run %d: %v", i+1, err)
+		}
+	}
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	got, err := st.ListFiles(context.Background(), "smb")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("imported files: len=%d err=%v", len(got), err)
+	}
+	if got[0].Inode != files[0].Inode || got[1].Inode != files[1].Inode {
+		t.Fatalf("SMB inode not preserved: %#v", got)
+	}
+	storages, err := st.ListStorages(context.Background())
+	if err != nil || len(storages) != 1 || storages[0].RootPath != "/mount/archive" {
+		t.Fatalf("inferred storage root: %#v err=%v", storages, err)
+	}
+}
+
+func TestImportIndexValidatesBeforeCreatingDatabase(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "bad.jsonl")
+	dbPath := filepath.Join(tmp, "governance.db")
+	if err := os.WriteFile(indexPath, []byte("{bad json}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runImportIndex([]string{"-index", indexPath, "-db", dbPath}); err == nil {
+		t.Fatal("expected malformed index error")
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("database should not be created for invalid input: %v", err)
+	}
+}
 
 // TestEndToEnd_ScanDuplicatesPlanApproveExecute verifies the full
 // scan → duplicates → plan → approve → execute pipeline against real

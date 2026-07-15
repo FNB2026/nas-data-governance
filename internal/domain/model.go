@@ -118,7 +118,24 @@ type FormatInfo struct {
 	Codec string `json:"codec,omitempty"`
 	// ArchiveEntryCount is the number of entries in an archive.
 	ArchiveEntryCount int `json:"archive_entry_count,omitempty"`
+	// Role distinguishes primary content from protected project/sidecar data.
+	// It is advisory metadata only; destructive decisions still require review.
+	Role FormatRole `json:"role,omitempty"`
+	// Protected prevents ordinary cleanup planning for project sources and
+	// sidecars. Regenerable means a cache may be rebuilt, but never implies
+	// that it is safe to delete without verifying its primary/project.
+	Protected   bool `json:"protected,omitempty"`
+	Regenerable bool `json:"regenerable,omitempty"`
 }
+
+type FormatRole string
+
+const (
+	FormatRolePrimary          FormatRole = "primary"
+	FormatRoleProjectSource    FormatRole = "project_source"
+	FormatRoleMetadataSidecar  FormatRole = "metadata_sidecar"
+	FormatRoleRegenerableCache FormatRole = "regenerable_cache"
+)
 
 type DuplicateGroup struct {
 	SHA256 string         `json:"sha256"`
@@ -224,6 +241,7 @@ const (
 	RelationDerivative RelationType = "derivative" // 原始与派生（同内容不同编码）
 	RelationVersion    RelationType = "version"    // 版本关系（命名模式）
 	RelationSimilar    RelationType = "similar"    // 视觉/听觉近似
+	RelationSidecar    RelationType = "sidecar"    // 主资产与受保护侧车/缓存依赖
 )
 
 // FileRelation describes a relationship between two file paths. Score is a
@@ -240,11 +258,13 @@ type FileRelation struct {
 // or business matter. Clustering is path/anchor based (K-001/K-002); it is
 // read-only and never modifies the filesystem.
 type AssetGroup struct {
-	ID       string         `json:"id"`
-	Anchor   string         `json:"anchor,omitempty"`
-	RootPath string         `json:"root_path"`
-	Members  []FileInstance `json:"members"`
-	Evidence []string       `json:"evidence"`
+	ID             string         `json:"id"`
+	Anchor         string         `json:"anchor,omitempty"`
+	RootPath       string         `json:"root_path"`
+	Members        []FileInstance `json:"members"`
+	Evidence       []string       `json:"evidence"`
+	ReviewRequired bool           `json:"review_required,omitempty"`
+	ReviewReason   string         `json:"review_reason,omitempty"`
 }
 
 // MergeSuggestion proposes consolidating sibling directories that hold the

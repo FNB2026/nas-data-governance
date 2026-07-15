@@ -27,6 +27,12 @@ const pathSegmentDepth = 3
 // not an asset group.
 const minMembers = 2
 
+// maxGroupMembers is a safety ceiling, not a claim that 10,000 files form
+// one business asset. Buckets above it are split by progressively deeper
+// relative paths and finally deterministic shards. False negatives are safer
+// than silently collapsing unrelated business matters.
+const maxGroupMembers = 10000
+
 // Group clusters files into asset groups. Files sharing a business anchor
 // (project code, year folder) are grouped by that anchor. Files without a
 // detectable anchor are grouped by their first pathSegmentDepth directory
@@ -36,26 +42,53 @@ func Group(files []domain.FileInstance) []domain.AssetGroup {
 	evidence := map[string][]string{}             // cluster key -> reasons
 	anchors := map[string]string{}                // cluster key -> anchor (if any)
 
+	root := commonDirPrefix(files)
 	for _, f := range files {
 		ctx := dircontext.Classify(f.Path)
-		key, ev, anchor := clusterKey(f.Path, ctx)
+		key, ev, anchor := clusterKey(f.Path, ctx, root)
 		buckets[key] = append(buckets[key], f)
 		evidence[key] = append(evidence[key], ev)
 		anchors[key] = anchor
 	}
 
-	groups := make([]domain.AssetGroup, 0, len(buckets))
+	type candidate struct {
+		key, anchor string
+		members     []domain.FileInstance
+		evidence    []string
+		review      bool
+	}
+	candidates := make([]candidate, 0, len(buckets))
 	for key, members := range buckets {
 		if len(members) < minMembers {
 			continue
 		}
+		parts := splitOversized(key, members, root)
+		for _, part := range parts {
+			if len(part.members) < minMembers {
+				continue
+			}
+			candidates = append(candidates, candidate{
+				key: part.key, anchor: anchors[key], members: part.members,
+				evidence: evidence[key], review: part.split,
+			})
+		}
+	}
+
+	groups := make([]domain.AssetGroup, 0, len(candidates))
+	for _, c := range candidates {
+		key, members := c.key, c.members
 		root := commonDirPrefix(members)
 		g := domain.AssetGroup{
 			ID:       groupID(key),
-			Anchor:   anchors[key],
+			Anchor:   c.anchor,
 			RootPath: root,
 			Members:  sortedMembers(members),
-			Evidence: dedupeEvidence(evidence[key]),
+			Evidence: dedupeEvidence(c.evidence),
+		}
+		if c.review {
+			g.ReviewRequired = true
+			g.ReviewReason = "超大候选组已按更深路径安全拆分，边界必须人工复核"
+			g.Evidence = append(g.Evidence, "超大候选组安全拆分：保护规则优先，禁止跨分片自动合并")
 		}
 		if g.Anchor != "" {
 			g.Evidence = append(g.Evidence, fmt.Sprintf("业务锚点：%s", g.Anchor))
@@ -71,21 +104,103 @@ func Group(files []domain.FileInstance) []domain.AssetGroup {
 	return groups
 }
 
+type groupPart struct {
+	key     string
+	members []domain.FileInstance
+	split   bool
+}
+
+func splitOversized(key string, members []domain.FileInstance, root string) []groupPart {
+	if len(members) <= maxGroupMembers {
+		return []groupPart{{key: key, members: members}}
+	}
+	parts := []groupPart{{key: key, members: members, split: true}}
+	for depth := 2; depth <= 8; depth++ {
+		next := make([]groupPart, 0, len(parts))
+		changed := false
+		for _, part := range parts {
+			if len(part.members) <= maxGroupMembers {
+				next = append(next, part)
+				continue
+			}
+			buckets := map[string][]domain.FileInstance{}
+			for _, file := range part.members {
+				rel, err := filepath.Rel(root, filepath.Dir(file.Path))
+				if err != nil {
+					rel = filepath.Dir(file.Path)
+				}
+				segs := splitSegments(filepath.ToSlash(rel))
+				if len(segs) > depth {
+					segs = segs[:depth]
+				}
+				prefix := strings.Join(segs, "/")
+				buckets[prefix] = append(buckets[prefix], file)
+			}
+			if len(buckets) == 1 {
+				next = append(next, part)
+				continue
+			}
+			changed = true
+			keys := make([]string, 0, len(buckets))
+			for prefix := range buckets {
+				keys = append(keys, prefix)
+			}
+			sort.Strings(keys)
+			for _, prefix := range keys {
+				next = append(next, groupPart{key: key + ":path:" + prefix, members: buckets[prefix], split: true})
+			}
+		}
+		parts = next
+		if !changed {
+			break
+		}
+	}
+
+	final := make([]groupPart, 0, len(parts))
+	for _, part := range parts {
+		if len(part.members) <= maxGroupMembers {
+			final = append(final, part)
+			continue
+		}
+		sorted := sortedMembers(part.members)
+		for start, shard := 0, 0; start < len(sorted); start, shard = start+maxGroupMembers, shard+1 {
+			end := start + maxGroupMembers
+			if end > len(sorted) {
+				end = len(sorted)
+			}
+			final = append(final, groupPart{
+				key:     fmt.Sprintf("%s:shard:%04d", part.key, shard),
+				members: sorted[start:end], split: true,
+			})
+		}
+	}
+	return final
+}
+
 // clusterKey returns (key, evidence, anchor). When the directory context
 // carries a business anchor, the anchor is the key. Otherwise the first
 // pathSegmentDepth segments of the path form the key.
-func clusterKey(path string, ctx domain.DirectoryContext) (string, string, string) {
+func clusterKey(path string, ctx domain.DirectoryContext, root string) (string, string, string) {
+	relDir := filepath.ToSlash(filepath.Dir(path))
+	if rel, err := filepath.Rel(root, filepath.Dir(path)); err == nil {
+		relDir = filepath.ToSlash(rel)
+	}
+	relSegs := splitSegments(relDir)
+	scope := ""
+	if len(relSegs) > 0 {
+		scope = relSegs[0]
+	}
 	if ctx.BusinessAnchor != "" {
-		return "anchor:" + ctx.BusinessAnchor,
-			fmt.Sprintf("路径 %s 命中业务锚点 %s", path, ctx.BusinessAnchor),
+		return "anchor:" + scope + ":" + ctx.BusinessAnchor,
+			"目录语境检测到业务锚点；具体来源仅保留在成员记录中",
 			ctx.BusinessAnchor
 	}
-	segs := splitSegments(filepath.ToSlash(filepath.Dir(path)))
+	segs := relSegs
 	if len(segs) > pathSegmentDepth {
 		segs = segs[:pathSegmentDepth]
 	}
 	key := "path:" + strings.Join(segs, "/")
-	return key, fmt.Sprintf("路径 %s 无业务锚点，按路径前缀聚类", path), ""
+	return key, "未检测到业务锚点，按相对路径前缀聚类；具体来源仅保留在成员记录中", ""
 }
 
 func splitSegments(dir string) []string {
