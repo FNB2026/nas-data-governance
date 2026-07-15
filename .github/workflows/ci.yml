@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify formatting of changed Go files
+        shell: bash
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              base="${{ github.event.pull_request.base.sha }}"
+              ;;
+            push)
+              base="${{ github.event.before }}"
+              ;;
+            *)
+              base=""
+              ;;
+          esac
+
+          if [[ -n "$base" && ! "$base" =~ ^0+$ ]]; then
+            mapfile -d '' files < <(git diff --name-only -z --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.go')
+          else
+            mapfile -d '' files < <(git ls-files -z '*.go')
+          fi
+
+          if (( ${#files[@]} == 0 )); then
+            echo "No changed Go files to check."
+            exit 0
+          fi
+
+          unformatted="$(printf '%s\0' "${files[@]}" | xargs -0 gofmt -l)"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following changed Go files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -race -count=1 ./...
+
+      - name: Build CLI
+        run: make build

@@ -1,0 +1,9 @@
+# Default owner for all repository changes.
+* @FNB2026
+
+# Governance and high-risk filesystem boundaries.
+/.github/ @FNB2026
+/internal/executor/ @FNB2026
+/internal/scanner/ @FNB2026
+/internal/filepolicy/ @FNB2026
+/internal/store/ @FNB2026
