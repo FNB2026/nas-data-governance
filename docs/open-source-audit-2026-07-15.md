@@ -2,7 +2,7 @@
 
 ## Outcome
 
-The repository is technically prepared for a public-readiness pull request, but it is **not yet ready to change visibility**. The current tree is licensed and sanitized; historical source documents, old release artifacts, and commit identity history still require a controlled history migration.
+The repository's current tree and all pushable branches are licensed and sanitized, but it is **not yet ready to change visibility**. GitHub's read-only pull-request refs still retain pre-rewrite objects and require a server-side purge by GitHub Support.
 
 ## Verified Repository State
 
@@ -10,19 +10,21 @@ The repository is technically prepared for a public-readiness pull request, but 
 - Default branch: `main`.
 - Merge policy: squash merge only; merged branches are deleted automatically.
 - Issues: enabled. Wiki and Discussions: disabled.
-- Existing release: `v1.0.0`, with four platform archives and SHA-256 checksums.
+- Existing releases and tags: none; the pre-sanitization `v1.0.0` release and tag were backed up and removed.
 - Root software license: Apache License 2.0.
 - Original documentation and sanitized whitepaper license: CC BY 4.0.
 - Branch protection: unavailable while the repository remains private on the current GitHub plan; configure it after publication or a plan change.
 
 ## Security and Privacy Results
 
-- `gitleaks 8.28.0 git --redact --log-opts=--all`: 60 commits scanned, no leaks found.
+- Gitleaks full-history CI on the sanitized pull request: passed.
 - Manual history signature scan: no credential signatures; only synthetic macOS-style user-path fixtures were found.
 - `govulncheck 1.1.4 ./...`: zero reachable vulnerabilities.
 - Current tracked-artifact and text boundary check: passed.
 - Private DOCX/XMind materials were reviewed and found to contain real identities, equipment, capacities, business structures, and directory information; they are excluded from the public-ready tree.
-- Historical commits include a workstation-local `.local` author email; future repository-local commits now use the existing GitHub noreply project identity.
+- Every pushable branch was rewritten to remove the three private source paths and workstation-local author identity.
+- A fresh mirror clone verifies that branch and tag histories contain none of those paths or the local identity.
+- Four GitHub pull-request refs were affected by the rewrite; read-only PR refs still make the old objects reachable until GitHub completes server-side removal.
 
 Automated scans do not establish copyright ownership, consent, or redistribution rights.
 
@@ -47,13 +49,14 @@ Automated scans do not establish copyright ownership, consent, or redistribution
 - A sanitized, source-independent Markdown whitepaper with no real identities, paths, devices, capacities, or production examples.
 - Owner-only repository-external backup of the three private source files, followed by removal from the current tree.
 - A public-boundary rule that rejects tracked DOCX and XMind files.
+- A complete private mirror, verified Git bundle, and checksum-verified copy of every old release asset.
+- Rewritten and force-updated active branches, with the old release and tag removed.
+- A private GitHub Support request draft containing the affected PR count and first changed commit mapping.
 
-## Blocking Owner Decisions
+## Remaining Publication Blockers
 
-1. Create and verify a private offline bundle, then rewrite public branches and tags to remove the DOCX/XMind files from all reachable history.
-2. Remove or replace the existing `v1.0.0` GitHub release artifacts, which were built before the sanitized boundary; do not reuse them as the public launch.
-3. Decide whether the workstation-local author email in existing commits is acceptable or should be rewritten during the same migration.
-4. Choose a monitored private contact channel before adding a Code of Conduct.
-5. Select a fresh first public release version; do not move or reuse `v1.0.0`.
+1. Submit the prepared private request to GitHub Support and obtain confirmation that affected PR refs, cached views, and old objects were purged.
+2. Choose a monitored private contact channel before adding a Code of Conduct.
+3. Select a fresh first public release version; do not recreate or reuse `v1.0.0`.
 
 Repository visibility must remain private until these blockers are resolved.
