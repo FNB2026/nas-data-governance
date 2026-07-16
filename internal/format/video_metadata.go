@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 const moovReadLimit = 4 << 20

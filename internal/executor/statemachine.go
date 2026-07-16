@@ -3,7 +3,7 @@ package executor
 import (
 	"fmt"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // ErrIllegalTransition is returned when a state transition is not allowed
@@ -33,6 +33,7 @@ var legalTransitions = map[domain.PlanState]map[domain.PlanState]bool{
 	},
 	domain.PlanStaleChecked: {
 		domain.PlanExecuting: true,
+		domain.PlanApproved:  true, // pre-execution journal failure; safe to retry
 	},
 	domain.PlanExecuting: {
 		domain.PlanVerified:   true,

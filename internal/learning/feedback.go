@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // FeedbackStats is the output of one feedback learning run. It analyzes
@@ -52,8 +52,8 @@ type WeightAdjustment struct {
 type ConfidenceDowngrade struct {
 	RuleID            string  `json:"rule_id"`
 	ObservedRejection float64 `json:"observed_rejection"`
-	Samples          int     `json:"samples"`
-	SuggestedDelta   float64 `json:"suggested_delta"` // negative, magnitude <= 0.2
+	Samples           int     `json:"samples"`
+	SuggestedDelta    float64 `json:"suggested_delta"` // negative, magnitude <= 0.2
 }
 
 // FeedbackOptions controls feedback learning.
@@ -101,10 +101,10 @@ const minPlansForAdjustment = 5
 //     get a confidence downgrade suggestion.
 //
 // What it does NOT do:
-//  - Never reads action.Path / RetainPath for learning. Only score
-//    components and action types are used (K-009).
-//  - Never applies adjustments directly. Output is a draft for human
-//    review via the `rules` subcommand.
+//   - Never reads action.Path / RetainPath for learning. Only score
+//     components and action types are used (K-009).
+//   - Never applies adjustments directly. Output is a draft for human
+//     review via the `rules` subcommand.
 func LearnFromFeedback(ctx context.Context, st store.Store, opts FeedbackOptions) (*FeedbackStats, error) {
 	opts = opts.withDefaults()
 

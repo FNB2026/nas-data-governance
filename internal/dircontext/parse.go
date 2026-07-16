@@ -3,7 +3,7 @@ package dircontext
 import (
 	"strings"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // parseDirectorySignal parses a minimal YAML-like rule definition into a

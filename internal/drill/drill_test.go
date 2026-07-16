@@ -2,10 +2,11 @@
 // 目录中进行，绝不触及真实 NAS 数据，遵循 AGENTS rule 1「默认只读」。
 //
 // 演练覆盖四个场景：
-//   A. 崩溃恢复：构造 EXECUTING plan + journal，调用 Recover() 验证回滚/重置
-//   B. 中断续扫：模拟 Ctrl+C 中断，--resume 续扫，验证断点+哈希复用
-//   C. stale 检测：批准后修改源文件，验证执行被拦回 DRAFT
-//   D. 权限错误：000 权限子目录，验证 scanner 不终止、错误进 Stats
+//
+//	A. 崩溃恢复：构造 EXECUTING plan + journal，调用 Recover() 验证回滚/重置
+//	B. 中断续扫：模拟 Ctrl+C 中断，--resume 续扫，验证断点+哈希复用
+//	C. stale 检测：批准后修改源文件，验证执行被拦回 DRAFT
+//	D. 权限错误：000 权限子目录，验证 scanner 不终止、错误进 Stats
 //
 // 通过 TestDrill_All 入口串行执行四个场景，并在结束后把演练报告
 // 写入 var/reports/drill-<timestamp>.md（项目自有目录，非 NAS 数据）。
@@ -24,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/executor"
-	"nas-data-governance/internal/fingerprint"
-	"nas-data-governance/internal/scanner"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/executor"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // reportBuf 在测试过程中收集各场景的演练结果，最后由 TestDrill_All
@@ -39,11 +40,11 @@ var reportBuf struct {
 }
 
 type scenarioResult struct {
-	Name      string
-	Pass      bool
-	Detail    string
-	Evidence  []string
-	Duration  time.Duration
+	Name     string
+	Pass     bool
+	Detail   string
+	Evidence []string
+	Duration time.Duration
 }
 
 func record(r scenarioResult) {
@@ -112,9 +113,9 @@ func writeFile(t *testing.T, path, content string) string {
 
 // TestDrill_A_CrashRecovery 模拟崩溃：plan 处于 EXECUTING，journal 有
 // 一个 done 条目（文件已被隔离）。Recover() 应当：
-//   1. 把隔离文件移回原路径（回滚）
-//   2. 把 plan 状态置为 ROLLED_BACK
-//   3. 不残留任何隔离区文件
+//  1. 把隔离文件移回原路径（回滚）
+//  2. 把 plan 状态置为 ROLLED_BACK
+//  3. 不残留任何隔离区文件
 //
 // 同时验证「无 done 条目」分支：plan 应被重置为 APPROVED。
 func TestDrill_A_CrashRecovery(t *testing.T) {
@@ -265,10 +266,10 @@ func TestDrill_A_CrashRecovery(t *testing.T) {
 // =====================================================================
 
 // TestDrill_B_InterruptedResume 模拟 Ctrl+C 中断后续扫：
-//   1. 构造较大数据集
-//   2. 用 context.WithCancel 在中途取消（模拟中断）
-//   3. 第二次 scan 用 --resume 语义（ResumePath）
-//   4. 验证：两次扫描合并后文件数等于全集，且未变化文件哈希被复用
+//  1. 构造较大数据集
+//  2. 用 context.WithCancel 在中途取消（模拟中断）
+//  3. 第二次 scan 用 --resume 语义（ResumePath）
+//  4. 验证：两次扫描合并后文件数等于全集，且未变化文件哈希被复用
 func TestDrill_B_InterruptedResume(t *testing.T) {
 	start := time.Now()
 	record(scenarioResult{Name: "B. 中断续扫", Pass: false})

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // versionSuffix captures the trailing token that marks a file as a version

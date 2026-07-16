@@ -36,7 +36,7 @@
 
 本里程碑把 M1–M5 的功能基座推向可在真实 NAS 上运行的生产形态，不改变"默认只读、保护优先"的安全边界。
 
-- P0-1 持久化执行日志与崩溃恢复（commit `633c9ac`）：新增 `execution_journal` 表（schema 003），记录每个文件系统动作的生命周期（pending→done/failed→rolled_back）与实际目标路径；`Executor` 注入 `Journal` 接口，`BeginJournal/MarkJournalDone/MarkJournalFailed/MarkJournalRolledBack` 在每个动作前后落盘；`Recover()` 在启动时扫描未完成的动作，对已完成但未校验的动作回滚、对中断的计划重置为 APPROVED；CLI `recover --db` 子命令。9 个新测试覆盖日志幂等、崩溃恢复场景与 nil journal 向后兼容。
+- P0-1 持久化执行日志与崩溃恢复（commit `633c9ac`，开源前进一步 fail-closed）：新增 `execution_journal` 表（schema 003），记录每个文件系统动作的生命周期（pending→done/failed→rolled_back）与实际目标路径；非 dry-run CLI 强制要求 SQLite `--db`，`BeginJournal` 或 `MarkJournalDone` 失败即停止并在需要时回滚，禁止无持久化日志继续写文件；`Recover()` 在启动时扫描未完成动作。测试覆盖日志幂等、崩溃恢复以及 Journal 失败不写入/回滚场景。
 - P0-2 增量扫描与断点续扫（commit `c7a1ddc`）：新增 `scan_checkpoints` 表（schema 004）与 `file_instances.file_status` 列（active/missing）；扫描前从 DB 加载 `ListFileMetadata` 缓存，比较 size+mtime+inode 三元组复用既有 SHA-256（哈希缓存复用）；自定义 BFS 遍历替代 `filepath.WalkDir`，每轮迭代检查 `ctx.Err()` 支持优雅中断；单目录 `os.ReadDir` 失败记入 `Stats.Errors` 并 continue，不终止整个扫描；扫描后 `MarkFilesMissing` 标记已删除文件为 missing（非物理删除）；`ResumePath` 选项支持断点续扫。store 层 6 个测试 + scanner 层 11 个测试。
 - P0-3 真实 NAS 故障演练（commit `e3363d9`）：在 `t.TempDir()` 隔离环境中跑 4 个只读场景（崩溃恢复、中断续扫、stale 检测、权限错误容忍）；报告通过 `sanitize()` 函数脱敏，把 `os.TempDir()` 前缀替换为 `<tmp>`，不暴露机器 hash 与绝对路径；placeholder 死代码清理。
 - P1-4 任务队列与资源控制（commit `b1667d2`）：新增 `internal/runner` worker pool，semaphore 通道控制并发，`Submit/Wait/Run` API，context-aware，单失败不阻塞其他任务；files 切片 mutex 保护，计数器用 atomic；`domain.TaskState` 枚举（queued/running/completed/failed/cancelled）+ store `UpdateTaskState`；CLI `scan --workers N`、`analyze --workers N`。8 个测试。

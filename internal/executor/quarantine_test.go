@@ -92,9 +92,50 @@ func TestValidateRejectsUnknownStructure(t *testing.T) {
 
 func TestValidateAcceptsKnownStructures(t *testing.T) {
 	for _, s := range []QuarantineStructure{QuarantineFlat, QuarantineDated} {
-		c := QuarantineConfig{Root: "/var/q", Structure: s, SourceRoots: []string{"/data"}}
+		base := t.TempDir()
+		qRoot := filepath.Join(base, "q")
+		sourceRoot := filepath.Join(base, "data")
+		if err := os.Mkdir(qRoot, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(sourceRoot, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		c := QuarantineConfig{Root: qRoot, Structure: s, SourceRoots: []string{sourceRoot}}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("structure %q: %v", s, err)
 		}
+	}
+}
+
+func TestValidateRejectsOverlappingRoots(t *testing.T) {
+	sourceRoot := t.TempDir()
+	qRoot := filepath.Join(sourceRoot, "quarantine")
+	if err := os.Mkdir(qRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := QuarantineConfig{Root: qRoot, Structure: QuarantineFlat, SourceRoots: []string{sourceRoot}}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected overlapping roots to be rejected")
+	}
+}
+
+func TestValidateRejectsRootSymlink(t *testing.T) {
+	base := t.TempDir()
+	sourceRoot := filepath.Join(base, "source")
+	realQ := filepath.Join(base, "real-q")
+	qLink := filepath.Join(base, "q")
+	if err := os.Mkdir(sourceRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(realQ, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realQ, qLink); err != nil {
+		t.Fatal(err)
+	}
+	c := QuarantineConfig{Root: qLink, Structure: QuarantineFlat, SourceRoots: []string{sourceRoot}}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected quarantine symlink to be rejected")
 	}
 }

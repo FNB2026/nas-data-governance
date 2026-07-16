@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // pathSegmentDepth is how many path segments (from the root) are used as a

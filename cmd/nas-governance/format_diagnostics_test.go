@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/formatdiag"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/formatdiag"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func TestDiagnoseFormatsWritesPrivateOfflineReport(t *testing.T) {

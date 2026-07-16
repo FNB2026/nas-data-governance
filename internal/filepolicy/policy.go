@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 type Policy struct {

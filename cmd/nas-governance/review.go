@@ -13,20 +13,22 @@ import (
 	"syscall"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/merge"
-	idx "nas-data-governance/internal/index"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	idx "github.com/FNB2026/nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/merge"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // runReview 是 P1-5 人工复核管理界面的入口。它是一个交互式 CLI，
 // 支持四类复核对象：plans / rules / merges / conflicts。
 //
 // 用法：
-//   nas-governance review plans   --db ./var/governance.db [--plan-file ./var/plan.json]
-//   nas-governance review rules   --db ./var/governance.db
-//   nas-governance review merges  --index ./var/index.jsonl [--out ./var/plan.json]
-//   nas-governance review conflicts --db ./var/governance.db
+//
+//	nas-governance review plans   --db ./var/governance.db [--plan-file ./var/plan.json]
+//	nas-governance review rules   --db ./var/governance.db
+//	nas-governance review merges  --index ./var/index.jsonl [--out ./var/plan.json]
+//	nas-governance review conflicts --db ./var/governance.db
 //
 // 所有操作都是只读 + 显式确认，不自动执行任何文件系统动作。
 func runReview(args []string) error {
@@ -147,10 +149,7 @@ func runReviewPlans(args []string) error {
 	}
 
 	// 写入已批准的 plan 文件
-	if err := os.MkdirAll(filepath.Dir(*approvedOut), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(*approvedOut)
+	f, err := privatefs.Create(*approvedOut)
 	if err != nil {
 		return err
 	}
@@ -361,10 +360,7 @@ func runReviewMerges(args []string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(*out)
+	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // RecoveryStore is the store subset needed by Recover(). It extends
@@ -23,16 +23,16 @@ type RecoveryAction string
 
 const (
 	RecoveryRolledBack      RecoveryAction = "rolled_back"       // done actions were undone
-	RecoveryResetToApproved RecoveryAction = "reset_to_approved"  // nothing was done, safe to re-run
-	RecoverySkipped         RecoveryAction = "skipped"            // not in EXECUTING state
+	RecoveryResetToApproved RecoveryAction = "reset_to_approved" // nothing was done, safe to re-run
+	RecoverySkipped         RecoveryAction = "skipped"           // not in EXECUTING state
 )
 
 // RecoveryResult captures the outcome of recovering one plan.
 type RecoveryResult struct {
-	PlanID     string          `json:"plan_id"`
+	PlanID     string         `json:"plan_id"`
 	Action     RecoveryAction `json:"action"`
-	RolledBack int             `json:"rolled_back"`
-	Errors     []string        `json:"errors,omitempty"`
+	RolledBack int            `json:"rolled_back"`
+	Errors     []string       `json:"errors,omitempty"`
 }
 
 // Recover scans for plans left in EXECUTING state (typically after a

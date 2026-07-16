@@ -14,7 +14,9 @@
 
 用于内部研究的原始 DOCX、XMind、真实目录树和扫描资料不属于公开仓库，也不受上述文档许可授权。
 
-## 快速开始
+## 快速开始：安全体验
+
+以下命令只读取样本数据并生成项目私有产物，不执行移动、隔离、重命名或删除动作。首次使用请只针对复制出来的合成测试目录。
 
 ```bash
 make test
@@ -36,14 +38,31 @@ make build
 ./bin/nas-governance merge --index ./var/index.jsonl
 ./bin/nas-governance plan --index ./var/index.jsonl --out ./var/plan.json
 ./bin/nas-governance review plans --plan ./var/plan.json
-./bin/nas-governance approve --plan ./var/plan.json --out ./var/approved.json --all
-./bin/nas-governance execute --plan ./var/approved.json --quarantine /path/to/quarantine --source-root /path/to/data --out ./var/audit.json
-./bin/nas-governance recover --db ./var/governance.db
-./bin/nas-governance learn --db ./var/governance.db --apply
-./bin/nas-governance learn --source=corpus --corpus-dir ./var/corpus --apply
-./bin/nas-governance learn --source=feedback --db ./var/governance.db --apply
 ./bin/nas-governance review rules --db ./var/governance.db
+./bin/nas-governance version
 ```
+
+## 高级风险操作
+
+文件写操作不属于快速开始。执行前必须同时满足：已有独立备份；先在复制的测试目录验证；隔离区位于所有源根目录之外；人工逐项批准计划；持久化 SQLite Journal 可用。首次使用不推荐 `approve --all`。
+
+先批准明确选中的计划，并执行完全只读的预检：
+
+```bash
+./bin/nas-governance approve --plan ./var/plan.json --out ./var/approved.json --plan-id PLAN_ID
+./bin/nas-governance execute --dry-run --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --out ./var/audit-dry-run.json
+```
+
+人工复核 dry-run 审计结果后，真实执行必须提供 `--db`。Journal 初始化或动作完成记录失败时，执行器会在下一次文件写入前停止并回滚已完成动作：
+
+```bash
+./bin/nas-governance execute --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --db ./var/governance.db --out ./var/audit.json
+./bin/nas-governance recover --db ./var/governance.db
+```
+
+## 支持平台
+
+发布包覆盖 `darwin/arm64`、`darwin/amd64`、`linux/arm64` 和 `linux/amd64`。其他平台可从源码构建，但不属于首个公开版本的发布矩阵。
 
 扫描默认不跟随符号链接，不跨挂载点，不读取文件内容之外的外部服务，不上传任何数据。完整哈希采用 SHA-256；文件先按大小分组，只有潜在重复项才计算完整哈希。增量扫描复用 size+mtime+inode 三元组匹配的既有哈希，断点续扫通过 `scan_checkpoints` 表记录进度，已删除文件标记为 missing 而非物理删除。
 
@@ -98,7 +117,7 @@ docs/adr/                 架构决策记录
 ## 当前边界
 
 - 已有：只读扫描（含增量、断点续扫、哈希有限重试与失败补扫）、JSONL/SQLite 索引、目录语境、格式分析、资产关系、目录合并建议、草案计划、安全执行器（含执行日志与崩溃恢复）、L1–L4 规则学习、人工复核 CLI（plans/rules/merges/conflicts）。`scan --db` 可直接写入后续 `analyze --db` 所需的文件和目录语境记录。
-- 执行前置条件：计划须处于 `APPROVED`；每个写操作必须位于显式配置的 `SourceRoots` 内；根目录内任意符号链接会被拒绝；执行失败不会把路径写入审计结果；执行动作通过 `execution_journal` 表落盘，崩溃后 `recover` 可回滚未完成的动作。
+- 执行前置条件：计划须处于 `APPROVED`；非 dry-run 必须提供 SQLite `--db`；每个写操作必须位于显式配置的 `SourceRoots` 内；源根目录与隔离根目录必须是互不重叠的真实目录且不能是符号链接；执行失败不会把路径写入普通日志；执行动作通过 `execution_journal` 表同步落盘，Journal 失败即停止，崩溃后 `recover` 可回滚未完成的动作。
 - 并发控制：`scan`/`analyze` 支持 `--workers N`，由 `internal/runner` 的 semaphore 通道约束并发度；`analyze` 支持断点复用、unknown/媒体元数据定向刷新、SQLite 分批持久化和脱敏聚合进度。
 - 外部 AI 继续关闭；L2/L3/L4 学习只生成 `status=draft` 规则草案，priority≤60（K-008），不覆盖已审批规则。
 - 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；跨备份域自动去重。

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // makeFile 创建一个用于测试的 FileInstance。
@@ -104,14 +104,23 @@ func TestWriteEmptyList(t *testing.T) {
 	}
 }
 
-// TestWriteCreatesParentDir 验证 Write 不会创建父目录（os.Create 要求父目录存在）。
-func TestWriteMissingParentDir(t *testing.T) {
+// TestWriteCreatesPrivateParentDir verifies sensitive indexes create an
+// owner-only parent directory and file instead of relying on umask.
+func TestWriteCreatesPrivateParentDir(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nonexistent", "index.jsonl")
+	parent := filepath.Join(dir, "nonexistent")
+	path := filepath.Join(parent, "index.jsonl")
 
-	err := Write(path, []domain.FileInstance{makeFile("/a", "x", 1)})
-	if err == nil {
-		t.Fatal("expected error for missing parent directory")
+	if err := Write(path, []domain.FileInstance{makeFile("/a", "x", 1)}); err != nil {
+		t.Fatal(err)
+	}
+	parentInfo, _ := os.Stat(parent)
+	fileInfo, _ := os.Stat(path)
+	if got := parentInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("parent mode = %o, want 700", got)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("index mode = %o, want 600", got)
 	}
 }
 

@@ -10,32 +10,62 @@ import (
 	"strings"
 	"time"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
 
 	_ "modernc.org/sqlite"
 )
 
 // SQLiteStore implements Store on top of a SQLite database file.
 type SQLiteStore struct {
-	db *sql.DB
+	db            *sql.DB
+	path          string
+	secureOnClose bool
 }
 
 // Open creates (or opens) a SQLite database at path and applies migrations.
 // The database is project-owned; it never reads or writes user files.
 func Open(ctx context.Context, path string) (*SQLiteStore, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve path: %w", err)
+	}
+	if strings.ContainsAny(absPath, "?#") {
+		return nil, fmt.Errorf("store: path contains unsupported URI delimiter")
+	}
+	dbDir := filepath.Dir(absPath)
+	if filepath.Base(dbDir) == "var" {
+		err = privatefs.SecureDirectory(dbDir)
+	} else {
+		err = privatefs.EnsureDirectory(dbDir)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: secure directory: %w", err)
+	}
+	if _, err := os.Lstat(absPath); err == nil {
+		if err := privatefs.SecureFile(absPath); err != nil {
+			return nil, fmt.Errorf("store: secure database: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("store: inspect database: %w", err)
+	}
 	// _txlock=immediate makes write transactions acquire the write lock up
 	// front, avoiding "database is locked" mid-transaction. foreign_keys &
 	// busy_timeout make the behavior safer under concurrent readers.
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_busy_timeout=5000", path)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_busy_timeout=5000", filepath.ToSlash(absPath))
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
 	db.SetMaxOpenConns(1) // SQLite serializes writes; one conn avoids lock storms.
-	s := &SQLiteStore{db: db}
+	s := &SQLiteStore{db: db, path: absPath, secureOnClose: true}
 	if err := s.Init(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if err := privatefs.SecureSQLiteFiles(absPath); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: secure sqlite files: %w", err)
 	}
 	return s, nil
 }
@@ -70,10 +100,18 @@ func OpenReadOnly(ctx context.Context, path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open read-only: %w", err)
 	}
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{db: db, path: absPath}, nil
 }
 
-func (s *SQLiteStore) Close() error { return s.db.Close() }
+func (s *SQLiteStore) Close() error {
+	if err := s.db.Close(); err != nil {
+		return err
+	}
+	if s.secureOnClose {
+		return privatefs.SecureSQLiteFiles(s.path)
+	}
+	return nil
+}
 
 // ---------------- storages ----------------
 

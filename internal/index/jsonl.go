@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"os"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
 )
 
 func Write(path string, files []domain.FileInstance) error {
-	f, err := os.Create(path)
+	f, err := privatefs.Create(path)
 	if err != nil {
 		return err
 	}

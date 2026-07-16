@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"nas-data-governance/internal/formatdiag"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/formatdiag"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func runDiagnoseFormats(args []string) error {
@@ -55,20 +56,13 @@ func runDiagnoseFormats(args []string) error {
 }
 
 func writePrivateJSON(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("private report output must not be a symbolic link")
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, privateFileMode)
+	f, err := privatefs.Create(path)
 	if err != nil {
-		return err
-	}
-	if err := f.Chmod(privateFileMode); err != nil {
-		_ = f.Close()
 		return err
 	}
 	enc := json.NewEncoder(f)

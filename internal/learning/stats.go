@@ -12,18 +12,18 @@ import (
 	"sort"
 	"strings"
 
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // DirNameStat records how frequently a directory name appears across the
 // indexed file tree. It is the raw material for generating learned rules.
 type DirNameStat struct {
-	Name         string            `json:"name"`
-	DirCount     int               `json:"dir_count"`     // unique parent paths containing this name
-	FileCount    int               `json:"file_count"`     // total files in directories with this name
-	CoOccurrence map[string]int    `json:"co_occurrence"`  // builtin term → co-occurrence count
+	Name          string               `json:"name"`
+	DirCount      int                  `json:"dir_count"`     // unique parent paths containing this name
+	FileCount     int                  `json:"file_count"`    // total files in directories with this name
+	CoOccurrence  map[string]int       `json:"co_occurrence"` // builtin term → co-occurrence count
 	SuggestedRole domain.DirectoryRole `json:"suggested_role"`
 }
 
@@ -36,10 +36,10 @@ type ProjectCodeStat struct {
 // Stats is the output of one learning run. It contains no raw paths or
 // file names — only anonymized directory name frequencies and pattern counts.
 type Stats struct {
-	DirStats     []DirNameStat     `json:"dir_stats"`
-	ProjectCodes []ProjectCodeStat `json:"project_codes"`
-	TotalFiles   int               `json:"total_files"`
-	SensitiveSkipped int           `json:"sensitive_skipped"`
+	DirStats         []DirNameStat     `json:"dir_stats"`
+	ProjectCodes     []ProjectCodeStat `json:"project_codes"`
+	TotalFiles       int               `json:"total_files"`
+	SensitiveSkipped int               `json:"sensitive_skipped"`
 }
 
 // minDirCount is the minimum number of unique parent paths for a directory
@@ -155,7 +155,7 @@ func Learn(ctx context.Context, st store.Store) (*Stats, error) {
 
 	// Convert maps to sorted slices, applying thresholds.
 	stats := &Stats{
-		TotalFiles:      totalFiles,
+		TotalFiles:       totalFiles,
 		SensitiveSkipped: sensitiveSkipped,
 	}
 	for _, s := range dirFreq {

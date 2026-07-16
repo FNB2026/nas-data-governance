@@ -50,7 +50,12 @@ Repository-local Git configuration and rewritten commits use the GitHub noreply 
 - [x] Remove the old `v1.0.0` GitHub Release and tag rather than retagging them.
 - [x] Run `make public-check`, race tests, vet, Govulncheck, Gitleaks, and release packaging successfully.
 - [x] Review third-party dependency licenses and bundle verbatim upstream license texts.
-- [ ] Ask GitHub Support to purge the four affected PR refs, cached views, and unreachable objects; verify completion.
+- [x] Ask GitHub Support to purge the four affected PR refs, cached views, and unreachable objects.
+- [ ] Obtain GitHub Support confirmation and independently verify that the old commit and three private paths are inaccessible.
+- [x] Require a persistent SQLite journal for real execution and stop on journal write failure.
+- [x] Create indexes, plans, audits, diagnostics, and SQLite artifacts with owner-only permissions.
+- [x] Reject symlinked or overlapping source and quarantine roots.
+- [x] Use the canonical public Go module path and portable release checksums.
 - [ ] Add a Code of Conduct after choosing a monitored private conduct-reporting channel.
 - [ ] Enable branch protection, secret scanning, Dependabot alerts, and private vulnerability reporting when repository visibility and plan support them.
 - [ ] Create a fresh release from the public-ready commit; do not present the older private-preparation tag as the public launch baseline.
@@ -61,7 +66,7 @@ Repository-local Git configuration and rewritten commits use the GitHub noreply 
 1. Merge the readiness changes through a reviewed pull request.
 2. Re-run all local and GitHub checks on the exact release commit.
 3. Obtain confirmation that GitHub has purged affected PR refs, cached views, and old objects.
-4. Create a new signed or annotated version tag; do not move `v1.0.0`.
+4. Create a new signed or annotated `v1.1.0-beta.1` tag; do not move `v1.0.0`.
 5. Build release artifacts from the tagged commit and publish matching SHA-256 checksums.
 6. Enable the public repository security and branch settings.
 7. Change visibility last, then verify the anonymous public view.

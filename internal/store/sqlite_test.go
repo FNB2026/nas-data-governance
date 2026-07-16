@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func newTestStore(t *testing.T) *SQLiteStore {
@@ -29,6 +29,35 @@ func TestInitIsIdempotent(t *testing.T) {
 	// IF NOT EXISTS precisely so re-runs are safe.
 	if err := s.Init(context.Background()); err != nil {
 		t.Fatalf("re-init: %v", err)
+	}
+}
+
+func TestOpenTightensDatabasePermissions(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("POSIX mode assertion")
+	}
+	dir := filepath.Join(t.TempDir(), "var")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dir, "governance.db")
+	if err := os.WriteFile(dbPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, _ := os.Stat(dir)
+	dbInfo, _ := os.Stat(dbPath)
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("directory mode = %o, want 700", got)
+	}
+	if got := dbInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("database mode = %o, want 600", got)
 	}
 }
 

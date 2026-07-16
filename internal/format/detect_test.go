@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func writeBytes(t *testing.T, name string, data []byte) string {

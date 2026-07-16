@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // seedTaskWithPlans creates a task and saves the given plans under it.
@@ -30,18 +30,18 @@ func seedTaskWithPlans(t *testing.T, st *store.SQLiteStore, taskID string, plans
 // retainAuth; the other copy's AuthorityLevel is set via otherAuth.
 func makePlan(id string, state domain.PlanState, retainAuth, otherAuth int, evidence []string) domain.OperationPlan {
 	retainScore := domain.RetentionScore{
-		Authority:  retainAuth,
-		Stability:  10,
-		PathDepth:  3,
-		RoleBonus:  0,
-		Total:      retainAuth + 10 + 3,
+		Authority: retainAuth,
+		Stability: 10,
+		PathDepth: 3,
+		RoleBonus: 0,
+		Total:     retainAuth + 10 + 3,
 	}
 	return domain.OperationPlan{
-		ID:           id,
-		State:        state,
+		ID:            id,
+		State:         state,
 		ContentSHA256: strings.Repeat("a", 64),
-		RetainScore:  retainScore,
-		Evidence:     evidence,
+		RetainScore:   retainScore,
+		Evidence:      evidence,
 		Actions: []domain.PlannedAction{
 			{
 				Action:  domain.OperationKeep,
@@ -257,16 +257,16 @@ func TestGenerateFeedbackDrafts_AppliesConfidenceDowngrade(t *testing.T) {
 	ctx := context.Background()
 
 	draftRule := domain.Rule{
-		ID:         "learned-dir-竣工图",
-		Version:    1, Priority: 60, Enabled: true,
+		ID:      "learned-dir-竣工图",
+		Version: 1, Priority: 60, Enabled: true,
 		Source:     domain.RuleSourceLearned,
 		Confidence: 0.8,
 		Status:     domain.RuleDraft,
 		Definition: "match:\n  segment_contains: \"竣工图\"\neffect:\n  role: formal_archive\n  authority: 60",
 	}
 	approvedRule := domain.Rule{
-		ID:         "learned-dir-deliverables",
-		Version:    1, Priority: 60, Enabled: true,
+		ID:      "learned-dir-deliverables",
+		Version: 1, Priority: 60, Enabled: true,
 		Source:     domain.RuleSourceLearned,
 		Confidence: 0.9,
 		Status:     domain.RuleApproved,
@@ -312,8 +312,8 @@ func TestGenerateFeedbackDrafts_PreservesApprovedWeightRules(t *testing.T) {
 	st := newLearnStore(t)
 	ctx := context.Background()
 	approved := domain.Rule{
-		ID:         "learned-weight-authority",
-		Version:    1, Priority: 40, Enabled: true,
+		ID:      "learned-weight-authority",
+		Version: 1, Priority: 40, Enabled: true,
 		Source:     domain.RuleSourceLearned,
 		Confidence: 0.9,
 		Status:     domain.RuleApproved,
@@ -345,8 +345,8 @@ func TestLearnFromFeedback_NoPathsInOutput(t *testing.T) {
 	// Plans with paths in actions (simulating real data).
 	plans := []domain.OperationPlan{
 		{
-			ID:           "p1",
-			State:        domain.PlanApproved,
+			ID:            "p1",
+			State:         domain.PlanApproved,
 			ContentSHA256: strings.Repeat("a", 64),
 			RetainPath:    "/vol/secret/retain.txt",
 			RetainScore:   domain.RetentionScore{Authority: 50, Total: 60},

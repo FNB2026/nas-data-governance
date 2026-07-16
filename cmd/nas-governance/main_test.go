@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/executor"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/executor"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func TestScanErrorSummariesOmitSensitivePaths(t *testing.T) {
@@ -291,9 +291,10 @@ func TestExecuteRejectsMissingRequiredFlags(t *testing.T) {
 	planPath := filepath.Join(tmp, "plan.json")
 	writeJSON(t, planPath, []domain.OperationPlan{})
 	cases := [][]string{
-		{"-plan", planPath},                          // missing quarantine + source-root
-		{"-plan", planPath, "-quarantine", "/q"},     // missing source-root
-		{"-plan", planPath, "-source-root", "/data"}, // missing quarantine
+		{"-plan", planPath},                                               // missing quarantine + source-root
+		{"-plan", planPath, "-quarantine", "/q"},                          // missing source-root
+		{"-plan", planPath, "-source-root", "/data"},                      // missing quarantine
+		{"-plan", planPath, "-quarantine", "/q", "-source-root", "/data"}, // missing mandatory db
 	}
 	for i, args := range cases {
 		if err := runExecute(args); err == nil {
@@ -348,6 +349,13 @@ func TestExecuteDryRunSkipsFilesystem(t *testing.T) {
 	if err := json.NewDecoder(f).Decode(&results); err != nil {
 		t.Fatal(err)
 	}
+	info, err := os.Stat(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("audit output mode=%o, want 600", info.Mode().Perm())
+	}
 	if len(results) != 1 || len(results[0].Steps) < 2 || results[0].Steps[0].Name != "stale_check" || results[0].Steps[1].Name != "dry_run" {
 		t.Fatalf("dry-run must perform read-only preflight: %#v", results)
 	}
@@ -375,7 +383,7 @@ func TestExecuteSkipsNonApprovedPlans(t *testing.T) {
 	auditPath := filepath.Join(tmp, "audit.json")
 	if err := runExecute([]string{
 		"-plan", planPath, "-out", auditPath,
-		"-quarantine", qRoot, "-source-root", dataRoot,
+		"-quarantine", qRoot, "-source-root", dataRoot, "-dry-run",
 	}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}

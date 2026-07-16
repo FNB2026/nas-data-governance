@@ -55,7 +55,7 @@ Automated scans do not establish copyright ownership, consent, or redistribution
 
 ## Remaining Publication Blockers
 
-1. Submit the prepared private request to GitHub Support and obtain confirmation that affected PR refs, cached views, and old objects were purged.
+1. Obtain confirmation on the submitted GitHub Support request that affected PR refs, cached views, and old objects were purged, then independently verify the old paths are inaccessible.
 2. Choose a monitored private contact channel before adding a Code of Conduct.
 3. Select a fresh first public release version; do not recreate or reuse `v1.0.0`.
 

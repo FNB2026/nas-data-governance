@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 var errActionFailed = errors.New("executor: filesystem action failed")
@@ -20,7 +20,8 @@ var errStaleDetected = errors.New("executor: stale plan detected")
 // Journal is the persistence port for crash-recovery logging. The executor
 // writes one entry per filesystem action before/during/after execution; on
 // restart, Recover() reads these entries to decide whether to continue or
-// roll back. A nil journal disables crash recovery (backward compatible).
+// roll back. Production filesystem execution must use a persistent journal;
+// New without a journal is retained for read-only validation and focused tests.
 // store.SQLiteStore satisfies this interface structurally.
 type Journal interface {
 	BeginJournal(ctx context.Context, taskID, planID string, actions []domain.PlannedAction) error
@@ -73,12 +74,12 @@ type Result struct {
 type Executor struct {
 	quarantine QuarantineConfig
 	now        func() time.Time
-	journal    Journal // optional; nil disables crash-recovery logging
+	journal    Journal
 }
 
 // New creates an executor with the given quarantine config. `now` defaults
 // to time.Now but can be overridden in tests for deterministic paths.
-// The returned executor has no journal (backward compatible).
+// The returned executor has no journal and should only be used with Validate.
 func New(q QuarantineConfig) (*Executor, error) {
 	if err := q.Validate(); err != nil {
 		return nil, err
@@ -89,10 +90,13 @@ func New(q QuarantineConfig) (*Executor, error) {
 // NewWithJournal creates an executor with crash-recovery journaling. Every
 // filesystem action is recorded in the journal before execution; on
 // success the actual target path is persisted; on failure/rollback the
-// status is updated. If journal is nil, behaves like New (no journaling).
+// status is updated. A nil journal is rejected.
 func NewWithJournal(q QuarantineConfig, journal Journal) (*Executor, error) {
 	if err := q.Validate(); err != nil {
 		return nil, err
+	}
+	if journal == nil {
+		return nil, fmt.Errorf("executor: journal is required")
 	}
 	return &Executor{quarantine: q, now: time.Now, journal: journal}, nil
 }
@@ -158,8 +162,9 @@ func (e *Executor) Validate(ctx context.Context, plan *domain.OperationPlan) Res
 // When a Journal is configured, each filesystem action is recorded before
 // execution (BeginJournal), marked done with its actual target path on
 // success (MarkJournalDone), and marked rolled back during rollback
-// (MarkJournalRolledBack). Journal errors are non-fatal: execution
-// proceeds with the in-memory rollback chain as fallback.
+// (MarkJournalRolledBack). Journal creation and completion writes are fatal:
+// no filesystem action starts without pending records, and the next action is
+// not allowed until the previous action is durably marked done.
 func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Result {
 	result := Result{PlanID: plan.ID, Steps: make([]AuditStep, 0), FinalState: plan.State}
 
@@ -203,7 +208,11 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 				Name: "journal_begin", Status: StepFailed,
 				Detail: map[string]any{"error_type": "journal_begin_failed"},
 			})
-			// Non-fatal: proceed with in-memory rollback only.
+			result.Err = fmt.Errorf("executor: journal begin failed")
+			result.ErrorType = "journal_begin_failed"
+			_ = Transition(plan, domain.PlanApproved)
+			result.FinalState = plan.State
+			return result
 		}
 	}
 
@@ -240,11 +249,22 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 			result.FinalState = plan.State
 			return result
 		}
-		if e.journal != nil {
-			_ = e.journal.MarkJournalDone(ctx, plan.ID, i, actualTarget)
-		}
 		if rollback != nil {
 			rollbacks = append(rollbacks, rollbackEntry{actionIndex: i, fn: rollback})
+		}
+		if e.journal != nil {
+			if jerr := e.journal.MarkJournalDone(ctx, plan.ID, i, actualTarget); jerr != nil {
+				result.Steps = append(result.Steps, AuditStep{
+					Name: "journal_done", Status: StepFailed,
+					Detail: map[string]any{"error_type": "journal_done_failed", "index": i},
+				})
+				result.Err = fmt.Errorf("executor: journal completion failed")
+				result.ErrorType = "journal_done_failed"
+				e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
+				_ = Transition(plan, domain.PlanRolledBack)
+				result.FinalState = plan.State
+				return result
+			}
 		}
 	}
 
@@ -308,15 +328,25 @@ func rootFor(path string, roots []string) (string, bool) {
 	return "", false
 }
 
-// notSymlinkBelowRoot checks every existing component below an explicitly
-// approved task root. It deliberately does not inspect ancestors of root:
-// platforms may expose safe system aliases there (for example /var on macOS).
+// notSymlinkBelowRoot checks the explicitly approved root itself and every
+// existing component below it. Ancestors above root are intentionally not
+// inspected because platforms may expose safe system aliases there.
 func notSymlinkBelowRoot(path, root string) error {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return errOutOfScope
 	}
 	current := filepath.Clean(root)
+	rootInfo, err := os.Lstat(current)
+	if err != nil {
+		return err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return ErrSymlinkRefused
+	}
+	if !rootInfo.IsDir() {
+		return errOutOfScope
+	}
 	if rel == "." {
 		return nil
 	}
