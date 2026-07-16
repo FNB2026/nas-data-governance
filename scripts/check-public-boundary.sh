@@ -3,9 +3,14 @@ set -euo pipefail
 
 failed=0
 
+if ! grep -qx 'module github.com/FNB2026/nas-data-governance' go.mod; then
+  echo "public-boundary: go.mod must use the canonical public module path" >&2
+  failed=1
+fi
+
 while IFS= read -r -d '' path; do
   case "$path" in
-    .DS_Store|*/.DS_Store|*.db|*.db-shm|*.db-wal|*.sqlite|*.sqlite3|*.jsonl|*.log|*.pem|*.key|*.docx|*.xmind|.env|.env.*|*/.env|*/.env.*|bin/*|dist/*|nas-governance)
+    .DS_Store|*/.DS_Store|*.db|*.db-shm|*.db-wal|*.sqlite|*.sqlite3|*.jsonl|*.log|*.pem|*.key|*.docx|*.xmind|*.pages|*.numbers|*.keynote|.env|.env.*|*/.env|*/.env.*|bin/*|dist/*|nas-governance)
       echo "public-boundary: forbidden tracked artifact: $path" >&2
       failed=1
       ;;

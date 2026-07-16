@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func mt(s string) time.Time {
@@ -200,7 +200,7 @@ func TestPickTargetBothHaveSuffix(t *testing.T) {
 	// 两个目录都有后缀 → 选文件多的
 	names := map[string]map[string]struct{}{
 		"/d/a_backup": {"f1.txt": {}, "f2.txt": {}, "f3.txt": {}},
-		"/d/a_copy":  {"f1.txt": {}, "f2.txt": {}},
+		"/d/a_copy":   {"f1.txt": {}, "f2.txt": {}},
 	}
 	target, _ := pickTarget("/d/a_backup", "/d/a_copy", names)
 	if target != "/d/a_backup" {

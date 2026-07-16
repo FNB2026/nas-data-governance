@@ -20,11 +20,11 @@ import (
 // Runner 管理一组 worker goroutine，限制并发数。
 // 零值不可用，必须用 New 创建。
 type Runner struct {
-	sem  chan struct{}   // semaphore，缓冲大小 = workers
-	wg   sync.WaitGroup  // 等待所有任务完成
-	mu   sync.Mutex      // 保护 errors 和 results
-	errs []error         // 收集任务错误（保序）
-	n    int             // 已提交任务数
+	sem  chan struct{}  // semaphore，缓冲大小 = workers
+	wg   sync.WaitGroup // 等待所有任务完成
+	mu   sync.Mutex     // 保护 errors 和 results
+	errs []error        // 收集任务错误（保序）
+	n    int            // 已提交任务数
 }
 
 // New 创建一个并发数为 workers 的 Runner。

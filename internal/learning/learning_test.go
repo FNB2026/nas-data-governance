@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // newLearnStore opens a fresh SQLite store in a temp dir for learning tests.
@@ -68,8 +68,8 @@ func TestLearn_StatsSensitiveSkipAndThreshold(t *testing.T) {
 		"/vol/归档/PRJ-2024-002/deliverables/b.txt",
 		"/vol/临时/PRJ-2024-001/drafts/c.txt",
 		"/vol/临时/PRJ-2024-002/drafts/d.txt",
-		"/vol/scratch/once.txt",  // below threshold: 1 dir, 1 file
-		"/vol/私密/secret.txt",   // sensitive: skipped entirely
+		"/vol/scratch/once.txt", // below threshold: 1 dir, 1 file
+		"/vol/私密/secret.txt",    // sensitive: skipped entirely
 	}
 	seedFiles(t, st, "local", paths)
 

@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"time"
 
-	"nas-data-governance/internal/pathdiag"
+	"github.com/FNB2026/nas-data-governance/internal/pathdiag"
 )
 
 var legacyHashErrorLine = regexp.MustCompile(`^warning: hash error: open (.*): no such file or directory$`)

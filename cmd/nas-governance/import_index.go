@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
-	idx "nas-data-governance/internal/index"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	idx "github.com/FNB2026/nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func runImportIndex(args []string) error {

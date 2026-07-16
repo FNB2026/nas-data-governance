@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/planner"
-	"nas-data-governance/internal/relations"
-	"nas-data-governance/internal/report"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/planner"
+	"github.com/FNB2026/nas-data-governance/internal/relations"
+	"github.com/FNB2026/nas-data-governance/internal/report"
 )
 
 const RecommendationKeepReview = "KEEP_AND_REVIEW"

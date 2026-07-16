@@ -15,20 +15,27 @@ import (
 	"syscall"
 	"time"
 
-	"nas-data-governance/internal/assets"
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/executor"
-	"nas-data-governance/internal/format"
-	idx "nas-data-governance/internal/index"
-	"nas-data-governance/internal/learning"
-	"nas-data-governance/internal/merge"
-	"nas-data-governance/internal/planner"
-	"nas-data-governance/internal/relations"
-	"nas-data-governance/internal/report"
-	"nas-data-governance/internal/runner"
-	"nas-data-governance/internal/scanner"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/assets"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/executor"
+	"github.com/FNB2026/nas-data-governance/internal/format"
+	idx "github.com/FNB2026/nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/learning"
+	"github.com/FNB2026/nas-data-governance/internal/merge"
+	"github.com/FNB2026/nas-data-governance/internal/planner"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
+	"github.com/FNB2026/nas-data-governance/internal/relations"
+	"github.com/FNB2026/nas-data-governance/internal/report"
+	"github.com/FNB2026/nas-data-governance/internal/runner"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
+	"github.com/FNB2026/nas-data-governance/internal/store"
+)
+
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
 )
 
 func main() {
@@ -76,6 +83,8 @@ func main() {
 		err = runRecover(os.Args[2:])
 	case "review":
 		err = runReview(os.Args[2:])
+	case "version":
+		err = runVersion(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -354,10 +363,7 @@ func runPlan(args []string) error {
 		return err
 	}
 	plans := planner.Build(report.DuplicateGroups(files))
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(*out)
+	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
 	}
@@ -372,7 +378,15 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|retry-hashes|import-index|duplicates|plan|approve|execute|analyze|diagnose-formats|diagnose-governance|diagnose-paths|diagnose-merges|group|relations|merge|learn|rules|recover|review> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|retry-hashes|import-index|duplicates|plan|approve|execute|analyze|diagnose-formats|diagnose-governance|diagnose-paths|diagnose-merges|group|relations|merge|learn|rules|recover|review|version> [options]")
+}
+
+func runVersion(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("version does not accept arguments")
+	}
+	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", version, commit, buildTime)
+	return nil
 }
 
 // ---- approve ----
@@ -419,10 +433,7 @@ func runApprove(args []string) error {
 	if len(approved) == 0 {
 		return fmt.Errorf("no plans matched the selection")
 	}
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(*out)
+	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
 	}
@@ -445,7 +456,7 @@ func runExecute(args []string) error {
 	quarantineRoot := fs.String("quarantine", "", "quarantine root directory (absolute)")
 	var sourceRoots stringList
 	fs.Var(&sourceRoots, "source-root", "approved task root (repeatable, absolute)")
-	dbPath := fs.String("db", "", "SQLite database for audit logs (optional)")
+	dbPath := fs.String("db", "", "SQLite database for mandatory execution journal")
 	dryRun := fs.Bool("dry-run", false, "validate plans without executing filesystem actions")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -456,13 +467,16 @@ func runExecute(args []string) error {
 	if len(sourceRoots) == 0 {
 		return fmt.Errorf("--source-root is required (at least one)")
 	}
+	if !*dryRun && *dbPath == "" {
+		return fmt.Errorf("--db is required for non-dry-run execution")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	plans, err := readPlans(*planPath)
 	if err != nil {
 		return err
 	}
-	// Optional SQLite store for audit log persistence.
+	// SQLite is mandatory for real execution and optional for read-only dry-run.
 	var st *store.SQLiteStore
 	if *dbPath != "" {
 		st, err = store.Open(ctx, *dbPath)
@@ -490,10 +504,10 @@ func runExecute(args []string) error {
 		Structure:   executor.QuarantineFlat,
 		SourceRoots: sourceRoots,
 	}
-	// When a database is available, enable crash-recovery journaling
-	// so execution can be resumed or rolled back after a crash.
+	// Real execution is fail-closed behind the persistent journal. Dry-run may
+	// validate without a database because it performs no filesystem writes.
 	var exec *executor.Executor
-	if st != nil {
+	if !*dryRun {
 		exec, err = executor.NewWithJournal(qCfg, st)
 	} else {
 		exec, err = executor.New(qCfg)
@@ -536,10 +550,7 @@ func runExecute(args []string) error {
 			persistAudit(ctx, st, result)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(*out)
+	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
 	}
@@ -767,15 +778,8 @@ func runAnalyze(args []string) error {
 		return fmt.Errorf("analysis incomplete")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, privateFileMode)
+	f, err := privatefs.Create(*out)
 	if err != nil {
-		return err
-	}
-	if err := f.Chmod(privateFileMode); err != nil {
-		_ = f.Close()
 		return err
 	}
 	defer f.Close()
@@ -1058,10 +1062,7 @@ func runLearnCorpus(args []string, dbPath, corpusDir, outPath string, apply bool
 
 // writeJSONFile writes v as indented JSON to path, creating parent dirs.
 func writeJSONFile(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
+	f, err := privatefs.Create(path)
 	if err != nil {
 		return err
 	}
@@ -1296,7 +1297,7 @@ func runRecover(args []string) error {
 
 	enc := json.NewEncoder(os.Stdout)
 	if *out != "" {
-		f, err := os.Create(*out)
+		f, err := privatefs.Create(*out)
 		if err != nil {
 			return err
 		}

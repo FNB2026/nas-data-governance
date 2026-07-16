@@ -12,7 +12,7 @@ import (
 	"io"
 	"os"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // headerSize is the maximum number of bytes read from a file for detection.

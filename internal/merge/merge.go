@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // nameOverlapThreshold is the minimum Jaccard overlap of file-name sets

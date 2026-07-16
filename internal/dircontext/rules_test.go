@@ -3,7 +3,7 @@ package dircontext
 import (
 	"testing"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func TestBuiltinRulesUnchanged(t *testing.T) {

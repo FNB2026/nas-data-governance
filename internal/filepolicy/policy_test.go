@@ -3,7 +3,7 @@ package filepolicy
 import (
 	"testing"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func TestApplyClassifiesProtectedFileRoles(t *testing.T) {

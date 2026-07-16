@@ -12,7 +12,7 @@
 
 ## 后果
 
-- 执行器注入 `Journal` 接口，`BeginJournal/MarkJournalDone/MarkJournalFailed/MarkJournalRolledBack` 在每个动作前后同步落盘；nil journal 保持向后兼容（测试可用）。
+- 执行器注入 `Journal` 接口，`BeginJournal/MarkJournalDone/MarkJournalFailed/MarkJournalRolledBack` 在每个动作前后同步落盘；非 dry-run CLI 强制要求 SQLite `--db`。`BeginJournal` 或 `MarkJournalDone` 失败即停止，后者会先回滚已完成动作，禁止以内存回滚链代替持久化审计继续执行。
 - `Recover()` 是只读分析 + 必要时回滚，不产生新动作；回滚失败的动作标记为 failed，进入人工复核。
 - 日志记录动作 ID、计划 ID、操作类型、状态与目标路径；不记录文件内容、哈希或敏感路径片段（遵循 AGENTS.md 审计不泄露路径）。
 - 增量扫描（P0-2）与断点续扫独立于此 ADR，分别由 `scan_checkpoints` 表和 `file_instances.file_status` 列管理。

@@ -1,6 +1,6 @@
 package report
 
-import "nas-data-governance/internal/domain"
+import "github.com/FNB2026/nas-data-governance/internal/domain"
 
 func DuplicateGroups(files []domain.FileInstance) []domain.DuplicateGroup {
 	byHash := map[string][]domain.FileInstance{}

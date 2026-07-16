@@ -3,7 +3,7 @@ package dircontext
 import (
 	"sync"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // maxLearnedPriority caps the priority of learned rules. Per K-008, learned

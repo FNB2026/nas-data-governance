@@ -16,9 +16,9 @@ import (
 
 	"github.com/dslipak/pdf"
 
-	"nas-data-governance/internal/dircontext"
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/dircontext"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // CorpusStats is the output of one corpus learning run. It holds candidate
@@ -43,9 +43,9 @@ type CorpusStats struct {
 // CorpusTerm is one extracted candidate term with its frequency and the
 // documents it appeared in (by basename, not full path — K-009).
 type CorpusTerm struct {
-	Term   string `json:"term"`
-	Count  int    `json:"count"`
-	DocSources []string `json:"doc_sources,omitempty"`
+	Term          string               `json:"term"`
+	Count         int                  `json:"count"`
+	DocSources    []string             `json:"doc_sources,omitempty"`
 	SuggestedRole domain.DirectoryRole `json:"suggested_role,omitempty"`
 }
 

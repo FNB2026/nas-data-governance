@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	idx "nas-data-governance/internal/index"
-	"nas-data-governance/internal/merge"
+	idx "github.com/FNB2026/nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/merge"
 )
 
 func runDiagnoseMerges(args []string) error {

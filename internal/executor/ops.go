@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"nas-data-governance/internal/fingerprint"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
 )
 
 // ErrHashMismatch is returned by VerifyFile when the computed SHA-256 does

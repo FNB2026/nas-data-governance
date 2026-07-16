@@ -78,9 +78,9 @@ func ResolveCollision(nominal string) (string, error) {
 	return "", fmt.Errorf("executor: could not resolve collision for %q after 10000 attempts", base)
 }
 
-// Validate checks that the quarantine root is configured and absolute.
-// It does not verify the directory exists on disk — that is the caller's
-// responsibility at execution time, not at plan-review time.
+// Validate checks that all configured roots are existing real directories and
+// that source and quarantine trees cannot overlap. This prevents quarantined
+// files from being scanned back into the task root and refuses root symlinks.
 func (c QuarantineConfig) Validate() error {
 	if c.Root == "" {
 		return fmt.Errorf("executor: quarantine root is empty")
@@ -91,9 +91,25 @@ func (c QuarantineConfig) Validate() error {
 	if len(c.SourceRoots) == 0 {
 		return fmt.Errorf("executor: at least one source root is required")
 	}
+	quarantineRoot := filepath.Clean(c.Root)
+	if err := validateRealDirectory(quarantineRoot, "quarantine root"); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(c.SourceRoots))
 	for _, root := range c.SourceRoots {
 		if root == "" || !filepath.IsAbs(root) {
 			return fmt.Errorf("executor: source roots must be absolute")
+		}
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			return fmt.Errorf("executor: duplicate source root")
+		}
+		seen[root] = struct{}{}
+		if err := validateRealDirectory(root, "source root"); err != nil {
+			return err
+		}
+		if pathsOverlap(root, quarantineRoot) {
+			return fmt.Errorf("executor: quarantine and source roots must not overlap")
 		}
 	}
 	switch c.Structure {
@@ -102,4 +118,29 @@ func (c QuarantineConfig) Validate() error {
 	default:
 		return fmt.Errorf("executor: unknown quarantine structure %q", c.Structure)
 	}
+}
+
+func validateRealDirectory(path, label string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("executor: inspect %s: %w", label, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("executor: %s must not be a symbolic link", label)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("executor: %s must be a directory", label)
+	}
+	return nil
+}
+
+func pathsOverlap(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	return pathContains(a, b) || pathContains(b, a)
+}
+
+func pathContains(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }

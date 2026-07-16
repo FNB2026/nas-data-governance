@@ -1,11 +1,14 @@
 .PHONY: build test fmt vet public-check release-check release clean-dist
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 DIST_DIR ?= dist
+LDFLAGS = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
 
 build:
 	mkdir -p bin
-	go build -o bin/nas-governance ./cmd/nas-governance
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/nas-governance ./cmd/nas-governance
 
 test:
 	go test ./...
@@ -36,12 +39,16 @@ release: release-check clean-dist
 		bin=nas-governance-$${os}-$${arch}; \
 		echo "==> Building $${os}/$${arch}"; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
-			go build -trimpath -ldflags "-s -w" -o $(DIST_DIR)/$$bin ./cmd/nas-governance; \
+			go build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $(DIST_DIR)/$$bin ./cmd/nas-governance; \
 		tar -czf $(DIST_DIR)/$$bin.tar.gz -C $(DIST_DIR) \
 			$$bin README.md LICENSE LICENSE-DOCS.md NOTICE THIRD_PARTY_NOTICES.md third-party-licenses; \
 		rm $(DIST_DIR)/$$bin; \
 	done
-	@cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	@cd $(DIST_DIR) && if command -v sha256sum >/dev/null 2>&1; then \
+		sha256sum *.tar.gz > SHA256SUMS; \
+	else \
+		shasum -a 256 *.tar.gz > SHA256SUMS; \
+	fi
 	@echo "==> Release artifacts in $(DIST_DIR)/:"
 	@ls -lh $(DIST_DIR)/
 

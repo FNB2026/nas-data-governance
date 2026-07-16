@@ -2,14 +2,38 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
+
+type failingJournal struct {
+	beginErr error
+	doneErr  error
+}
+
+func (j failingJournal) BeginJournal(context.Context, string, string, []domain.PlannedAction) error {
+	return j.beginErr
+}
+func (j failingJournal) MarkJournalDone(context.Context, string, int, string) error {
+	return j.doneErr
+}
+func (failingJournal) MarkJournalFailed(context.Context, string, int) error { return nil }
+func (failingJournal) MarkJournalRolledBack(context.Context, string, int, error) error {
+	return nil
+}
+func (failingJournal) ListJournalDone(context.Context, string) ([]store.JournalEntry, error) {
+	return nil, nil
+}
+func (failingJournal) ListJournalPending(context.Context, string) ([]store.JournalEntry, error) {
+	return nil, nil
+}
+func (failingJournal) ListExecutingPlans(context.Context) ([]string, error) { return nil, nil }
 
 // newTestStore opens a fresh SQLite store in a temp dir for executor tests.
 func newTestStore(t *testing.T) *store.SQLiteStore {
@@ -99,6 +123,56 @@ func TestExecuteWithJournal_Success(t *testing.T) {
 	// The quarantined file should exist at the recorded target.
 	if _, err := os.Stat(done[0].TargetPath); err != nil {
 		t.Fatalf("file should exist at journal target: %v", err)
+	}
+}
+
+func TestExecuteStopsBeforeWriteWhenBeginJournalFails(t *testing.T) {
+	srcDir := t.TempDir()
+	qDir := t.TempDir()
+	src := filepath.Join(srcDir, "file.txt")
+	if err := os.WriteFile(src, []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := Snapshot(src, true)
+	plan := domain.OperationPlan{ID: "journal-begin-fail", TaskID: "task", State: domain.PlanApproved, Actions: []domain.PlannedAction{{
+		Path: src, Action: domain.OperationQuarantine,
+		File: domain.FileInstance{Path: src, Size: snap.Size, ModifiedAt: snap.ModifiedAt, Device: snap.Device, Inode: snap.Inode, ContentSHA256: snap.Hash},
+	}}}
+	exec, err := NewWithJournal(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{srcDir}}, failingJournal{beginErr: errors.New("disk full")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := exec.Execute(context.Background(), &plan)
+	if result.ErrorType != "journal_begin_failed" || plan.State != domain.PlanApproved {
+		t.Fatalf("result=%#v state=%s", result, plan.State)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source changed despite journal failure: %v", err)
+	}
+}
+
+func TestExecuteRollsBackWhenJournalDoneFails(t *testing.T) {
+	srcDir := t.TempDir()
+	qDir := t.TempDir()
+	src := filepath.Join(srcDir, "file.txt")
+	if err := os.WriteFile(src, []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := Snapshot(src, true)
+	plan := domain.OperationPlan{ID: "journal-done-fail", TaskID: "task", State: domain.PlanApproved, Actions: []domain.PlannedAction{{
+		Path: src, Action: domain.OperationQuarantine,
+		File: domain.FileInstance{Path: src, Size: snap.Size, ModifiedAt: snap.ModifiedAt, Device: snap.Device, Inode: snap.Inode, ContentSHA256: snap.Hash},
+	}}}
+	exec, err := NewWithJournal(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{srcDir}}, failingJournal{doneErr: errors.New("disk full")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := exec.Execute(context.Background(), &plan)
+	if result.ErrorType != "journal_done_failed" || plan.State != domain.PlanRolledBack {
+		t.Fatalf("result=%#v state=%s", result, plan.State)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source was not rolled back: %v", err)
 	}
 }
 

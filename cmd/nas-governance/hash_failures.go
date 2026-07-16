@@ -16,9 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"nas-data-governance/internal/domain"
-	"nas-data-governance/internal/fingerprint"
-	idx "nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
+	idx "github.com/FNB2026/nas-data-governance/internal/index"
+	"github.com/FNB2026/nas-data-governance/internal/privatefs"
 )
 
 const privateFileMode = 0o600
@@ -51,15 +52,8 @@ func writeHashFailures(path string, failures []hashFailure) error {
 	if path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, privateFileMode)
+	f, err := privatefs.Create(path)
 	if err != nil {
-		return err
-	}
-	if err := f.Chmod(privateFileMode); err != nil {
-		_ = f.Close()
 		return err
 	}
 	w := bufio.NewWriter(f)

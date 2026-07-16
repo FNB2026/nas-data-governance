@@ -8,6 +8,11 @@
 *.sqlite3
 *.jsonl
 *.log
+*.docx
+*.xmind
+*.pages
+*.numbers
+*.keynote
 *.pem
 *.key
 .env

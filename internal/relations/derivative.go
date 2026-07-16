@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // extCategory maps a file extension to a format category. Used when FormatInfo

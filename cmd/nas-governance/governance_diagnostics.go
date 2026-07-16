@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"nas-data-governance/internal/governancediag"
-	"nas-data-governance/internal/store"
+	"github.com/FNB2026/nas-data-governance/internal/governancediag"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func runDiagnoseGovernance(args []string) error {

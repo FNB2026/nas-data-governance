@@ -1,4 +1,4 @@
-module nas-data-governance
+module github.com/FNB2026/nas-data-governance
 
 go 1.26
 

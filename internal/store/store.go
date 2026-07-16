@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // ErrNotFound is returned when a single-row lookup has no match.

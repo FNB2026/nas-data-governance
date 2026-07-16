@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 // TestExtractKeywords 验证关键词提取逻辑。
@@ -112,7 +112,7 @@ func TestMergeSuggestionToPlan(t *testing.T) {
 		SourceDirs: []string{"/data/deliverables-copy", "/data/deliverables-backup"},
 		Reason:     "similar content",
 		Confidence: 0.85,
-		Evidence:    []string{"jaccard=0.7"},
+		Evidence:   []string{"jaccard=0.7"},
 	}
 	plan := mergeSuggestionToPlan(s)
 	if plan.ID != "merge-merge-001" {

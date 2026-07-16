@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"nas-data-governance/schemas"
+	"github.com/FNB2026/nas-data-governance/schemas"
 )
 
 // Init applies migrations inside a single connection. SQLite's "CREATE
