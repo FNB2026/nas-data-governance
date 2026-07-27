@@ -27,12 +27,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/runner"
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
-)
-
-var (
-	version   = "dev"
-	commit    = "unknown"
-	buildTime = "unknown"
+	"github.com/FNB2026/nas-data-governance/internal/version"
 )
 
 func main() {
@@ -290,10 +285,11 @@ func usage() {
 }
 
 func runVersion(args []string) error {
-	if len(args) != 0 {
+	if len(args) > 0 {
 		return fmt.Errorf("version does not accept arguments")
 	}
-	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", version, commit, buildTime)
+	v := version.Get()
+	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", v.Version, v.Commit, v.BuildTime)
 	return nil
 }
 

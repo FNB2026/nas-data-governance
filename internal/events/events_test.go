@@ -13,7 +13,7 @@ func TestSanitizePayload_RemovesSensitiveKeys(t *testing.T) {
 		"target_path":    "/mnt/nas/target",
 		"error":          "open /secret/path: permission denied",
 		"quarantine":     "/var/quarantine/abc",
-		"db_path":        "/home/user/project.db",
+		"db_path":        "<db_path_placeholder>",
 		"processed":      int64(50),
 	}
 
