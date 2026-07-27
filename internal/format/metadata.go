@@ -4,11 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/filepolicy"
@@ -18,6 +20,12 @@ import (
 // an unbounded allocation. Real [Content_Types].xml files are tiny; 1 MiB is
 // deliberately generous.
 const contentTypesLimit = 1 << 20
+
+// structuredTextLimit bounds the extra read used only after all binary
+// signatures fail. Text and JSON recognition is deliberately conservative:
+// it reduces false "unknown" classifications without treating an extension
+// as evidence of the file's real format.
+const structuredTextLimit int64 = 16 << 20
 
 // ExtractMetadata enriches a FormatInfo with cheap, header-only metadata.
 // It must be called after Detect. The path is opened again to extract
@@ -350,6 +358,11 @@ func Analyze(path string) (domain.FormatInfo, error) {
 	if err != nil && !errors.Is(err, ErrUnrecognized) {
 		return info, err
 	}
+	if errors.Is(err, ErrUnrecognized) {
+		if textInfo, ok := detectStructuredText(path, stat.Size()); ok {
+			info = textInfo
+		}
+	}
 	info = filepolicy.Apply(path, info)
 	// Even if unrecognized, return the info (with unknown category).
 	// ExtractMetadata is skipped for unrecognized formats.
@@ -358,4 +371,46 @@ func Analyze(path string) (domain.FormatInfo, error) {
 	}
 	info = ExtractMetadata(path, info)
 	return info, nil
+}
+
+// detectStructuredText is a bounded, content-based fallback after magic-byte
+// detection fails. JSON is accepted only when the complete bounded file is
+// valid JSON; plain text requires valid UTF-8 and no binary control bytes.
+// It never infers a format from a filename extension.
+func detectStructuredText(path string, size int64) (domain.FormatInfo, bool) {
+	if size < 16 || size > structuredTextLimit {
+		return domain.FormatInfo{}, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return domain.FormatInfo{}, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, structuredTextLimit+1))
+	if err != nil || int64(len(data)) != size {
+		return domain.FormatInfo{}, false
+	}
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}))
+	if len(trimmed) == 0 {
+		return domain.FormatInfo{}, false
+	}
+	if json.Valid(trimmed) {
+		return domain.FormatInfo{Format: "json", Category: domain.CategoryCode, MIME: "application/json"}, true
+	}
+	lower := bytes.ToLower(trimmed)
+	if bytes.HasPrefix(lower, []byte("<!doctype html")) || bytes.HasPrefix(lower, []byte("<html")) {
+		return domain.FormatInfo{Format: "html", Category: domain.CategoryCode, MIME: "text/html"}, true
+	}
+	if bytes.HasPrefix(trimmed, []byte("<?xml")) {
+		return domain.FormatInfo{Format: "xml", Category: domain.CategoryCode, MIME: "application/xml"}, true
+	}
+	if !utf8.Valid(data) {
+		return domain.FormatInfo{}, false
+	}
+	for _, b := range data {
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+			return domain.FormatInfo{}, false
+		}
+	}
+	return domain.FormatInfo{Format: "text", Category: domain.CategoryCode, MIME: "text/plain; charset=utf-8"}, true
 }

@@ -20,7 +20,7 @@
 
 ## M4 常见格式分析（已完成）
 
-- 已实现：基于 magic bytes 的格式检测（图片/视频/音频/PDF/压缩包；RIFF 子类型区分 WebP vs WAV；OOXML docx/xlsx/pptx 经 [Content_Types].xml 分流）、只读元数据提取（PNG/JPEG/GIF/BMP/WebP 尺寸、PDF 页数、ZIP 条目数、MP4/MOV/MKV 时长+编码、MP3 时长）、SQLite file_formats 持久化、CLI analyze 子命令（可选 --db 持久化、--storage-id/--limit 过滤）。
+- 已实现：基于 magic bytes 的格式检测（图片/视频/音频/PDF/压缩包；RIFF 子类型；OOXML 分流；XML、MXF、MPEG-TS/MTS、AAC、ASF/WMV、AEP、STEP、DPX、EPS、TTF/OTF、SQLite 容器等）、只读元数据提取、SQLite file_formats 持久化和 CLI analyze。AEP/Premiere/Lightroom/STEP/Corel/LUT 工程源、字幕与侧车、可再生缓存分类后仍保持 protected，格式识别不授予删除权。
 - 验收：遵循 K-006 渐进式分析，只读文件头，不解码媒体内容、不调用 OCR/AI；28 个测试覆盖所有检测器、元数据提取器、OOXML 分类与边界情况。
 
 ## M5 资产关系与智能整理（已完成）
@@ -44,3 +44,16 @@
 - P1-6 补齐底层测试（commit `c81df09`）：覆盖 6 个包此前未测试的分支——internal/index JSONL 往返与错误路径（7 测试）、planner 默认 REVIEW 与 Cache 角色 QUARANTINE（2 测试）、dircontext 六个目录角色正面测试（7 测试）、merge pickTarget 双后缀与中文 _副本/_temp/_old/_new（5 测试）、relations Audio 派生与 _old/_new/_backup/副本 版本标记（6 测试）、format WebP/HEIC/AVI/TAR/RAR/Bzip2 检测（7 测试）。新增 481 行测试，全量 `go test ./... -race` 17 包通过。
 
 验收：执行动作可崩溃恢复；扫描可中断续扫且不丢失既有哈希；并发受 worker pool 约束；人工复核覆盖计划/规则/合并/冲突四条线；底层测试覆盖此前未触达的分支。全部遵守 AGENTS.md 工程护栏（默认只读、不跟随符号链接、保护优先、审计不泄露路径）。
+
+## M7 分级删除生命周期（已完成）
+
+- L0：计划器继续只生成 `DRAFT` 建议，不产生文件系统写入。
+- L1：隔离成功后从持久化执行 Journal 注册 `quarantine_items`，记录原路径、隔离路径、完整哈希、大小、隔离时间和恢复信息；受保护角色自动进入 `HOLD`。
+- L2：默认冷静期 30 天，可通过 `execute --retention` 延长（最低 24 小时）；到期只生成单项 `PURGE DRAFT`，不会自动执行。
+- 恢复：`restore-plan → restore-approve → restore-execute --dry-run → restore-execute` 独立分层；目标已存在、范围越界、符号链接或内容 stale 均拒绝，Journal 完成失败时回到隔离区。
+- L3：`purge plan → approve → execute --dry-run → execute`；无批量 `--all`，审批与执行均绑定同一 SHA-256 摘要，只能处理受管隔离项。
+- 永久清除执行器：同卷 `.purge-staging`、第二次完整哈希校验、`pending → staged → commit_pending → committed` 持久化状态；提交前故障回滚，提交后崩溃按 staging 状态对账。
+- 边界：PURGE 不接受源目录路径；HOLD 不生成候选；不跟随符号链接、不越隔离根、不进入嵌套挂载点；普通日志只输出数量、状态和错误类型。
+- 语义：永久清除是当前文件系统命名空间的不可恢复移除，不承诺擦除 NAS 快照、独立备份或底层介质数据块。
+
+验收：隔离台账幂等；保护项保持 HOLD；未到期、摘要错误、内容变化和越界路径均不写文件；dry-run 零写入；Journal 故障在提交前恢复隔离文件；`commit_pending` 崩溃既可回滚也可确认已提交；全链路 CLI 测试覆盖恢复和永久清除。

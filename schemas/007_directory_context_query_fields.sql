@@ -1,0 +1,10 @@
+-- 007: 目录语境查询字段反规范化（V1 正确性与查询基座）
+--
+-- directory_contexts 的反规范化字段（role/protected/business_anchor/
+-- authority_level/branch_point/privacy_level）及相关索引通过 Go 代码
+-- 幂等添加和创建（SQLite 的 ALTER TABLE ADD COLUMN 不支持 IF NOT EXISTS；
+-- 且 .sql 文件在 Go 的 addColumnsIfMissing 之前执行，索引引用新列会失败）。
+--
+-- 本文件仅作为迁移编号占位与文档说明。
+-- 实际 DDL 见 internal/store/migrations.go 的 Init() 函数。
+-- 对应 ADR-0006 第 6 项迁移编号与校正指南 V1 工作内容。

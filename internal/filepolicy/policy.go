@@ -21,15 +21,26 @@ type Policy struct {
 }
 
 var extensionPolicies = map[string]Policy{
-	".xmp":      {Format: "xmp", MIME: "application/rdf+xml", Category: domain.CategoryOther, Role: domain.FormatRoleMetadataSidecar, Protected: true, Sidecar: true},
-	".cpr":      {Format: "cubase-project", MIME: "application/x-cubase-project", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
-	".sesx":     {Format: "audition-session", MIME: "application/xml", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
-	".psd":      {Format: "psd", MIME: "image/vnd.adobe.photoshop", Category: domain.CategoryImage, Role: domain.FormatRoleProjectSource, Protected: true},
-	".peak":     {Format: "peak-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
-	".pkf":      {Format: "pkf-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
-	".pek":      {Format: "pek-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
-	".cfa":      {Format: "cfa-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
-	".mpgindex": {Format: "mpeg-index-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".xmp":          {Format: "xmp", MIME: "application/rdf+xml", Category: domain.CategoryOther, Role: domain.FormatRoleMetadataSidecar, Protected: true, Sidecar: true},
+	".cpr":          {Format: "cubase-project", MIME: "application/x-cubase-project", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".sesx":         {Format: "audition-session", MIME: "application/xml", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".psd":          {Format: "psd", MIME: "image/vnd.adobe.photoshop", Category: domain.CategoryImage, Role: domain.FormatRoleProjectSource, Protected: true},
+	".peak":         {Format: "peak-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".pkf":          {Format: "pkf-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".pek":          {Format: "pek-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".cfa":          {Format: "cfa-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".mpgindex":     {Format: "mpeg-index-cache", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".aep":          {Format: "after-effects-project", MIME: "application/x-after-effects-project", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".prproj":       {Format: "premiere-project", MIME: "application/xml", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".lrcat":        {Format: "lightroom-catalog", MIME: "application/vnd.sqlite3", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".step":         {Format: "step", MIME: "model/step", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".stp":          {Format: "step", MIME: "model/step", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".cdr":          {Format: "corel-draw", MIME: "application/vnd.corel-draw", Category: domain.CategoryImage, Role: domain.FormatRoleProjectSource, Protected: true},
+	".cube":         {Format: "lut-cube", MIME: "application/x-cube-lut", Category: domain.CategoryOther, Role: domain.FormatRoleProjectSource, Protected: true},
+	".srt":          {Format: "subrip", MIME: "application/x-subrip", Category: domain.CategoryDocument, Role: domain.FormatRoleMetadataSidecar, Protected: true, Sidecar: true},
+	".plist":        {Format: "plist", MIME: "application/x-apple-plist", Category: domain.CategoryCode, Role: domain.FormatRoleMetadataSidecar, Protected: true, Sidecar: true},
+	".lrprev":       {Format: "lightroom-preview", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
+	".mcaudioindex": {Format: "mc-audio-index", Category: domain.CategoryOther, Role: domain.FormatRoleRegenerableCache, Protected: true, Regenerable: true, Sidecar: true},
 }
 
 func ForPath(path string) (Policy, bool) {
@@ -55,20 +66,28 @@ func Apply(path string, info domain.FormatInfo) domain.FormatInfo {
 	if info.Format != "" && info.Format != "unknown" && info.Role == "" {
 		info.Role = domain.FormatRolePrimary
 	}
-	return refineOLE(path, info)
+	return refineContainer(path, info)
 }
 
-func refineOLE(path string, info domain.FormatInfo) domain.FormatInfo {
-	if info.Format != "ole" {
-		return info
-	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".doc":
-		info.Format, info.MIME = "doc", "application/msword"
-	case ".xls":
-		info.Format, info.MIME = "xls", "application/vnd.ms-excel"
-	case ".ppt":
-		info.Format, info.MIME = "ppt", "application/vnd.ms-powerpoint"
+func refineContainer(path string, info domain.FormatInfo) domain.FormatInfo {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch info.Format {
+	case "ole":
+		switch ext {
+		case ".doc":
+			info.Format, info.MIME = "doc", "application/msword"
+		case ".xls":
+			info.Format, info.MIME = "xls", "application/vnd.ms-excel"
+		case ".ppt":
+			info.Format, info.MIME = "ppt", "application/vnd.ms-powerpoint"
+		}
+	case "asf":
+		switch ext {
+		case ".wma":
+			info.Format, info.Category, info.MIME = "wma", domain.CategoryAudio, "audio/x-ms-wma"
+		case ".wmv":
+			info.Format, info.Category, info.MIME = "wmv", domain.CategoryVideo, "video/x-ms-wmv"
+		}
 	}
 	return info
 }

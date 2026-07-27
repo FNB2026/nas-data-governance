@@ -1,7 +1,7 @@
 -- 004: 扫描检查点与文件状态标记（增量扫描/断点续扫基础）
 --
 -- scan_checkpoints 记录每次扫描的进度，支持中断后从断点恢复。
--- file_instances 新增 status 列标记文件是否仍存在（active/missing），
+-- file_instances 新增 status 列标记文件是否仍存在（active/missing/unavailable），
 -- 用于增量扫描时检测已删除文件。
 
 CREATE TABLE IF NOT EXISTS scan_checkpoints (
