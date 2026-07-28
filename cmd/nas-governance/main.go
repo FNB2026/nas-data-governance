@@ -9,8 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,13 +16,11 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/assets"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
-	"github.com/FNB2026/nas-data-governance/internal/format"
 	idx "github.com/FNB2026/nas-data-governance/internal/index"
 	"github.com/FNB2026/nas-data-governance/internal/learning"
 	"github.com/FNB2026/nas-data-governance/internal/merge"
 	"github.com/FNB2026/nas-data-governance/internal/privatefs"
 	"github.com/FNB2026/nas-data-governance/internal/relations"
-	"github.com/FNB2026/nas-data-governance/internal/runner"
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"github.com/FNB2026/nas-data-governance/internal/version"
@@ -408,19 +404,19 @@ func runExecute(args []string) error {
 
 // ---- analyze ----
 
-// formatReportEntry is one row in the analyze output.
-type formatReportEntry struct {
-	Path      string            `json:"path"`
-	StorageID string            `json:"storage_id"`
-	Format    domain.FormatInfo `json:"format"`
-	Error     string            `json:"error,omitempty"`
-}
+// formatReportEntry is a type alias for app.FormatReportEntry so existing
+// CLI tests that decode JSON into []formatReportEntry continue to work.
+type formatReportEntry = app.FormatReportEntry
 
 // runAnalyze reads a scan index, runs header-only format analysis (K-006) on
 // each file, and writes a JSON report. When --db is provided, results are also
 // persisted to SQLite in batches; the file rows must already exist
 // (created by a prior scan). Analyze is read-only with respect to user data:
 // it only reads file headers and writes its own report/database.
+//
+// The core analysis logic (worker pool, resume, persistence) lives in
+// app.AnalyzeService. This function handles flag parsing, file I/O, progress
+// reporting, and output formatting.
 func runAnalyze(args []string) error {
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	index := fs.String("index", "./var/index.jsonl", "index file from scan")
@@ -448,12 +444,6 @@ func runAnalyze(args []string) error {
 	if *refreshMetadata && !*resume {
 		return fmt.Errorf("--refresh-metadata requires --resume")
 	}
-	if *workers < 1 || *workers > 64 {
-		return fmt.Errorf("--workers must be between 1 and 64")
-	}
-	if *batchSize < 1 || *batchSize > 10000 {
-		return fmt.Errorf("--batch-size must be between 1 and 10000")
-	}
 	if *progressEvery < 0 {
 		return fmt.Errorf("--progress-every cannot be negative")
 	}
@@ -461,20 +451,9 @@ func runAnalyze(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *storageID != "" {
-		filtered := make([]domain.FileInstance, 0, len(files))
-		for _, f := range files {
-			if f.StorageID == *storageID {
-				filtered = append(filtered, f)
-			}
-		}
-		files = filtered
-	}
-	if *limit > 0 && len(files) > *limit {
-		files = files[:*limit]
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
 	var st *store.SQLiteStore
 	if *dbPath != "" {
 		st, err = store.Open(ctx, *dbPath)
@@ -484,56 +463,21 @@ func runAnalyze(args []string) error {
 		defer st.Close()
 	}
 
-	// Resume is based on durable format rows, not a fragile path cursor. This
-	// safely handles worker completion order and makes repeated runs idempotent.
-	existing := map[string]domain.FormatInfo{}
-	if *resume {
-		records, listErr := st.ListFormats(ctx, *storageID)
-		if listErr != nil {
-			return listErr
-		}
-		for _, record := range records {
-			existing[formatRecordKey(record.StorageID, record.Path)] = record.Info
-		}
+	// Create analyze service. The service encapsulates worker pool, resume,
+	// and batch persistence. Store may be nil for JSON-only mode.
+	var analyzeStore app.AnalyzeStore
+	if st != nil {
+		analyzeStore = st
 	}
+	svc := app.NewAnalyzeService(analyzeStore)
 
-	// Concurrent format analysis via worker pool. Each worker reads file
-	// headers (read-only) and writes results to the shared entries slice.
-	// A separate local persistence stage batches SQLite writes; it never writes
-	// to the NAS and ordinary progress output contains aggregate counts only.
-	entries := make([]formatReportEntry, len(files))
-	var entriesMu sync.Mutex
-	var analyzed, unrecognized, failed int64
-	type pendingFile struct {
-		index int
-		file  domain.FileInstance
-	}
-	pending := make([]pendingFile, 0, len(files))
-	var reused int64
-	for i, file := range files {
-		if info, ok := existing[formatRecordKey(file.StorageID, file.Path)]; ok &&
-			!(*refreshUnknown && isUnknownFormat(info)) &&
-			!(*refreshMetadata && needsMetadataRefresh(info)) {
-			entries[i] = formatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
-			reused++
-			if info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown {
-				unrecognized++
-			} else {
-				analyzed++
-			}
-			continue
-		}
-		pending = append(pending, pendingFile{index: i, file: file})
-	}
-	var analyzeStage atomic.Value
-	analyzeStage.Store("format_analysis")
-	var processedNew int64
+	// Start progress reporter that polls the service's Progress() method.
 	reporter, err := startProgressReporter(*progressOut, *progressInterval, func() progressSnapshot {
-		stage := analyzeStage.Load().(string)
+		p := svc.Progress()
 		return progressSnapshot{
-			Command: "analyze", Stage: stage, Status: progressStatus(stage),
-			Processed: reused + atomic.LoadInt64(&processedNew), Total: int64(len(files)),
-			Failed: atomic.LoadInt64(&failed), Reused: reused,
+			Command: "analyze", Stage: p.Stage, Status: progressStatus(p.Stage),
+			Processed: p.Processed,
+			Details:   map[string]int{"total": int(p.Total), "reused": int(p.Reused), "failed": int(p.Failed)},
 		}
 	})
 	if err != nil {
@@ -542,103 +486,49 @@ func runAnalyze(args []string) error {
 	if reporter != nil {
 		defer reporter.Stop()
 	}
-	if *resume {
-		fmt.Printf("resume: reused %d completed format record(s); source paths omitted\n", reused)
-	}
 
-	var persistCh chan store.FormatRecord
-	var persistWG sync.WaitGroup
-	var persistMu sync.Mutex
-	var persistErr error
-	var persisted, lookupFailed int64
-	if st != nil {
-		persistCh = make(chan store.FormatRecord, *batchSize*2)
-		persistWG.Add(1)
+	// Periodic stderr progress (polls service Progress() on a short ticker).
+	if *progressEvery > 0 {
 		go func() {
-			defer persistWG.Done()
-			batch := make([]store.FormatRecord, 0, *batchSize)
-			flush := func() {
-				if len(batch) == 0 {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			var lastReported int64 = -1
+			for {
+				select {
+				case <-ctx.Done():
 					return
-				}
-				persistMu.Lock()
-				failedAlready := persistErr != nil
-				persistMu.Unlock()
-				if !failedAlready {
-					saved, missing, err := st.SaveFormatsByPath(context.Background(), batch)
-					persistMu.Lock()
-					persisted += int64(saved)
-					lookupFailed += int64(missing)
-					if err != nil && persistErr == nil {
-						persistErr = err
+				case <-ticker.C:
+					p := svc.Progress()
+					boundary := p.Processed / int64(*progressEvery)
+					if boundary > lastReported && p.Processed > 0 {
+						fmt.Fprintf(os.Stderr, "progress: analyzed %d/%d file(s); source paths omitted\n", p.Processed, p.Total)
+						lastReported = boundary
 					}
-					persistMu.Unlock()
-				}
-				batch = batch[:0]
-			}
-			for record := range persistCh {
-				batch = append(batch, record)
-				if len(batch) >= *batchSize {
-					flush()
 				}
 			}
-			flush()
 		}()
 	}
 
-	ar := runner.New(*workers)
-	var submitErr error
-	for _, item := range pending {
-		idx := item.index
-		file := item.file
-		if err := ar.Submit(ctx, func() error {
-			info, analyzeErr := format.Analyze(file.Path)
-			entry := formatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
-			if analyzeErr != nil {
-				entry.Error = analyzeErr.Error()
-				atomic.AddInt64(&failed, 1)
-			} else if info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown {
-				atomic.AddInt64(&unrecognized, 1)
-			} else {
-				atomic.AddInt64(&analyzed, 1)
-			}
-			if persistCh != nil && analyzeErr == nil && info.Format != "" {
-				persistCh <- store.FormatRecord{StorageID: file.StorageID, Path: file.Path, Info: info}
-			}
-			entriesMu.Lock()
-			entries[idx] = entry
-			entriesMu.Unlock()
-			done := reused + atomic.AddInt64(&processedNew, 1)
-			if *progressEvery > 0 && done%int64(*progressEvery) == 0 {
-				fmt.Fprintf(os.Stderr, "progress: analyzed %d/%d file(s); source paths omitted\n", done, len(files))
-			}
-			return nil
-		}); err != nil {
-			submitErr = err
-			break
-		}
-	}
-	ar.Wait()
-	analyzeStage.Store("persisting")
-	if persistCh != nil {
-		close(persistCh)
-		persistWG.Wait()
-	}
-	persistMu.Lock()
-	batchErr := persistErr
-	persistMu.Unlock()
-	completed := reused + atomic.LoadInt64(&processedNew)
-	if completed != int64(len(files)) {
-		fmt.Fprintf(os.Stderr, "analysis interrupted after %d/%d file(s); rerun with --resume; source paths omitted\n", completed, len(files))
-		if submitErr != nil {
-			return submitErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return fmt.Errorf("analysis incomplete")
+	// Run the analysis through the service.
+	result, err := svc.Analyze(ctx, app.AnalyzeInput{
+		Files:           files,
+		StorageID:       *storageID,
+		Limit:           *limit,
+		Workers:         *workers,
+		Resume:          *resume,
+		RefreshUnknown:  *refreshUnknown,
+		RefreshMetadata: *refreshMetadata,
+		BatchSize:       *batchSize,
+	})
+	if err != nil {
+		return err
 	}
 
+	if *resume && result.Reused > 0 {
+		fmt.Printf("resume: reused %d completed format record(s); source paths omitted\n", result.Reused)
+	}
+
+	// Write JSON report.
 	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
@@ -646,41 +536,20 @@ func runAnalyze(args []string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(entries); err != nil {
+	if err := enc.Encode(result.Entries); err != nil {
 		return err
 	}
+
 	fmt.Printf("analyzed %d files (%d recognized, %d unrecognized, %d failed) — report: %s\n",
-		len(entries), analyzed, unrecognized, failed, *out)
+		len(result.Entries), result.Analyzed, result.Unrecognized, result.Failed, *out)
 	if st != nil {
-		fmt.Printf("persisted %d new format records to %s (%d reused)\n", persisted, *dbPath, reused)
+		fmt.Printf("persisted %d new format records to %s (%d reused)\n", result.Persisted, *dbPath, result.Reused)
 	}
-	analyzeStage.Store("completed")
-	reportAnalyzePersistenceErrors(os.Stderr, int(lookupFailed), 0)
-	if batchErr != nil {
-		return batchErr
+	reportAnalyzePersistenceErrors(os.Stderr, int(result.LookupFailed), 0)
+	if result.PersistErr != nil {
+		return result.PersistErr
 	}
 	return nil
-}
-
-func formatRecordKey(storageID, path string) string { return storageID + "\x00" + path }
-
-func isUnknownFormat(info domain.FormatInfo) bool {
-	return info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown
-}
-
-// needsMetadataRefresh is deliberately capability-scoped. Formats whose
-// parser cannot currently fill a missing field are not retried forever.
-func needsMetadataRefresh(info domain.FormatInfo) bool {
-	switch info.Format {
-	case "wav", "aiff", "flac", "m4a":
-		return info.Duration <= 0
-	case "mp4", "mov", "m4v", "avi":
-		return info.Duration <= 0 || info.Width <= 0 || info.Height <= 0
-	case "mpeg":
-		return info.Width <= 0 || info.Height <= 0
-	default:
-		return false
-	}
 }
 
 func reportAnalyzePersistenceErrors(w io.Writer, lookupFailed, saveFailed int) {

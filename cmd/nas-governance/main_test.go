@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
@@ -218,16 +219,16 @@ func TestAnalyzeResumeRequiresDatabase(t *testing.T) {
 }
 
 func TestNeedsMetadataRefreshOnlyRetriesSupportedGaps(t *testing.T) {
-	if !needsMetadataRefresh(domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}) {
+	if !app.NeedsMetadataRefresh(domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}) {
 		t.Fatal("wav duration gap should refresh")
 	}
-	if !needsMetadataRefresh(domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, Duration: 2}) {
+	if !app.NeedsMetadataRefresh(domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, Duration: 2}) {
 		t.Fatal("mp4 dimension gap should refresh")
 	}
-	if needsMetadataRefresh(domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, Width: 1920, Height: 1080}) {
+	if app.NeedsMetadataRefresh(domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, Width: 1920, Height: 1080}) {
 		t.Fatal("mpeg with supported dimensions filled must not retry for unsupported duration")
 	}
-	if needsMetadataRefresh(domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo}) {
+	if app.NeedsMetadataRefresh(domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo}) {
 		t.Fatal("unsupported flv metadata must not retry forever")
 	}
 }

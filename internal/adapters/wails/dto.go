@@ -118,6 +118,7 @@ type JobSummary struct {
 	Discovered  int64  `json:"discovered,omitempty"`
 	Processed   int64  `json:"processed,omitempty"`
 	Failed      int64  `json:"failed,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
 	CreatedAt   string `json:"created_at"`
 	CompletedAt string `json:"completed_at,omitempty"`
 }
@@ -252,6 +253,7 @@ func mapJobSummary(j jobs.JobRun) JobSummary {
 		Discovered:  j.Progress.Discovered,
 		Processed:   j.Progress.Processed,
 		Failed:      j.Progress.Failed,
+		ErrorCode:   j.ErrorCode,
 		CreatedAt:   formatTime(&j.CreatedAt),
 		CompletedAt: formatTime(j.CompletedAt),
 	}
