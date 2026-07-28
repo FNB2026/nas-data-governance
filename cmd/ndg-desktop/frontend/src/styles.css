@@ -348,3 +348,209 @@ button.secondary {
     flex: 1 1 100%;
   }
 }
+
+/* ---- Mode toggle & indicator ---- */
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0;
+  cursor: pointer;
+}
+
+.mode-toggle input {
+  margin: 0;
+}
+
+.mode-indicator {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.72rem;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+/* ---- Scan panel ---- */
+
+.scan-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.scan-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.scan-form label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.scan-form input[type="text"],
+.scan-form input[type="number"] {
+  min-width: 140px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.scan-form .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  padding-bottom: 0.55rem;
+}
+
+.scan-form .checkbox-label input {
+  margin: 0;
+}
+
+.scan-form button {
+  margin-bottom: 1px;
+}
+
+/* ---- Progress bar ---- */
+
+.scan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  font-size: 0.85rem;
+}
+
+.progress-stats .warn {
+  color: #ff9500;
+}
+
+.progress-stats .error-text {
+  color: var(--error);
+}
+
+/* ---- State badges ---- */
+
+.state-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.state-badge--queued {
+  background: #e8e8ed;
+  color: var(--text-muted);
+}
+
+.state-badge--running {
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent);
+}
+
+.state-badge--cancel-requested {
+  background: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
+}
+
+.state-badge--completed {
+  background: rgba(52, 199, 89, 0.15);
+  color: #248a3d;
+}
+
+.state-badge--failed {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--error);
+}
+
+.state-badge--cancelled {
+  background: #e8e8ed;
+  color: var(--text-muted);
+}
+
+/* ---- Job history ---- */
+
+.job-history h3,
+.job-detail h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+/* ---- Job detail ---- */
+
+.job-detail {
+  border: 1px solid var(--border);
+}
+
+.payload-cell {
+  max-width: 300px;
+}
+
+.payload-json {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* ---- Mobile: scan form ---- */
+
+@media (max-width: 600px) {
+  .scan-form label,
+  .scan-form input[type="text"],
+  .scan-form input[type="number"] {
+    width: 100%;
+  }
+
+  .scan-form label {
+    flex: 1 1 100%;
+  }
+
+  .scan-form .checkbox-label {
+    flex: 1 1 100%;
+  }
+
+  .progress-stats {
+    gap: 0.3rem 1rem;
+  }
+}

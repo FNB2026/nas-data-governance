@@ -1,14 +1,57 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CancelScan,
   CloseProject,
   GetGroupDetail,
+  GetJobDetail,
   GetProjectInfo,
+  GetScanProgress,
   GetVersion,
   ListDuplicateGroups,
+  ListRecentJobs,
   ListStorages,
   OpenProject,
+  OpenProjectReadWrite,
+  StartScan,
 } from "./wailsjs/go/wails/API";
 import { wails } from "./wailsjs/go/models";
+
+// ---- constants ----
+
+const TERMINAL_STATES = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+const STAGE_LABELS: Record<string, string> = {
+  DISCOVERING: "发现文件",
+  METADATA_INDEXING: "索引元数据",
+  QUICK_HASHING: "快速哈希",
+  FULL_HASHING: "完整哈希",
+  CONTEXT_CLASSIFYING: "上下文分类",
+  FORMAT_ANALYZING: "格式分析",
+  GROUPING: "分组",
+  PLANNING: "规划",
+  FINALIZING: "收尾",
+};
+
+const STATE_LABELS: Record<string, string> = {
+  QUEUED: "排队中",
+  RUNNING: "运行中",
+  CANCEL_REQUESTED: "取消中",
+  COMPLETED: "已完成",
+  FAILED: "已失败",
+  CANCELLED: "已取消",
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  "job:created": "创建",
+  "job:stage": "阶段切换",
+  "job:progress": "进度更新",
+  "job:warning": "警告",
+  "job:completed": "完成",
+  "job:failed": "失败",
+  "job:cancelled": "取消",
+};
+
+// ---- helpers ----
 
 function hasWailsRuntime(): boolean {
   return typeof window !== "undefined" && "go" in window && "runtime" in window;
@@ -30,12 +73,52 @@ function shortHash(hash: string): string {
   return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
 }
 
+function formatDateTime(iso: string): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function stateLabel(state: string): string {
+  return STATE_LABELS[state] || state;
+}
+
+function stageLabel(stage: string): string {
+  return STAGE_LABELS[stage] || stage;
+}
+
+function eventLabel(eventType: string): string {
+  return EVENT_LABELS[eventType] || eventType;
+}
+
+function stateBadgeClass(state: string): string {
+  return `state-badge state-badge--${state.toLowerCase().replace("_", "-")}`;
+}
+
+// ---- component ----
+
 export default function App() {
   const [version, setVersion] = useState<wails.VersionInfo | null>(null);
   const [project, setProject] = useState<wails.ProjectInfo | null>(null);
   const [projectPath, setProjectPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Read-write mode
+  const [readWriteMode, setReadWriteMode] = useState(false);
+  const [isReadWrite, setIsReadWrite] = useState(false);
 
   // Storage list state
   const [storages, setStorages] = useState<wails.StorageInfo[]>([]);
@@ -58,6 +141,30 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  // Scan form state
+  const [scanRoot, setScanRoot] = useState("");
+  const [scanStorageId, setScanStorageId] = useState("");
+  const [scanFullScan, setScanFullScan] = useState(false);
+  const [scanWorkers, setScanWorkers] = useState("");
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanStarting, setScanStarting] = useState(false);
+
+  // Active scan job
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<wails.ScanJobProgress | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  // Job history
+  const [jobs, setJobs] = useState<wails.JobSummary[]>([]);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+
+  // Job detail
+  const [selectedJob, setSelectedJob] = useState<wails.JobDetailResponse | null>(null);
+  const [jobDetailLoading, setJobDetailLoading] = useState(false);
+  const [jobDetailError, setJobDetailError] = useState<string | null>(null);
+
+  // ---- effects ----
+
   useEffect(() => {
     if (!hasWailsRuntime()) {
       setVersion({ version: "dev", commit: "n/a", build_time: "n/a" } as wails.VersionInfo);
@@ -67,6 +174,38 @@ export default function App() {
       .then(setVersion)
       .catch((e: unknown) => setError(errorText(e)));
   }, []);
+
+  // Progress polling: when activeJobId is set, poll GetScanProgress every 1s.
+  // Stops automatically when the job reaches a terminal state.
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const p = await GetScanProgress(activeJobId);
+        setScanProgress(p);
+        if (TERMINAL_STATES.has(p.state)) {
+          clearInterval(intervalId);
+          setActiveJobId(null);
+          setCancelling(false);
+          void loadJobs();
+          if (p.state === "COMPLETED") {
+            void loadStorages();
+            void loadGroups("", appliedStorageFilter, appliedMinimumBytes);
+          }
+        }
+      } catch {
+        clearInterval(intervalId);
+        setActiveJobId(null);
+        setCancelling(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJobId, appliedStorageFilter, appliedMinimumBytes]);
+
+  // ---- data loaders ----
 
   const loadStorages = useCallback(async () => {
     if (!hasWailsRuntime()) return;
@@ -110,11 +249,32 @@ export default function App() {
     }
   }, []);
 
-  const parsedMinimumBytes = (): number | null => {
-    if (!minReclaimableMiB.trim()) return 0;
-    const value = Number(minReclaimableMiB);
-    if (!Number.isFinite(value) || value < 0) return null;
-    return Math.floor(value * 1024 * 1024);
+  const loadJobs = useCallback(async () => {
+    if (!hasWailsRuntime()) return;
+    try {
+      const list = await ListRecentJobs(20);
+      setJobs(list || []);
+      setJobsError(null);
+    } catch (e: unknown) {
+      setJobsError(errorText(e));
+    }
+  }, []);
+
+  // ---- project handlers ----
+
+  const resetScanState = () => {
+    setActiveJobId(null);
+    setScanProgress(null);
+    setCancelling(false);
+    setScanError(null);
+    setScanRoot("");
+    setScanStorageId("");
+    setScanFullScan(false);
+    setScanWorkers("");
+    setSelectedJob(null);
+    setJobDetailError(null);
+    setJobs([]);
+    setJobsError(null);
   };
 
   const handleOpenProject = async () => {
@@ -124,16 +284,23 @@ export default function App() {
     }
     setBusy(true);
     try {
-      const info = await OpenProject(projectPath.trim());
+      const info = readWriteMode
+        ? await OpenProjectReadWrite(projectPath.trim())
+        : await OpenProject(projectPath.trim());
       setProject(info);
+      setIsReadWrite(readWriteMode);
       setError(null);
       setSelectedGroup(null);
       setStorageFilter("");
       setMinReclaimableMiB("");
       setAppliedStorageFilter("");
       setAppliedMinimumBytes(0);
-      // These read-only queries are independent and may start together.
-      await Promise.all([loadStorages(), loadGroups("", "", 0)]);
+      resetScanState();
+      const loads: Promise<void>[] = [loadStorages(), loadGroups("", "", 0)];
+      if (readWriteMode) {
+        loads.push(loadJobs());
+      }
+      await Promise.all(loads);
     } catch (e: unknown) {
       setError(errorText(e));
     } finally {
@@ -146,6 +313,7 @@ export default function App() {
     try {
       await CloseProject();
       setProject(null);
+      setIsReadWrite(false);
       setStorages([]);
       setGroups([]);
       setNextCursor("");
@@ -156,6 +324,7 @@ export default function App() {
       setAppliedStorageFilter("");
       setAppliedMinimumBytes(0);
       setError(null);
+      resetScanState();
     } catch (e: unknown) {
       setError(errorText(e));
     } finally {
@@ -172,6 +341,7 @@ export default function App() {
       await Promise.all([
         loadStorages(),
         loadGroups("", appliedStorageFilter, appliedMinimumBytes),
+        ...(isReadWrite ? [loadJobs()] : []),
       ]);
       setSelectedGroup(null);
     } catch (e: unknown) {
@@ -181,10 +351,19 @@ export default function App() {
     }
   };
 
+  // ---- duplicate group handlers ----
+
   const handleLoadMore = () => {
     if (nextCursor && !groupsLoading) {
       loadGroups(nextCursor, appliedStorageFilter, appliedMinimumBytes);
     }
+  };
+
+  const parsedMinimumBytes = (): number | null => {
+    if (!minReclaimableMiB.trim()) return 0;
+    const value = Number(minReclaimableMiB);
+    if (!Number.isFinite(value) || value < 0) return null;
+    return Math.floor(value * 1024 * 1024);
   };
 
   const handleApplyFilters = () => {
@@ -219,7 +398,76 @@ export default function App() {
     setDetailError(null);
   };
 
+  // ---- scan handlers ----
+
+  const handleStartScan = async () => {
+    if (!scanRoot.trim()) {
+      setScanError("请输入要扫描的根目录路径");
+      return;
+    }
+    setScanStarting(true);
+    setScanError(null);
+    try {
+      const workersNum = scanWorkers.trim() ? parseInt(scanWorkers, 10) : undefined;
+      const resp = await StartScan({
+        root: scanRoot.trim(),
+        storage_id: scanStorageId.trim(),
+        full_scan: scanFullScan,
+        workers: Number.isFinite(workersNum) && workersNum! > 0 ? workersNum : undefined,
+      } as wails.StartScanRequest);
+      setActiveJobId(resp.job_id);
+      setScanProgress(null);
+    } catch (e: unknown) {
+      setScanError(errorText(e));
+    } finally {
+      setScanStarting(false);
+    }
+  };
+
+  const handleCancelScan = async () => {
+    if (!activeJobId) return;
+    setCancelling(true);
+    try {
+      await CancelScan(activeJobId);
+    } catch (e: unknown) {
+      setScanError(errorText(e));
+      setCancelling(false);
+    }
+    // Polling will detect CANCELLED state and reset cancelling.
+  };
+
+  // ---- job detail handlers ----
+
+  const handleSelectJob = async (jobId: string) => {
+    if (!hasWailsRuntime()) return;
+    setJobDetailLoading(true);
+    setJobDetailError(null);
+    try {
+      const detail = await GetJobDetail(jobId);
+      setSelectedJob(detail);
+    } catch (e: unknown) {
+      setJobDetailError(errorText(e));
+      setSelectedJob(null);
+    } finally {
+      setJobDetailLoading(false);
+    }
+  };
+
+  const handleCloseJobDetail = () => {
+    setSelectedJob(null);
+    setJobDetailError(null);
+  };
+
+  // ---- derived ----
+
   const projectOpen = project !== null;
+  const scanActive = activeJobId !== null;
+  const progressPercent =
+    scanProgress && scanProgress.discovered > 0
+      ? Math.min(100, Math.round((scanProgress.processed / scanProgress.discovered) * 100))
+      : 0;
+
+  // ---- render ----
 
   return (
     <div className="app">
@@ -245,6 +493,7 @@ export default function App() {
               <p>
                 <strong>存储数量：</strong>
                 {project!.storage_count}
+                {isReadWrite && <span className="mode-indicator">读写模式</span>}
               </p>
               <div className="button-row">
                 <button disabled={busy} onClick={handleRefreshProject}>刷新</button>
@@ -253,7 +502,11 @@ export default function App() {
             </div>
           ) : (
             <div className="project-open">
-              <p className="muted">输入已有项目数据库路径；只读 Alpha 不会创建或迁移数据库。</p>
+              <p className="muted">
+                {readWriteMode
+                  ? "读写模式：可创建新数据库、执行扫描；首次打开会自动建表迁移。"
+                  : "只读模式：不会创建或迁移数据库，仅查询已有数据。"}
+              </p>
               <div className="path-row">
                 <input
                   aria-label="项目数据库路径"
@@ -262,7 +515,17 @@ export default function App() {
                   placeholder="/path/to/project.db"
                 />
               </div>
-              <button disabled={busy || !projectPath.trim()} onClick={handleOpenProject}>只读打开</button>
+              <label className="mode-toggle">
+                <input
+                  type="checkbox"
+                  checked={readWriteMode}
+                  onChange={(event) => setReadWriteMode(event.target.checked)}
+                />
+                读写模式（可扫描）
+              </label>
+              <button disabled={busy || !projectPath.trim()} onClick={handleOpenProject}>
+                {readWriteMode ? "读写打开" : "只读打开"}
+              </button>
             </div>
           )}
           {error && <p className="error" role="alert">{error}</p>}
@@ -270,6 +533,160 @@ export default function App() {
 
         {projectOpen && (
           <>
+            {/* Scan panel — only in read-write mode */}
+            {isReadWrite && (
+              <section className="card card--full scan-panel">
+                <div className="card-header-row">
+                  <h2>扫描</h2>
+                  {scanActive && scanProgress && (
+                    <span className={stateBadgeClass(scanProgress.state)}>
+                      {stateLabel(scanProgress.state)}
+                    </span>
+                  )}
+                </div>
+
+                {/* Scan form */}
+                <div className="scan-form" aria-label="扫描参数">
+                  <label>
+                    根目录
+                    <input
+                      type="text"
+                      value={scanRoot}
+                      onChange={(e) => setScanRoot(e.target.value)}
+                      placeholder="/path/to/scan"
+                      disabled={scanActive}
+                    />
+                  </label>
+                  <label>
+                    存储 ID（可选）
+                    <input
+                      type="text"
+                      value={scanStorageId}
+                      onChange={(e) => setScanStorageId(e.target.value)}
+                      placeholder="default"
+                      disabled={scanActive}
+                    />
+                  </label>
+                  <label>
+                    并发数（可选）
+                    <input
+                      type="number"
+                      min="1"
+                      max="32"
+                      value={scanWorkers}
+                      onChange={(e) => setScanWorkers(e.target.value)}
+                      placeholder="4"
+                      disabled={scanActive}
+                    />
+                  </label>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={scanFullScan}
+                      onChange={(e) => setScanFullScan(e.target.checked)}
+                      disabled={scanActive}
+                    />
+                    全量扫描
+                  </label>
+                  <button
+                    className="btn-sm"
+                    disabled={scanActive || scanStarting}
+                    onClick={handleStartScan}
+                  >
+                    {scanStarting ? "启动中…" : "开始扫描"}
+                  </button>
+                </div>
+                {scanError && <p className="error" role="alert">{scanError}</p>}
+
+                {/* Active scan progress */}
+                {scanProgress && (
+                  <div className="scan-progress">
+                    <div className="progress-bar">
+                      <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }} />
+                    </div>
+                    <div className="progress-stats">
+                      <span><strong>阶段：</strong>{stageLabel(scanProgress.stage)}</span>
+                      <span><strong>已发现：</strong>{scanProgress.discovered.toLocaleString()}</span>
+                      <span><strong>已处理：</strong>{scanProgress.processed.toLocaleString()}</span>
+                      <span><strong>失败：</strong>{scanProgress.failed.toLocaleString()}</span>
+                      {scanProgress.warning_count > 0 && (
+                        <span className="warn"><strong>警告：</strong>{scanProgress.warning_count}</span>
+                      )}
+                      {scanProgress.error_code && (
+                        <span className="error-text"><strong>错误：</strong>{scanProgress.error_code}</span>
+                      )}
+                    </div>
+                    {scanActive && (
+                      <button
+                        className="btn-sm secondary"
+                        disabled={cancelling}
+                        onClick={handleCancelScan}
+                      >
+                        {cancelling ? "取消中…" : "取消扫描"}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Job history */}
+                <div className="job-history">
+                  <h3>任务历史</h3>
+                  {jobsError ? (
+                    <p className="error" role="alert">{jobsError}</p>
+                  ) : jobs.length === 0 ? (
+                    <p className="muted">暂无任务记录</p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>任务 ID</th>
+                            <th>类型</th>
+                            <th>状态</th>
+                            <th>阶段</th>
+                            <th className="num">已发现</th>
+                            <th className="num">已处理</th>
+                            <th className="num">失败</th>
+                            <th>创建时间</th>
+                            <th>完成时间</th>
+                            <th>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {jobs.map((j) => (
+                            <tr key={j.job_id}>
+                              <td className="mono" title={j.job_id}>{shortHash(j.job_id)}</td>
+                              <td>{j.job_type}</td>
+                              <td>
+                                <span className={stateBadgeClass(j.state)}>
+                                  {stateLabel(j.state)}
+                                </span>
+                              </td>
+                              <td>{stageLabel(j.stage)}</td>
+                              <td className="num">{j.discovered ?? 0}</td>
+                              <td className="num">{j.processed ?? 0}</td>
+                              <td className="num">{j.failed ?? 0}</td>
+                              <td className="muted">{formatDateTime(j.created_at)}</td>
+                              <td className="muted">{formatDateTime(j.completed_at || "")}</td>
+                              <td>
+                                <button
+                                  className="btn-sm"
+                                  disabled={jobDetailLoading}
+                                  onClick={() => handleSelectJob(j.job_id)}
+                                >
+                                  详情
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* Storage list */}
             <section className="card card--full">
               <h2>存储列表</h2>
@@ -464,17 +881,92 @@ export default function App() {
               </section>
             )}
 
-            {/* Scan placeholder */}
-            <section className="card">
-              <h2>扫描</h2>
-              <p className="muted">扫描功能将在后续 PR 中实现</p>
-            </section>
+            {/* Job detail */}
+            {(selectedJob || jobDetailLoading || jobDetailError) && (
+              <section className="card card--full job-detail">
+                <div className="card-header-row">
+                  <h2>任务详情</h2>
+                  <button className="btn-sm secondary" onClick={handleCloseJobDetail}>关闭</button>
+                </div>
+                {jobDetailLoading ? (
+                  <p className="muted">加载中…</p>
+                ) : jobDetailError ? (
+                  <p className="error" role="alert">{jobDetailError}</p>
+                ) : selectedJob ? (
+                  <>
+                    <div className="detail-summary">
+                      <span><strong>任务 ID：</strong><span className="mono">{selectedJob.job_id}</span></span>
+                      <span>
+                        <strong>状态：</strong>
+                        <span className={stateBadgeClass(selectedJob.state)}>
+                          {stateLabel(selectedJob.state)}
+                        </span>
+                      </span>
+                      <span><strong>阶段：</strong>{stageLabel(selectedJob.stage)}</span>
+                      <span><strong>已发现：</strong>{selectedJob.discovered.toLocaleString()}</span>
+                      <span><strong>已处理：</strong>{selectedJob.processed.toLocaleString()}</span>
+                      <span><strong>失败：</strong>{selectedJob.failed.toLocaleString()}</span>
+                      {selectedJob.warning_count > 0 && (
+                        <span className="warn"><strong>警告：</strong>{selectedJob.warning_count}</span>
+                      )}
+                      {selectedJob.error_code && (
+                        <span className="error-text"><strong>错误码：</strong>{selectedJob.error_code}</span>
+                      )}
+                      <span><strong>创建：</strong>{formatDateTime(selectedJob.created_at)}</span>
+                      {selectedJob.started_at && (
+                        <span><strong>开始：</strong>{formatDateTime(selectedJob.started_at)}</span>
+                      )}
+                      {selectedJob.completed_at && (
+                        <span><strong>完成：</strong>{formatDateTime(selectedJob.completed_at)}</span>
+                      )}
+                    </div>
+                    <h3>事件时间线</h3>
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th className="num">#</th>
+                            <th>事件</th>
+                            <th>阶段</th>
+                            <th>状态</th>
+                            <th>时间</th>
+                            <th>载荷</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedJob.events || []).map((ev) => (
+                            <tr key={ev.sequence}>
+                              <td className="num">{ev.sequence}</td>
+                              <td>{eventLabel(ev.event_type)}</td>
+                              <td>{stageLabel(ev.stage)}</td>
+                              <td>
+                                <span className={stateBadgeClass(ev.state)}>
+                                  {stateLabel(ev.state)}
+                                </span>
+                              </td>
+                              <td className="muted">{formatDateTime(ev.created_at)}</td>
+                              <td className="payload-cell">
+                                {ev.payload && Object.keys(ev.payload).length > 0 ? (
+                                  <pre className="payload-json">{JSON.stringify(ev.payload)}</pre>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : null}
+              </section>
+            )}
           </>
         )}
       </main>
 
       <footer className="app-footer">
-        <p>NDG — NAS Data Governance · 只读 Alpha</p>
+        <p>NDG — NAS Data Governance · {isReadWrite ? "读写模式" : "只读 Alpha"}</p>
       </footer>
     </div>
   );

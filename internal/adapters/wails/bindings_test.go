@@ -374,3 +374,337 @@ func TestGetGroupDetailRequiresIdentifiers(t *testing.T) {
 		t.Fatal("expected error for empty SHA-256")
 	}
 }
+
+// ---- V4 scan & job binding tests ----
+
+// createScanDir creates a temp directory with 3 small text files for
+// scan testing. Two files share identical content (duplicate candidates).
+func createScanDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string][]byte{
+		"file1.txt": []byte("hello world"),
+		"file2.txt": []byte("hello world"), // duplicate of file1
+		"file3.txt": []byte("unique content here"),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// waitForJobTerminal polls GetScanProgress until the job reaches a
+// terminal state (COMPLETED, FAILED, or CANCELLED) or the timeout expires.
+func waitForJobTerminal(t *testing.T, api *API, jobID string, timeout time.Duration) ScanJobProgress {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		prog, err := api.GetScanProgress(jobID)
+		if err != nil {
+			t.Fatalf("GetScanProgress: %v", err)
+		}
+		if prog.State == "COMPLETED" || prog.State == "FAILED" || prog.State == "CANCELLED" {
+			return prog
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	prog, _ := api.GetScanProgress(jobID)
+	t.Fatalf("job %s did not reach terminal state within %s (last state: %s)", jobID, timeout, prog.State)
+	return ScanJobProgress{}
+}
+
+func TestOpenProjectReadWriteCreatesNewDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new-project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	info, err := api.OpenProjectReadWrite(path)
+	if err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+	if !info.IsOpen {
+		t.Fatal("expected project to be open")
+	}
+	if info.StorageCount != 0 {
+		t.Errorf("expected 0 storages in new project, got %d", info.StorageCount)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("database file not created: %v", err)
+	}
+}
+
+func TestOpenProjectReadWriteOpensExisting(t *testing.T) {
+	path := createProjectDB(t)
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	info, err := api.OpenProjectReadWrite(path)
+	if err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+	if info.StorageCount != 1 {
+		t.Errorf("expected 1 storage, got %d", info.StorageCount)
+	}
+}
+
+func TestOpenProjectReadWriteRejectsAlreadyOpen(t *testing.T) {
+	path := createProjectDB(t)
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := api.OpenProjectReadWrite(path); err != ErrProjectAlreadyOpen {
+		t.Errorf("expected ErrProjectAlreadyOpen, got %v", err)
+	}
+}
+
+func TestOpenProjectReadWriteRejectsSymlink(t *testing.T) {
+	path := createProjectDB(t)
+	link := filepath.Join(t.TempDir(), "project.db")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	api := NewAPI()
+	if _, err := api.OpenProjectReadWrite(link); err == nil {
+		t.Fatal("expected symlink validation error")
+	}
+}
+
+func TestOpenProjectReadWriteRejectsBadExtension(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.txt")
+	if err := os.WriteFile(path, []byte("not a db"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	api := NewAPI()
+	if _, err := api.OpenProjectReadWrite(path); err == nil {
+		t.Fatal("expected extension validation error")
+	}
+}
+
+func TestStartScanRejectsReadOnlyProject(t *testing.T) {
+	path := createProjectDB(t)
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProject(path); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	_, err := api.StartScan(StartScanRequest{Root: "/tmp"})
+	if err != ErrProjectNotReadWrite {
+		t.Errorf("expected ErrProjectNotReadWrite, got %v", err)
+	}
+}
+
+func TestStartScanRequiresRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+	if _, err := api.StartScan(StartScanRequest{}); err == nil {
+		t.Fatal("expected error for empty root")
+	}
+}
+
+func TestStartScanAndPollProgress(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-scan"})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	if resp.JobID == "" {
+		t.Fatal("expected non-empty job ID")
+	}
+
+	prog := waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+	if prog.State != "COMPLETED" {
+		t.Fatalf("expected COMPLETED, got %s (error: %s)", prog.State, prog.ErrorCode)
+	}
+	if prog.Discovered != 3 {
+		t.Errorf("expected 3 discovered, got %d", prog.Discovered)
+	}
+	if prog.Processed != 3 {
+		t.Errorf("expected 3 processed, got %d", prog.Processed)
+	}
+
+	// Verify the storage was registered in the database.
+	storages, err := api.ListStorages()
+	if err != nil {
+		t.Fatalf("ListStorages: %v", err)
+	}
+	found := false
+	for _, s := range storages {
+		if s.ID == "test-scan" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected storage 'test-scan' to be registered after scan")
+	}
+}
+
+func TestGetScanProgressJobNotFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+	_, err := api.GetScanProgress("job-nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent job")
+	}
+}
+
+func TestCancelScan(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-cancel"})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+
+	// Cancel immediately. For a small directory the scan may have
+	// already completed, in which case the cancel is a no-op and the
+	// job reaches COMPLETED. Either CANCELLED or COMPLETED is acceptable.
+	if err := api.CancelScan(resp.JobID); err != nil {
+		t.Fatalf("CancelScan: %v", err)
+	}
+
+	prog := waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+	if prog.State != "CANCELLED" && prog.State != "COMPLETED" {
+		t.Fatalf("expected CANCELLED or COMPLETED, got %s", prog.State)
+	}
+}
+
+func TestListRecentJobs(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-list"})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	_ = waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+
+	jobs, err := api.ListRecentJobs(10)
+	if err != nil {
+		t.Fatalf("ListRecentJobs: %v", err)
+	}
+	if len(jobs) == 0 {
+		t.Fatal("expected at least 1 job")
+	}
+	first := jobs[0]
+	if first.JobID != resp.JobID {
+		t.Errorf("expected first job ID %s, got %s", resp.JobID, first.JobID)
+	}
+	if first.JobType != "scan" {
+		t.Errorf("expected job type 'scan', got %s", first.JobType)
+	}
+	if first.State != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %s", first.State)
+	}
+}
+
+func TestGetJobDetail(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-detail"})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	_ = waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+
+	detail, err := api.GetJobDetail(resp.JobID)
+	if err != nil {
+		t.Fatalf("GetJobDetail: %v", err)
+	}
+	if detail.JobID != resp.JobID {
+		t.Errorf("expected job ID %s, got %s", resp.JobID, detail.JobID)
+	}
+	if detail.State != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %s", detail.State)
+	}
+	// A completed scan should have at least created, stage, and
+	// completed events.
+	if len(detail.Events) < 2 {
+		t.Errorf("expected at least 2 events, got %d", len(detail.Events))
+	}
+	// Verify event ordering by sequence.
+	for i := 1; i < len(detail.Events); i++ {
+		if detail.Events[i].Sequence <= detail.Events[i-1].Sequence {
+			t.Error("events are not ordered by sequence")
+			break
+		}
+	}
+}
+
+func TestGetJobDetailNotFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+	_, err := api.GetJobDetail("job-nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent job")
+	}
+}
+
+func TestV4MethodsNoProjectOpen(t *testing.T) {
+	api := NewAPI()
+
+	if _, err := api.StartScan(StartScanRequest{Root: "/tmp"}); err != ErrNoProjectOpen {
+		t.Errorf("StartScan: expected ErrNoProjectOpen, got %v", err)
+	}
+	if _, err := api.GetScanProgress("job-1"); err != ErrNoProjectOpen {
+		t.Errorf("GetScanProgress: expected ErrNoProjectOpen, got %v", err)
+	}
+	if err := api.CancelScan("job-1"); err != ErrNoProjectOpen {
+		t.Errorf("CancelScan: expected ErrNoProjectOpen, got %v", err)
+	}
+	if _, err := api.ListRecentJobs(10); err != ErrNoProjectOpen {
+		t.Errorf("ListRecentJobs: expected ErrNoProjectOpen, got %v", err)
+	}
+	if _, err := api.GetJobDetail("job-1"); err != ErrNoProjectOpen {
+		t.Errorf("GetJobDetail: expected ErrNoProjectOpen, got %v", err)
+	}
+}

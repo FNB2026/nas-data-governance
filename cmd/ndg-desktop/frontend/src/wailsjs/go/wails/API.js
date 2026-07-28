@@ -6,12 +6,24 @@ export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
 }
 
+export function CancelScan(arg1) {
+  return window['go']['wails']['API']['CancelScan'](arg1);
+}
+
 export function GetGroupDetail(arg1, arg2) {
   return window['go']['wails']['API']['GetGroupDetail'](arg1, arg2);
 }
 
+export function GetJobDetail(arg1) {
+  return window['go']['wails']['API']['GetJobDetail'](arg1);
+}
+
 export function GetProjectInfo() {
   return window['go']['wails']['API']['GetProjectInfo']();
+}
+
+export function GetScanProgress(arg1) {
+  return window['go']['wails']['API']['GetScanProgress'](arg1);
 }
 
 export function GetVersion() {
@@ -22,12 +34,24 @@ export function ListDuplicateGroups(arg1) {
   return window['go']['wails']['API']['ListDuplicateGroups'](arg1);
 }
 
+export function ListRecentJobs(arg1) {
+  return window['go']['wails']['API']['ListRecentJobs'](arg1);
+}
+
 export function ListStorages() {
   return window['go']['wails']['API']['ListStorages']();
 }
 
 export function OpenProject(arg1) {
   return window['go']['wails']['API']['OpenProject'](arg1);
+}
+
+export function OpenProjectReadWrite(arg1) {
+  return window['go']['wails']['API']['OpenProjectReadWrite'](arg1);
+}
+
+export function StartScan(arg1) {
+  return window['go']['wails']['API']['StartScan'](arg1);
 }
 
 export function ValidateProjectPath(arg1) {

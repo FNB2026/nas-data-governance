@@ -53,10 +53,37 @@ func (r *ScanJobRunner) RunScanAsJob(ctx context.Context, projectID string, in S
 		return "", nil, fmt.Errorf("app: scan job: create: %w", err)
 	}
 
+	result, err := r.runScanJob(ctx, jobID, in)
+	return jobID, result, err
+}
+
+// StartScanJob creates a scan job and starts execution asynchronously.
+// It returns the jobID immediately so the caller can poll progress via
+// JobManager.Get or the adapter layer.
+//
+// The scan runs in a background goroutine. The caller's ctx is used for
+// job creation; the job runs under its own lifecycle managed by
+// JobManager. To cancel an async scan, call JobManager.RequestCancel.
+func (r *ScanJobRunner) StartScanJob(ctx context.Context, projectID string, in ScanInput) (string, error) {
+	jobID, err := r.jobs.Create(ctx, projectID, jobs.JobScan)
+	if err != nil {
+		return "", fmt.Errorf("app: scan job: create: %w", err)
+	}
+
+	go func() {
+		_, _ = r.runScanJob(ctx, jobID, in)
+	}()
+
+	return jobID, nil
+}
+
+// runScanJob executes the scan pipeline for an already-created job.
+// It blocks until the scan completes, fails, or is cancelled.
+func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInput) (*ScanResult, error) {
 	var result *ScanResult
 	var scanErr error
 
-	err = r.jobs.Run(ctx, jobID, func(jobCtx context.Context, reporter *jobs.Reporter) error {
+	err := r.jobs.Run(ctx, jobID, func(jobCtx context.Context, reporter *jobs.Reporter) error {
 		// Start a progress poller goroutine that reads ScanService.Progress()
 		// and reports to the JobManager at intervals.
 		progressDone := make(chan struct{})
@@ -93,7 +120,7 @@ func (r *ScanJobRunner) RunScanAsJob(ctx context.Context, projectID string, in S
 		return nil
 	})
 
-	return jobID, result, err
+	return result, err
 }
 
 // pollScanProgress reads ScanService.Progress() at regular intervals and

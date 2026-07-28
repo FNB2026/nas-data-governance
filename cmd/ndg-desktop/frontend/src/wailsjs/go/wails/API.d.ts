@@ -4,16 +4,28 @@ import {wails} from '../models';
 
 export function CloseProject():Promise<void>;
 
+export function CancelScan(arg1:string):Promise<void>;
+
 export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetailResponse>;
 
+export function GetJobDetail(arg1:string):Promise<wails.JobDetailResponse>;
+
 export function GetProjectInfo():Promise<wails.ProjectInfo>;
+
+export function GetScanProgress(arg1:string):Promise<wails.ScanJobProgress>;
 
 export function GetVersion():Promise<wails.VersionInfo>;
 
 export function ListDuplicateGroups(arg1:wails.ListGroupsRequest):Promise<wails.ListGroupsResponse>;
 
+export function ListRecentJobs(arg1:number):Promise<Array<wails.JobSummary>>;
+
 export function ListStorages():Promise<Array<wails.StorageInfo>>;
 
 export function OpenProject(arg1:string):Promise<wails.ProjectInfo>;
+
+export function OpenProjectReadWrite(arg1:string):Promise<wails.ProjectInfo>;
+
+export function StartScan(arg1:wails.StartScanRequest):Promise<wails.StartScanResponse>;
 
 export function ValidateProjectPath(arg1:string):Promise<void>;

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/events"
+	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/query"
 )
 
@@ -74,6 +76,66 @@ type FileItem struct {
 type GroupDetailResponse struct {
 	GroupSummary
 	Files []FileItem `json:"files"`
+}
+
+// ---- V4 Scan & Job DTOs ----
+
+// StartScanRequest is the input DTO for StartScan.
+type StartScanRequest struct {
+	Root      string `json:"root"`
+	StorageID string `json:"storage_id"`
+	FullScan  bool   `json:"full_scan,omitempty"`
+	Workers   int    `json:"workers,omitempty"`
+}
+
+// StartScanResponse is the output DTO for StartScan.
+type StartScanResponse struct {
+	JobID string `json:"job_id"`
+}
+
+// ScanJobProgress is the progress DTO returned by GetScanProgress.
+// All fields are privacy-safe aggregate counters (ADR-0006 §10).
+type ScanJobProgress struct {
+	JobID         string `json:"job_id"`
+	State         string `json:"state"`
+	Stage         string `json:"stage"`
+	Discovered    int64  `json:"discovered"`
+	Processed     int64  `json:"processed"`
+	Failed        int64  `json:"failed"`
+	WarningCount  int    `json:"warning_count"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	StartedAt     string `json:"started_at,omitempty"`
+	CompletedAt   string `json:"completed_at,omitempty"`
+}
+
+// JobSummary is the list-view DTO for a job in ListRecentJobs.
+type JobSummary struct {
+	JobID       string `json:"job_id"`
+	JobType     string `json:"job_type"`
+	State       string `json:"state"`
+	Stage       string `json:"stage"`
+	Discovered  int64  `json:"discovered,omitempty"`
+	Processed   int64  `json:"processed,omitempty"`
+	Failed      int64  `json:"failed,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	CompletedAt string `json:"completed_at,omitempty"`
+}
+
+// JobEvent is the DTO for a single structured event in GetJobDetail.
+type JobEvent struct {
+	Sequence  int            `json:"sequence"`
+	EventType string         `json:"event_type"`
+	Stage     string         `json:"stage"`
+	State     string         `json:"state"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	CreatedAt string         `json:"created_at"`
+}
+
+// JobDetailResponse is the output DTO for GetJobDetail.
+type JobDetailResponse struct {
+	ScanJobProgress
+	Events []JobEvent `json:"events"`
 }
 
 // ---- mapping helpers ----
@@ -153,6 +215,56 @@ func mapGroupDetail(d query.GroupDetail) GroupDetailResponse {
 	return GroupDetailResponse{
 		GroupSummary: mapGroupSummary(d.DuplicateGroupSummary),
 		Files:        files,
+	}
+}
+
+// ---- V4 job mapping helpers ----
+
+func formatTime(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func mapScanJobProgress(j jobs.JobRun) ScanJobProgress {
+	return ScanJobProgress{
+		JobID:        j.ID,
+		State:        string(j.State),
+		Stage:        string(j.Stage),
+		Discovered:   j.Progress.Discovered,
+		Processed:    j.Progress.Processed,
+		Failed:       j.Progress.Failed,
+		WarningCount: j.WarningCount,
+		ErrorCode:    j.ErrorCode,
+		CreatedAt:    formatTime(&j.CreatedAt),
+		StartedAt:    formatTime(j.StartedAt),
+		CompletedAt:  formatTime(j.CompletedAt),
+	}
+}
+
+func mapJobSummary(j jobs.JobRun) JobSummary {
+	return JobSummary{
+		JobID:       j.ID,
+		JobType:     string(j.JobType),
+		State:       string(j.State),
+		Stage:       string(j.Stage),
+		Discovered:  j.Progress.Discovered,
+		Processed:   j.Progress.Processed,
+		Failed:      j.Progress.Failed,
+		CreatedAt:   formatTime(&j.CreatedAt),
+		CompletedAt: formatTime(j.CompletedAt),
+	}
+}
+
+func mapJobEvent(e events.Event) JobEvent {
+	return JobEvent{
+		Sequence:  e.Sequence,
+		EventType: string(e.EventType),
+		Stage:     e.Stage,
+		State:     e.State,
+		Payload:   e.Payload,
+		CreatedAt: formatTime(&e.CreatedAt),
 	}
 }
 
