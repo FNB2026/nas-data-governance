@@ -271,6 +271,29 @@ func TestListDuplicateGroupsInvalidCursor(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid cursor")
 	}
+	_, err = api.ListDuplicateGroups(ListGroupsRequest{Cursor: "e30="}) // {}
+	if err == nil {
+		t.Fatal("expected error for incomplete cursor")
+	}
+}
+
+func TestListDuplicateGroupsRejectsInvalidLimits(t *testing.T) {
+	path := createProjectDBWithDuplicates(t)
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+	if _, err := api.OpenProject(path); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+
+	for _, req := range []ListGroupsRequest{
+		{PageSize: -1},
+		{PageSize: 201},
+		{MinReclaimableBytes: -1},
+	} {
+		if _, err := api.ListDuplicateGroups(req); err == nil {
+			t.Fatalf("expected validation error for %#v", req)
+		}
+	}
 }
 
 func TestListDuplicateGroupsNoProjectOpen(t *testing.T) {
@@ -333,5 +356,21 @@ func TestGetGroupDetailNoProjectOpen(t *testing.T) {
 	_, err := api.GetGroupDetail("s1", "aaa")
 	if err != ErrNoProjectOpen {
 		t.Errorf("expected ErrNoProjectOpen, got %v", err)
+	}
+}
+
+func TestGetGroupDetailRequiresIdentifiers(t *testing.T) {
+	path := createProjectDBWithDuplicates(t)
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+	if _, err := api.OpenProject(path); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+
+	if _, err := api.GetGroupDetail("", "aaa"); err == nil {
+		t.Fatal("expected error for empty storage ID")
+	}
+	if _, err := api.GetGroupDetail("s1", ""); err == nil {
+		t.Fatal("expected error for empty SHA-256")
 	}
 }

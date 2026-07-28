@@ -27,6 +27,7 @@ cmd/ndg-desktop/frontend/dist/*
 !cmd/ndg-desktop/frontend/dist/.gitkeep
 cmd/ndg-desktop/frontend/package.json.md5
 cmd/ndg-desktop/build/bin/
+cmd/ndg-desktop/build/darwin/Info.dev.plist
 
 # build artifacts (binary at repo root, not the cmd/nas-governance source dir)
 /nas-governance

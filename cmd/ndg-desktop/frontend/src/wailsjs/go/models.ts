@@ -7,14 +7,14 @@ export namespace wails {
 	    size: number;
 	    modified_at: string;
 	    is_symlink: boolean;
-	    quick_hash: string;
-	    content_sha256: string;
-	    physical_device: number;
-	    physical_inode: number;
-	    physical_link_count: number;
+	    quick_hash?: string;
+	    content_sha256?: string;
+	    physical_device?: number;
+	    physical_inode?: number;
+	    physical_link_count?: number;
 	    physical_reliable: boolean;
-	    format_kind: string;
-	    format_mime: string;
+	    format_kind?: string;
+	    format_mime?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new FileItem(source);
@@ -48,7 +48,7 @@ export namespace wails {
 	    hardlink_alias_count: number;
 	    physical_reclaimable_bytes: number;
 	    sample_path: string;
-	    decision_type: string;
+	    decision_type?: string;
 	    files: FileItem[];
 
 	    static createFrom(source: any = {}) {
@@ -67,8 +67,26 @@ export namespace wails {
 	        this.physical_reclaimable_bytes = source["physical_reclaimable_bytes"];
 	        this.sample_path = source["sample_path"];
 	        this.decision_type = source["decision_type"];
-	        this.files = source["files"]?.map((item: any) => FileItem.createFrom(item));
+	        this.files = this.convertValues(source["files"], FileItem);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class GroupSummary {
 	    group_id: string;
@@ -80,7 +98,7 @@ export namespace wails {
 	    hardlink_alias_count: number;
 	    physical_reclaimable_bytes: number;
 	    sample_path: string;
-	    decision_type: string;
+	    decision_type?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new GroupSummary(source);
@@ -101,10 +119,10 @@ export namespace wails {
 	    }
 	}
 	export class ListGroupsRequest {
-	    storage_id: string;
-	    page_size: number;
-	    cursor: string;
-	    min_reclaimable_bytes: number;
+	    storage_id?: string;
+	    page_size?: number;
+	    cursor?: string;
+	    min_reclaimable_bytes?: number;
 
 	    static createFrom(source: any = {}) {
 	        return new ListGroupsRequest(source);
@@ -120,7 +138,7 @@ export namespace wails {
 	}
 	export class ListGroupsResponse {
 	    groups: GroupSummary[];
-	    next_cursor: string;
+	    next_cursor?: string;
 	    total_count: number;
 
 	    static createFrom(source: any = {}) {
@@ -129,10 +147,28 @@ export namespace wails {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.groups = source["groups"]?.map((item: any) => GroupSummary.createFrom(item));
+	        this.groups = this.convertValues(source["groups"], GroupSummary);
 	        this.next_cursor = source["next_cursor"];
 	        this.total_count = source["total_count"];
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ProjectInfo {
 	    path: string;

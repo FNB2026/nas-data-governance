@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CloseProject,
   GetGroupDetail,
@@ -20,8 +20,8 @@ function errorText(error: unknown): string {
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
@@ -47,6 +47,11 @@ export default function App() {
   const [totalCount, setTotalCount] = useState(0);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [storageFilter, setStorageFilter] = useState("");
+  const [minReclaimableMiB, setMinReclaimableMiB] = useState("");
+  const [appliedStorageFilter, setAppliedStorageFilter] = useState("");
+  const [appliedMinimumBytes, setAppliedMinimumBytes] = useState(0);
+  const groupsRequestInFlight = useRef(false);
 
   // Group detail state
   const [selectedGroup, setSelectedGroup] = useState<wails.GroupDetailResponse | null>(null);
@@ -74,13 +79,20 @@ export default function App() {
     }
   }, []);
 
-  const loadGroups = useCallback(async (cursor: string) => {
-    if (!hasWailsRuntime()) return;
+  const loadGroups = useCallback(async (
+    cursor: string,
+    storageId: string,
+    minReclaimableBytes: number,
+  ) => {
+    if (!hasWailsRuntime() || groupsRequestInFlight.current) return;
+    groupsRequestInFlight.current = true;
     setGroupsLoading(true);
     try {
       const resp = await ListDuplicateGroups({
+        storage_id: storageId,
         page_size: 20,
         cursor,
+        min_reclaimable_bytes: minReclaimableBytes,
       } as wails.ListGroupsRequest);
       if (cursor) {
         setGroups((prev) => [...prev, ...(resp.groups || [])]);
@@ -93,9 +105,17 @@ export default function App() {
     } catch (e: unknown) {
       setGroupsError(errorText(e));
     } finally {
+      groupsRequestInFlight.current = false;
       setGroupsLoading(false);
     }
   }, []);
+
+  const parsedMinimumBytes = (): number | null => {
+    if (!minReclaimableMiB.trim()) return 0;
+    const value = Number(minReclaimableMiB);
+    if (!Number.isFinite(value) || value < 0) return null;
+    return Math.floor(value * 1024 * 1024);
+  };
 
   const handleOpenProject = async () => {
     if (!projectPath.trim()) {
@@ -108,9 +128,12 @@ export default function App() {
       setProject(info);
       setError(null);
       setSelectedGroup(null);
-      // Auto-load storages and first page of groups
-      await loadStorages();
-      await loadGroups("");
+      setStorageFilter("");
+      setMinReclaimableMiB("");
+      setAppliedStorageFilter("");
+      setAppliedMinimumBytes(0);
+      // These read-only queries are independent and may start together.
+      await Promise.all([loadStorages(), loadGroups("", "", 0)]);
     } catch (e: unknown) {
       setError(errorText(e));
     } finally {
@@ -128,6 +151,10 @@ export default function App() {
       setNextCursor("");
       setTotalCount(0);
       setSelectedGroup(null);
+      setStorageFilter("");
+      setMinReclaimableMiB("");
+      setAppliedStorageFilter("");
+      setAppliedMinimumBytes(0);
       setError(null);
     } catch (e: unknown) {
       setError(errorText(e));
@@ -142,8 +169,10 @@ export default function App() {
       const info = await GetProjectInfo();
       setProject(info);
       setError(null);
-      await loadStorages();
-      await loadGroups("");
+      await Promise.all([
+        loadStorages(),
+        loadGroups("", appliedStorageFilter, appliedMinimumBytes),
+      ]);
       setSelectedGroup(null);
     } catch (e: unknown) {
       setError(errorText(e));
@@ -154,8 +183,20 @@ export default function App() {
 
   const handleLoadMore = () => {
     if (nextCursor && !groupsLoading) {
-      loadGroups(nextCursor);
+      loadGroups(nextCursor, appliedStorageFilter, appliedMinimumBytes);
     }
+  };
+
+  const handleApplyFilters = () => {
+    const minimum = parsedMinimumBytes();
+    if (minimum === null) {
+      setGroupsError("最小可回收空间必须是非负数");
+      return;
+    }
+    setSelectedGroup(null);
+    setAppliedStorageFilter(storageFilter);
+    setAppliedMinimumBytes(minimum);
+    void loadGroups("", storageFilter, minimum);
   };
 
   const handleSelectGroup = async (storageId: string, sha256: string) => {
@@ -269,6 +310,38 @@ export default function App() {
                 {totalCount > 0 && (
                   <span className="count-badge">共 {totalCount} 组</span>
                 )}
+              </div>
+              <div className="filter-row" aria-label="重复组筛选">
+                <label>
+                  存储
+                  <select
+                    value={storageFilter}
+                    onChange={(event) => setStorageFilter(event.target.value)}
+                  >
+                    <option value="">全部存储</option>
+                    {storages.map((storage) => (
+                      <option key={storage.id} value={storage.id}>{storage.id}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  最小可回收（MiB）
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={minReclaimableMiB}
+                    onChange={(event) => setMinReclaimableMiB(event.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+                <button
+                  className="btn-sm"
+                  disabled={groupsLoading}
+                  onClick={handleApplyFilters}
+                >
+                  应用筛选
+                </button>
               </div>
               {groupsError ? (
                 <p className="error" role="alert">{groupsError}</p>

@@ -65,7 +65,7 @@ var ErrProjectAlreadyOpen = errors.New("wails: a project is already open; close 
 //
 // Future PRs will add: StartScan, GetScanProgress, etc.
 type API struct {
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	store  *store.SQLiteStore
 	dupSvc *app.DuplicateService
 	path   string
@@ -121,6 +121,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	if err != nil {
 		_ = st.Close()
 		a.store = nil
+		a.dupSvc = nil
 		a.path = ""
 		return ProjectInfo{}, err
 	}
@@ -147,8 +148,8 @@ func (a *API) CloseProject() error {
 // GetProjectInfo returns metadata about the currently open project.
 // Returns ErrNoProjectOpen if no project is open.
 func (a *API) GetProjectInfo() (ProjectInfo, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	if a.store == nil {
 		return ProjectInfo{}, ErrNoProjectOpen
@@ -212,8 +213,8 @@ func (a *API) projectInfoLocked(ctx context.Context) (ProjectInfo, error) {
 
 // ListStorages returns all registered storage entries in the open project.
 func (a *API) ListStorages() ([]StorageInfo, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	if a.store == nil {
 		return nil, ErrNoProjectOpen
@@ -229,8 +230,8 @@ func (a *API) ListStorages() ([]StorageInfo, error) {
 // Pagination is keyset-based: pass the NextCursor from the previous
 // response to fetch the next page.
 func (a *API) ListDuplicateGroups(req ListGroupsRequest) (ListGroupsResponse, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	if a.dupSvc == nil {
 		return ListGroupsResponse{}, ErrNoProjectOpen
@@ -249,11 +250,14 @@ func (a *API) ListDuplicateGroups(req ListGroupsRequest) (ListGroupsResponse, er
 // GetGroupDetail loads the full file member list for a single duplicate
 // group identified by storageID and content SHA-256.
 func (a *API) GetGroupDetail(storageID, sha256 string) (GroupDetailResponse, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	if a.dupSvc == nil {
 		return GroupDetailResponse{}, ErrNoProjectOpen
+	}
+	if strings.TrimSpace(storageID) == "" || strings.TrimSpace(sha256) == "" {
+		return GroupDetailResponse{}, errors.New("wails: storage_id and sha256 are required")
 	}
 	detail, err := a.dupSvc.GroupDetail(context.Background(), storageID, sha256)
 	if err != nil {

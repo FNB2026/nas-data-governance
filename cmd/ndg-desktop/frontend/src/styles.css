@@ -68,6 +68,7 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 1.5rem;
+  min-width: 0;
 }
 
 .card h2 {
@@ -164,6 +165,10 @@ button.secondary {
   gap: 1rem;
 }
 
+.app-main--dashboard > .card {
+  width: 100%;
+}
+
 .card--full {
   grid-column: 1 / -1;
 }
@@ -185,6 +190,39 @@ button.secondary {
   background: var(--bg);
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin: -0.25rem 0 1rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.filter-row label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.filter-row select,
+.filter-row input {
+  min-width: 150px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.filter-row button {
+  margin-bottom: 1px;
 }
 
 /* ---- Buttons ---- */
@@ -280,5 +318,33 @@ button.secondary {
 }
 
 .detail-summary span {
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .app-header,
+  .app-main {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .app-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .filter-row label,
+  .filter-row select,
+  .filter-row input {
+    width: 100%;
+  }
+
+  .filter-row label {
+    flex: 1 1 100%;
+  }
 }

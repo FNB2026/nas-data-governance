@@ -4,7 +4,7 @@ import {wails} from '../models';
 
 export function CloseProject():Promise<void>;
 
-export function GetGroupDetail(arg1:string, arg2:string):Promise<wails.GroupDetailResponse>;
+export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetailResponse>;
 
 export function GetProjectInfo():Promise<wails.ProjectInfo>;
 

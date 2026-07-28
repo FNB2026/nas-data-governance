@@ -81,11 +81,15 @@ type GroupDetailResponse struct {
 func mapStorages(storages []domain.Storage) []StorageInfo {
 	out := make([]StorageInfo, len(storages))
 	for i, s := range storages {
+		createdAt := ""
+		if !s.CreatedAt.IsZero() {
+			createdAt = s.CreatedAt.UTC().Format(time.RFC3339)
+		}
 		out[i] = StorageInfo{
 			ID:        s.ID,
 			RootPath:  s.RootPath,
 			Kind:      s.Kind,
-			CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt: createdAt,
 		}
 	}
 	return out
@@ -119,12 +123,16 @@ func mapGroupPage(page query.GroupPage) ListGroupsResponse {
 }
 
 func mapFileItem(f domain.FileInstance) FileItem {
+	modifiedAt := ""
+	if !f.ModifiedAt.IsZero() {
+		modifiedAt = f.ModifiedAt.UTC().Format(time.RFC3339)
+	}
 	return FileItem{
 		StorageID:         f.StorageID,
 		Path:              f.Path,
 		Name:              f.Name,
 		Size:              f.Size,
-		ModifiedAt:        f.ModifiedAt.UTC().Format(time.RFC3339),
+		ModifiedAt:        modifiedAt,
 		IsSymlink:         f.IsSymlink,
 		QuickHash:         f.QuickHash,
 		ContentSHA256:     f.ContentSHA256,
@@ -182,9 +190,18 @@ func decodeCursor(s string) (*query.GroupCursor, error) {
 
 // toQuery converts a ListGroupsRequest into a query.GroupQuery.
 func (req ListGroupsRequest) toQuery() (query.GroupQuery, error) {
+	if req.PageSize < 0 || req.PageSize > 200 {
+		return query.GroupQuery{}, fmt.Errorf("wails: page_size must be between 1 and 200, or 0 for the default")
+	}
+	if req.MinReclaimableBytes < 0 {
+		return query.GroupQuery{}, fmt.Errorf("wails: min_reclaimable_bytes must not be negative")
+	}
 	cursor, err := decodeCursor(req.Cursor)
 	if err != nil {
 		return query.GroupQuery{}, err
+	}
+	if cursor != nil && (cursor.SHA256 == "" || cursor.StorageID == "" || cursor.ReclaimableEstimate < 0) {
+		return query.GroupQuery{}, fmt.Errorf("wails: cursor is incomplete or invalid")
 	}
 	return query.GroupQuery{
 		StorageID:           req.StorageID,
