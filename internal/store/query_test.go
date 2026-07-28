@@ -248,8 +248,8 @@ func TestListDuplicateGroupsMinReclaimableFilter(t *testing.T) {
 
 	// Filter: min reclaimable 500 → only the 10000-byte group
 	page, err := st.ListDuplicateGroups(ctx, query.GroupQuery{
-		PageSize:             20,
-		MinReclaimableBytes:  500,
+		PageSize:            20,
+		MinReclaimableBytes: 500,
 	})
 	if err != nil {
 		t.Fatalf("ListDuplicateGroups: %v", err)
@@ -346,6 +346,51 @@ func TestListDuplicateGroupsHardlinkStats(t *testing.T) {
 	}
 	if g.PhysicalReclaimableBytes != 0 {
 		t.Errorf("PhysicalReclaimableBytes: expected 0, got %d", g.PhysicalReclaimableBytes)
+	}
+}
+
+func TestListDuplicateGroupsMinReclaimableExcludesHardlinkOnlyGroup(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedStorage(t, st, "s1")
+
+	// Three paths reference one physical object, so physical reclaimable is 0.
+	seedFileWithPhysical(t, st, "s1", "/vol/a.txt", 500, "hashX", 1, 99)
+	seedFileWithPhysical(t, st, "s1", "/vol/b.txt", 500, "hashX", 1, 99)
+	seedFileWithPhysical(t, st, "s1", "/vol/c.txt", 500, "hashX", 1, 99)
+
+	page, err := st.ListDuplicateGroups(ctx, query.GroupQuery{
+		PageSize: 20, MinReclaimableBytes: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListDuplicateGroups: %v", err)
+	}
+	if len(page.Groups) != 0 || page.TotalCount != 0 {
+		t.Fatalf("hardlink-only group should be filtered out: %#v", page)
+	}
+}
+
+func TestListDuplicateGroupsSortsByPhysicalReclaimable(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedStorage(t, st, "s1")
+
+	// A large path-level group is one physical object and frees no space.
+	seedFileWithPhysical(t, st, "s1", "/vol/a1", 10000, "aaa", 1, 10)
+	seedFileWithPhysical(t, st, "s1", "/vol/a2", 10000, "aaa", 1, 10)
+	// A smaller group contains two physical copies and frees 100 bytes.
+	seedFileWithPhysical(t, st, "s1", "/vol/b1", 100, "bbb", 1, 20)
+	seedFileWithPhysical(t, st, "s1", "/vol/b2", 100, "bbb", 1, 21)
+
+	page, err := st.ListDuplicateGroups(ctx, query.GroupQuery{PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListDuplicateGroups: %v", err)
+	}
+	if len(page.Groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(page.Groups))
+	}
+	if page.Groups[0].SHA256 != "bbb" {
+		t.Fatalf("expected physically reclaimable group first, got %s", page.Groups[0].SHA256)
 	}
 }
 

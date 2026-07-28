@@ -2,10 +2,8 @@
 // the React frontend and the internal/app application services.
 //
 // Per ADR-0006:
-//   - This is the ONLY package outside cmd/ that may import Wails types
-//     (for context.Context passed by the Wails runtime).
-//   - It does NOT import Wails framework packages directly — it receives
-//     context.Context from the Wails runtime and passes it to app services.
+//   - This is the ONLY package outside cmd/ used as the Wails binding layer.
+//   - It does NOT import Wails framework packages directly.
 //   - It exposes only high-level use cases, never raw file/SQL/command APIs.
 //   - All returned types are plain structs with json tags, safe for Wails
 //     to serialize to the frontend.
@@ -18,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/FNB2026/nas-data-governance/internal/store"
@@ -54,7 +53,7 @@ var ErrProjectAlreadyOpen = errors.New("wails: a project is already open; close 
 //
 // The API is designed for V3 (read-only Alpha):
 //   - GetVersion: returns build version info
-//   - OpenProject: opens a project database (read-write for scan/learn)
+//   - OpenProject: opens an existing project database read-only
 //   - CloseProject: closes the current project
 //   - GetProjectInfo: returns metadata about the open project
 //   - ValidateProjectPath: checks if a file looks like a valid project DB
@@ -86,9 +85,9 @@ func (a *API) GetVersion() VersionInfo {
 // OpenProject opens a project database at the given path. If a project
 // is already open, it returns ErrProjectAlreadyOpen.
 //
-// The path must be a valid SQLite database file. The method creates the
-// database if it does not exist (store.Open applies migrations).
-func (a *API) OpenProject(ctx context.Context, path string) (ProjectInfo, error) {
+// The path must be an existing regular SQLite database file. Opening a
+// project never creates a file or applies migrations in the read-only Alpha.
+func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -96,21 +95,15 @@ func (a *API) OpenProject(ctx context.Context, path string) (ProjectInfo, error)
 		return ProjectInfo{}, ErrProjectAlreadyOpen
 	}
 
+	if err := validateProjectPath(path); err != nil {
+		return ProjectInfo{}, err
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return ProjectInfo{}, fmt.Errorf("wails: resolve project path: %w", err)
 	}
 
-	// Verify the file exists and is not a directory.
-	if info, err := os.Stat(absPath); err == nil {
-		if info.IsDir() {
-			return ProjectInfo{}, fmt.Errorf("wails: project path is a directory, not a file")
-		}
-	} else if !os.IsNotExist(err) {
-		return ProjectInfo{}, fmt.Errorf("wails: inspect project path: %w", err)
-	}
-
-	st, err := store.Open(ctx, absPath)
+	st, err := store.OpenReadOnly(context.Background(), absPath)
 	if err != nil {
 		return ProjectInfo{}, fmt.Errorf("wails: open project: %w", err)
 	}
@@ -118,7 +111,14 @@ func (a *API) OpenProject(ctx context.Context, path string) (ProjectInfo, error)
 	a.store = st
 	a.path = absPath
 
-	return a.projectInfoLocked(), nil
+	info, err := a.projectInfoLocked(context.Background())
+	if err != nil {
+		_ = st.Close()
+		a.store = nil
+		a.path = ""
+		return ProjectInfo{}, err
+	}
+	return info, nil
 }
 
 // CloseProject closes the currently open project database. If no project
@@ -139,7 +139,7 @@ func (a *API) CloseProject() error {
 
 // GetProjectInfo returns metadata about the currently open project.
 // Returns ErrNoProjectOpen if no project is open.
-func (a *API) GetProjectInfo(ctx context.Context) (ProjectInfo, error) {
+func (a *API) GetProjectInfo() (ProjectInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -147,7 +147,7 @@ func (a *API) GetProjectInfo(ctx context.Context) (ProjectInfo, error) {
 		return ProjectInfo{}, ErrNoProjectOpen
 	}
 
-	return a.projectInfoLocked(), nil
+	return a.projectInfoLocked(context.Background())
 }
 
 // ValidateProjectPath checks whether the given path looks like a valid
@@ -156,6 +156,10 @@ func (a *API) GetProjectInfo(ctx context.Context) (ProjectInfo, error) {
 //
 // Returns nil if valid, an error describing the problem otherwise.
 func (a *API) ValidateProjectPath(path string) error {
+	return validateProjectPath(path)
+}
+
+func validateProjectPath(path string) error {
 	if path == "" {
 		return errors.New("wails: project path is empty")
 	}
@@ -163,14 +167,20 @@ func (a *API) ValidateProjectPath(path string) error {
 	if err != nil {
 		return fmt.Errorf("wails: resolve path: %w", err)
 	}
-	info, err := os.Stat(absPath)
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		return fmt.Errorf("wails: file not found: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("wails: project path must not be a symbolic link")
 	}
 	if info.IsDir() {
 		return errors.New("wails: path is a directory, not a file")
 	}
-	ext := filepath.Ext(absPath)
+	if !info.Mode().IsRegular() {
+		return errors.New("wails: project path is not a regular file")
+	}
+	ext := strings.ToLower(filepath.Ext(absPath))
 	if ext != ".db" && ext != ".sqlite" && ext != ".sqlite3" {
 		return fmt.Errorf("wails: expected .db, .sqlite, or .sqlite3 extension, got %s", ext)
 	}
@@ -179,18 +189,14 @@ func (a *API) ValidateProjectPath(path string) error {
 
 // projectInfoLocked builds ProjectInfo from the current state.
 // Caller must hold a.mu.
-func (a *API) projectInfoLocked() ProjectInfo {
-	return ProjectInfo{
-		Path:   a.path,
-		IsOpen: true,
+func (a *API) projectInfoLocked(ctx context.Context) (ProjectInfo, error) {
+	storages, err := a.store.ListStorages(ctx)
+	if err != nil {
+		return ProjectInfo{}, fmt.Errorf("wails: read project metadata: %w", err)
 	}
-}
-
-// Store returns the currently open store, or nil. This is used by
-// the Wails main.go to pass the store to other bound services
-// (e.g., ScanService) when they are added in future PRs.
-func (a *API) Store() *store.SQLiteStore {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.store
+	return ProjectInfo{
+		Path:         a.path,
+		IsOpen:       true,
+		StorageCount: len(storages),
+	}, nil
 }

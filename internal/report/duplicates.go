@@ -64,21 +64,20 @@ type PhysicalStats struct {
 func ComputePhysicalStats(members []domain.FileInstance, size int64) PhysicalStats {
 	pathCount := len(members)
 
-	// Count distinct physical objects via PhysicalKey.
+	// Count distinct reliable physical objects via PhysicalKey. Every
+	// unreliable member is counted separately: an empty key means "unknown",
+	// never "the same object as another unknown member".
 	physicalSet := map[string]struct{}{}
+	unreliableCount := 0
 	for _, f := range members {
 		key := f.Physical.PhysicalKey(f.StorageID)
+		if key == "" {
+			unreliableCount++
+			continue
+		}
 		physicalSet[key] = struct{}{}
 	}
-	physicalCopyCount := len(physicalSet)
-
-	// If every file returned an empty PhysicalKey, physicalSet has 1 entry
-	// (the "" key) but that does NOT mean they share one physical object —
-	// it means identity is unknown. In that case, treat each path as a
-	// separate physical copy.
-	if _, hasEmpty := physicalSet[""]; hasEmpty && physicalCopyCount == 1 && pathCount > 1 {
-		physicalCopyCount = pathCount
-	}
+	physicalCopyCount := len(physicalSet) + unreliableCount
 
 	hardlinkAliasCount := pathCount - physicalCopyCount
 	if hardlinkAliasCount < 0 {

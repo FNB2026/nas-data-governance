@@ -81,6 +81,36 @@ body {
   font-size: 0.9rem;
 }
 
+.project-path {
+  overflow-wrap: anywhere;
+}
+
+.project-open .muted {
+  margin-bottom: 0.75rem;
+}
+
+.path-row,
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.path-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
+.path-row button,
+.button-row button {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
 button {
   background: var(--accent);
   color: white;
@@ -94,6 +124,16 @@ button {
 
 button:hover {
   opacity: 0.9;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button.secondary {
+  background: #e8e8ed;
+  color: var(--text);
 }
 
 .muted {

@@ -43,6 +43,7 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	// default for all pre-existing rows.
 	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{
 		{"file_status", "TEXT NOT NULL DEFAULT 'active'"},
+		{"physical_reliable", "INTEGER NOT NULL DEFAULT 0"},
 	}); err != nil {
 		return fmt.Errorf("store: migration 4 alter file_instances: %w", err)
 	}

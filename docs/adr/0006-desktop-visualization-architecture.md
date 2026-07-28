@@ -83,7 +83,8 @@ Wails 禁止直接绑定 `ReadFile`、`DeleteFile`、`MoveFile`、`RunCommand`�
 | 006 | `006_desktop_jobs.sql` | `job_runs` / `job_events` | V2 |
 | 007 | `007_directory_context_query_fields.sql` | 查询字段反规范化 | V1 |
 | 008 | `008_governance_decisions.sql` | `group_decisions` | V1 |
-| 009 | `009_scan_snapshots.sql` | `scan_runs` / `scan_run_membership` | 后续 |
+| 009 | `009_physical_identity_reliability.sql` | `file_instances.physical_reliable` | V1 修复 |
+| 010 | `010_scan_snapshots.sql` | `scan_runs` / `scan_run_membership` | 后续 |
 
 每次新增迁移后同步修改 `schemas/schemas.go` 的 `All()` 与对应 `var Schema00X string`，并增加连续升级集成测试。
 

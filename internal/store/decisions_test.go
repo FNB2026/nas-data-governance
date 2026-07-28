@@ -227,6 +227,31 @@ func TestSaveGroupDecisionValidation(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for empty decision_type")
 	}
+
+	// Unknown decision values must not leak into the read model.
+	err = st.SaveGroupDecision(ctx, domain.GroupDecision{
+		ID: "d3", GroupID: "g1", DecisionType: domain.ReviewDecisionType("TYPO"),
+	})
+	if err == nil {
+		t.Error("expected error for unsupported decision_type")
+	}
+
+	// A primary-retention decision is incomplete without its selected file.
+	err = st.SaveGroupDecision(ctx, domain.GroupDecision{
+		ID: "d4", GroupID: "g1", DecisionType: domain.DecisionPrimaryRetention,
+	})
+	if err == nil {
+		t.Error("expected error for PRIMARY_RETENTION without retained_file_id")
+	}
+
+	fileID := int64(1)
+	err = st.SaveGroupDecision(ctx, domain.GroupDecision{
+		ID: "d5", GroupID: "g1", DecisionType: domain.DecisionKeepAll,
+		RetainedFileID: &fileID,
+	})
+	if err == nil {
+		t.Error("expected error for retained_file_id on KEEP_ALL")
+	}
 }
 
 func TestListGroupDecisionsOrderingByUpdatedAt(t *testing.T) {
@@ -277,7 +302,6 @@ func TestGroupDecisionAllDecisionTypes(t *testing.T) {
 		domain.DecisionRejectedSuggestion,
 		domain.DecisionCrossArchive,
 		domain.DecisionBackupRelation,
-		domain.DecisionPrimaryRetention,
 	}
 	for i, dt := range types {
 		d := domain.GroupDecision{

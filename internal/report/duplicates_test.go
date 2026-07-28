@@ -135,6 +135,34 @@ func TestDuplicateGroupsUnreliableIdentityIsConservative(t *testing.T) {
 	}
 }
 
+func TestDuplicateGroupsMixedReliableAndUnreliableIdentityIsConservative(t *testing.T) {
+	// Two hardlink aliases plus two members whose identity is unknown.
+	// Unknown identities must each count as an independent physical copy.
+	files := []domain.FileInstance{
+		{StorageID: "s1", Path: "a", Size: 200, ContentSHA256: "mixed",
+			Physical: domain.PhysicalIdentity{Device: 1, Inode: 50, Reliable: true}},
+		{StorageID: "s1", Path: "b", Size: 200, ContentSHA256: "mixed",
+			Physical: domain.PhysicalIdentity{Device: 1, Inode: 50, Reliable: true}},
+		{StorageID: "s1", Path: "c", Size: 200, ContentSHA256: "mixed"},
+		{StorageID: "s1", Path: "d", Size: 200, ContentSHA256: "mixed"},
+	}
+
+	groups := DuplicateGroups(files)
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	g := groups[0]
+	if g.PhysicalCopyCount != 3 {
+		t.Errorf("PhysicalCopyCount: expected 3, got %d", g.PhysicalCopyCount)
+	}
+	if g.HardlinkAliasCount != 1 {
+		t.Errorf("HardlinkAliasCount: expected 1, got %d", g.HardlinkAliasCount)
+	}
+	if g.PhysicalReclaimableBytes != 400 {
+		t.Errorf("PhysicalReclaimableBytes: expected 400, got %d", g.PhysicalReclaimableBytes)
+	}
+}
+
 func TestDuplicateGroupsGroupIDIsStableAndNonEmpty(t *testing.T) {
 	files := []domain.FileInstance{
 		{StorageID: "s1", Path: "a", Size: 10, ContentSHA256: "stable_hash"},

@@ -72,7 +72,7 @@ WHERE file_status = 'active'
 | Migration 005 | **006** | `006_desktop_jobs.sql` | `job_runs` / `job_events` |
 | Migration 006 | **007** | `007_directory_context_query_fields.sql` | 查询字段反规范化 |
 | Migration 007 | **008** | `008_governance_decisions.sql` | `group_decisions` |
-| Migration 008 | **009** | `009_scan_snapshots.sql` | `scan_runs` / `scan_run_membership` |
+| Migration 008 | **010** | `010_scan_snapshots.sql` | `scan_runs` / `scan_run_membership` |
 
 **配套要求：**
 

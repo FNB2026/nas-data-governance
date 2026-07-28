@@ -20,10 +20,9 @@ var _ query.Reader = (*SQLiteStore)(nil)
 // members for physical stats computation.
 //
 // The sort key is (reclaimable_estimate DESC, content_sha256 ASC,
-// storage_id ASC) where reclaimable_estimate = (path_count - 1) * size.
-// This is an upper bound on PhysicalReclaimableBytes (which may be less
-// due to hardlinks); physical stats are computed accurately in Go after
-// fetching the page.
+// storage_id ASC). reclaimable_estimate is hardlink-aware: reliable
+// Device+Inode pairs collapse to one physical object while unknown
+// identities remain separate, conservative physical copies.
 func (s *SQLiteStore) ListDuplicateGroups(ctx context.Context, q query.GroupQuery) (query.GroupPage, error) {
 	pageSize := q.PageSize
 	if pageSize <= 0 || pageSize > 200 {
@@ -41,14 +40,13 @@ func (s *SQLiteStore) ListDuplicateGroups(ctx context.Context, q query.GroupQuer
 	var args []any
 
 	sb.WriteString(`
-WITH dup_groups AS (
-    SELECT
-        storage_id,
-        content_sha256,
-        COUNT(*) AS path_count,
-        MIN(size) AS group_size,
-        MIN(path) AS sample_path,
-        (COUNT(*) - 1) * MIN(size) AS reclaimable_estimate
+WITH physical_files AS (
+    SELECT *,
+        CASE
+            WHEN physical_reliable = 0 OR device IS NULL OR inode IS NULL OR device = 0 OR inode = 0
+                THEN 'path:' || path
+            ELSE 'inode:' || printf('%lld', device) || ':' || printf('%lld', inode)
+        END AS physical_key
     FROM file_instances
     WHERE file_status = 'active'
       AND content_sha256 IS NOT NULL
@@ -58,10 +56,20 @@ WITH dup_groups AS (
 		args = append(args, q.StorageID)
 	}
 	sb.WriteString(`
+),
+dup_groups AS (
+    SELECT
+        storage_id,
+        content_sha256,
+        COUNT(*) AS path_count,
+        MIN(size) AS group_size,
+        MIN(path) AS sample_path,
+        (COUNT(DISTINCT physical_key) - 1) * MIN(size) AS reclaimable_estimate
+    FROM physical_files
     GROUP BY storage_id, content_sha256
     HAVING COUNT(*) > 1`)
 	if q.MinReclaimableBytes > 0 {
-		sb.WriteString(" AND (COUNT(*) - 1) * MIN(size) >= ?")
+		sb.WriteString(" AND (COUNT(DISTINCT physical_key) - 1) * MIN(size) >= ?")
 		args = append(args, q.MinReclaimableBytes)
 	}
 	sb.WriteString(`
@@ -90,7 +98,7 @@ page_groups AS (
 SELECT
     pg.storage_id, pg.content_sha256, pg.path_count, pg.group_size,
     pg.sample_path, pg.reclaimable_estimate,
-    fi.path, fi.name, fi.size, fi.mode, fi.mtime, fi.device, fi.inode,
+    fi.path, fi.name, fi.size, fi.mode, fi.mtime, fi.device, fi.inode, fi.physical_reliable,
     fi.quick_hash, fi.discovered_at
 FROM page_groups pg
 JOIN file_instances fi
@@ -133,13 +141,14 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 			size                                 int64
 			mode                                 uint32
 			device, inode                        int64
+			physicalReliable                     bool
 			quickHash                            string
 		)
 
 		if err := rows.Scan(
 			&storageID, &contentSHA256, &pathCount, &groupSize,
 			&samplePath, &reclaimableEstimate,
-			&path, &name, &size, &mode, &mtime, &device, &inode,
+			&path, &name, &size, &mode, &mtime, &device, &inode, &physicalReliable,
 			&quickHash, &discoveredAt,
 		); err != nil {
 			return query.GroupPage{}, fmt.Errorf("store: scan duplicate group row: %w", err)
@@ -171,11 +180,9 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 			QuickHash:     quickHash,
 			ContentSHA256: contentSHA256,
 		}
-		// Reconstruct PhysicalIdentity from device/inode columns.
-		// The database does not persist the Reliable flag; we infer it
-		// from non-zero device and inode values so that hardlink dedup
-		// works correctly for query results read back from SQLite.
-		if device != 0 && inode != 0 {
+		// Reconstruct PhysicalIdentity only when scan-time filesystem
+		// reliability was persisted explicitly.
+		if physicalReliable && device != 0 && inode != 0 {
 			f.Physical = domain.PhysicalIdentity{
 				Device:   uint64(device),
 				Inode:    uint64(inode),
@@ -253,7 +260,7 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 // a single duplicate group identified by (storage_id, content_sha256).
 func (s *SQLiteStore) GetGroupDetail(ctx context.Context, storageID, sha256 string) (query.GroupDetail, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT storage_id, path, name, size, mode, mtime, device, inode,
+SELECT storage_id, path, name, size, mode, mtime, device, inode, physical_reliable,
        quick_hash, content_sha256, discovered_at
 FROM file_instances
 WHERE file_status = 'active' AND storage_id = ? AND content_sha256 = ?
@@ -268,14 +275,15 @@ ORDER BY path`, storageID, sha256)
 		var f domain.FileInstance
 		var mtime, discoveredAt string
 		var device, inode int64
+		var physicalReliable bool
 		if err := rows.Scan(&f.StorageID, &f.Path, &f.Name, &f.Size, &f.Mode, &mtime,
-			&device, &inode, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
+			&device, &inode, &physicalReliable, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
 			return query.GroupDetail{}, fmt.Errorf("store: scan group detail row: %w", err)
 		}
 		f.Device = uint64(device)
 		f.Inode = uint64(inode)
 		// Reconstruct PhysicalIdentity from device/inode columns.
-		if device != 0 && inode != 0 {
+		if physicalReliable && device != 0 && inode != 0 {
 			f.Physical = domain.PhysicalIdentity{
 				Device:   uint64(device),
 				Inode:    uint64(inode),
@@ -331,18 +339,27 @@ func (s *SQLiteStore) countDuplicateGroups(ctx context.Context, storageID string
 	var args []any
 
 	sb.WriteString(`
-SELECT COUNT(*) FROM (
-    SELECT 1 FROM file_instances
+WITH physical_files AS (
+    SELECT storage_id, content_sha256, size,
+        CASE
+            WHEN physical_reliable = 0 OR device IS NULL OR inode IS NULL OR device = 0 OR inode = 0
+                THEN 'path:' || path
+            ELSE 'inode:' || printf('%lld', device) || ':' || printf('%lld', inode)
+        END AS physical_key
+    FROM file_instances
     WHERE file_status = 'active' AND content_sha256 IS NOT NULL AND content_sha256 <> ''`)
 	if storageID != "" {
 		sb.WriteString(" AND storage_id = ?")
 		args = append(args, storageID)
 	}
 	sb.WriteString(`
+)
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM physical_files
     GROUP BY storage_id, content_sha256
     HAVING COUNT(*) > 1`)
 	if minReclaimable > 0 {
-		sb.WriteString(" AND (COUNT(*) - 1) * MIN(size) >= ?")
+		sb.WriteString(" AND (COUNT(DISTINCT physical_key) - 1) * MIN(size) >= ?")
 		args = append(args, minReclaimable)
 	}
 	sb.WriteString("\n) AS cnt")

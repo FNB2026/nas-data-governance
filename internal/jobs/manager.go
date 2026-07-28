@@ -24,10 +24,10 @@ type JobFunc func(ctx context.Context, reporter *Reporter) error
 // Reporter allows a running job to update its stage, progress, and
 // warning count. It is safe for concurrent use within a single job.
 type Reporter struct {
-	jobID  string
-	store  JobStore
-	mu     sync.Mutex
-	stage  JobStage
+	jobID string
+	store JobStore
+	mu    sync.Mutex
+	stage JobStage
 }
 
 // SetStage transitions the job to a new processing stage and emits a
@@ -84,7 +84,6 @@ func (r *Reporter) Warn(ctx context.Context, payload map[string]any) error {
 // activeJob tracks an in-memory job for cancellation propagation.
 type activeJob struct {
 	cancel context.CancelFunc
-	done   chan struct{} // closed when the job function returns
 }
 
 // JobManager coordinates job lifecycle: creation, execution,
@@ -126,7 +125,7 @@ func (m *JobManager) Create(ctx context.Context, projectID string, jobType JobTy
 		return "", fmt.Errorf("jobs: create: %w", err)
 	}
 	_, err := m.store.AppendEvent(ctx, id, events.EventCreated, string(StageDiscovering), string(StateQueued), map[string]any{
-		"job_type":  string(jobType),
+		"job_type":   string(jobType),
 		"project_id": projectID,
 	})
 	if err != nil {
@@ -148,21 +147,26 @@ func (m *JobManager) Create(ctx context.Context, projectID string, jobType JobTy
 // This method blocks until the job function returns. For async
 // execution, call it in a goroutine.
 func (m *JobManager) Run(ctx context.Context, jobID string, fn JobFunc) error {
-	// Transition QUEUED → RUNNING.
+	// Reserve the in-memory execution slot before changing persistent state.
+	// This closes the race where two callers could both transition the same
+	// job to RUNNING and overwrite each other's cancellation handle.
+	jobCtx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	if _, exists := m.active[jobID]; exists {
+		m.mu.Unlock()
+		cancel()
+		return ErrJobAlreadyRunning
+	}
+	m.active[jobID] = &activeJob{cancel: cancel}
+
+	// Keep the manager lock through the short persistent transition so a
+	// cancellation request cannot observe an active-but-still-QUEUED job.
 	if err := m.store.UpdateJobState(ctx, jobID, StateRunning, StageDiscovering); err != nil {
+		delete(m.active, jobID)
+		m.mu.Unlock()
+		cancel()
 		return fmt.Errorf("jobs: start %s: %w", jobID, err)
 	}
-	_, err := m.store.AppendEvent(ctx, jobID, events.EventStage, string(StageDiscovering), string(StateRunning), nil)
-	if err != nil {
-		return fmt.Errorf("jobs: emit running event: %w", err)
-	}
-
-	// Set up cancellation context.
-	jobCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-
-	m.mu.Lock()
-	m.active[jobID] = &activeJob{cancel: cancel, done: done}
 	m.mu.Unlock()
 
 	defer func() {
@@ -172,11 +176,15 @@ func (m *JobManager) Run(ctx context.Context, jobID string, fn JobFunc) error {
 		m.mu.Unlock()
 	}()
 
+	_, err := m.store.AppendEvent(ctx, jobID, events.EventStage, string(StageDiscovering), string(StateRunning), nil)
+	if err != nil {
+		return fmt.Errorf("jobs: emit running event: %w", err)
+	}
+
 	reporter := &Reporter{jobID: jobID, store: m.store, stage: StageDiscovering}
 
 	// Execute the job function.
 	jobErr := fn(jobCtx, reporter)
-	close(done)
 
 	// Determine final state.
 	finalState := StateCompleted

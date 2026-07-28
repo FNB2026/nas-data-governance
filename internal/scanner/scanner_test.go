@@ -59,6 +59,26 @@ func TestScanFindsFilesInNestedDirs(t *testing.T) {
 	}
 }
 
+func TestScanPopulatesPhysicalIdentity(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "a")
+
+	_, files := collectFiles(t, Options{Root: root, StorageID: "s1"})
+	if len(files) != 1 {
+		t.Fatalf("expected one file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Device == 0 || f.Inode == 0 {
+		t.Skip("filesystem does not expose device/inode identity")
+	}
+	if !f.Physical.Reliable {
+		t.Fatal("filesystem identity was present but not marked reliable")
+	}
+	if f.Physical.Device != f.Device || f.Physical.Inode != f.Inode {
+		t.Fatalf("physical identity does not match legacy fields: %#v", f)
+	}
+}
+
 func TestScanSkipsExcludedNames(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "keep.txt"), "keep")

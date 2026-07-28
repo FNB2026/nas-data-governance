@@ -21,6 +21,23 @@ func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecis
 	if d.DecisionType == "" {
 		return fmt.Errorf("store: SaveGroupDecision: decision_type is required")
 	}
+	switch d.DecisionType {
+	case domain.DecisionKeepAll,
+		domain.DecisionDraftAction,
+		domain.DecisionDeferred,
+		domain.DecisionRejectedSuggestion,
+		domain.DecisionCrossArchive,
+		domain.DecisionBackupRelation:
+		if d.RetainedFileID != nil {
+			return fmt.Errorf("store: SaveGroupDecision: retained_file_id is only valid for PRIMARY_RETENTION")
+		}
+	case domain.DecisionPrimaryRetention:
+		if d.RetainedFileID == nil {
+			return fmt.Errorf("store: SaveGroupDecision: PRIMARY_RETENTION requires retained_file_id")
+		}
+	default:
+		return fmt.Errorf("store: SaveGroupDecision: unsupported decision_type %q", d.DecisionType)
+	}
 
 	// Auto-generate a deterministic ID if the caller did not provide one.
 	// Format: group_id + "-" + decision_type. This is safe because the
@@ -77,7 +94,7 @@ func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecis
 func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (domain.GroupDecision, error) {
 	var (
 		id, scannedGroupID, decisionType, reason, ruleID, createdAt, updatedAt string
-		retainedFileID                                                        sql.NullInt64
+		retainedFileID                                                         sql.NullInt64
 	)
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at

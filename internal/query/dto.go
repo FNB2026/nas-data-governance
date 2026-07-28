@@ -6,8 +6,8 @@
 //   - ListDuplicateGroups uses keyset pagination on (reclaimable_estimate
 //     DESC, content_sha256 ASC, storage_id ASC) to avoid OFFSET's O(n) scan.
 //   - GetGroupDetail loads file members on demand, not in the list view.
-//   - Physical stats (hardlink dedup, reclaimable bytes) are computed in
-//     Go via report.ComputePhysicalStats after fetching rows from SQLite.
+//   - Pagination/filtering use a hardlink-aware physical reclaimable value;
+//     final physical stats are computed in Go after fetching rows.
 package query
 
 import (
@@ -64,8 +64,8 @@ type GroupQuery struct {
 	PageSize int
 	// Cursor is the keyset position; nil means first page.
 	Cursor *GroupCursor
-	// MinReclaimableBytes filters out groups whose estimated reclaimable
-	// (path_count - 1) * size is below this threshold. 0 = no minimum.
+	// MinReclaimableBytes filters out groups whose hardlink-aware physical
+	// reclaimable bytes are below this threshold. 0 = no minimum.
 	MinReclaimableBytes int64
 }
 

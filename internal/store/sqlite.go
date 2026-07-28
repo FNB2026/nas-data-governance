@@ -159,11 +159,11 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 
 	ids := make([]int64, 0, len(files))
 	const stmt = `INSERT INTO file_instances
-		(storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(storage_id, path, name, size, mode, mtime, device, inode, physical_reliable, quick_hash, content_sha256, discovered_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(storage_id, path) DO UPDATE SET
 			name=excluded.name, size=excluded.size, mode=excluded.mode, mtime=excluded.mtime,
-			device=excluded.device, inode=excluded.inode, quick_hash=excluded.quick_hash,
+			device=excluded.device, inode=excluded.inode, physical_reliable=excluded.physical_reliable, quick_hash=excluded.quick_hash,
 			content_sha256=excluded.content_sha256, discovered_at=excluded.discovered_at
 		RETURNING id`
 	prep, err := tx.PrepareContext(ctx, stmt)
@@ -176,7 +176,7 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 		err := prep.QueryRowContext(ctx,
 			f.StorageID, f.Path, f.Name, f.Size, f.Mode,
 			f.ModifiedAt.UTC().Format(time.RFC3339Nano),
-			sqliteUint64(f.Device), sqliteUint64(f.Inode), f.QuickHash, f.ContentSHA256,
+			sqliteUint64(f.Device), sqliteUint64(f.Inode), f.Physical.Reliable, f.QuickHash, f.ContentSHA256,
 			f.DiscoveredAt.UTC().Format(time.RFC3339Nano),
 		).Scan(&id)
 		if err != nil {
@@ -192,7 +192,7 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 
 func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain.FileInstance, error) {
 	query := `
-		SELECT storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at
+		SELECT storage_id, path, name, size, mode, mtime, device, inode, physical_reliable, quick_hash, content_sha256, discovered_at
 		FROM file_instances
 		WHERE file_status = 'active'`
 	var rows *sql.Rows
@@ -212,10 +212,11 @@ func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain
 		var mtime, discoveredAt string
 		var device, inode int64
 		if err := rows.Scan(&f.StorageID, &f.Path, &f.Name, &f.Size, &f.Mode, &mtime,
-			&device, &inode, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
+			&device, &inode, &f.Physical.Reliable, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
 			return nil, err
 		}
 		f.Device, f.Inode = uint64(device), uint64(inode)
+		f.Physical.Device, f.Physical.Inode = f.Device, f.Inode
 		f.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
 		f.DiscoveredAt, _ = time.Parse(time.RFC3339Nano, discoveredAt)
 		out = append(out, f)

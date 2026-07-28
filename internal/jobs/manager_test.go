@@ -157,6 +157,38 @@ func TestRun_SuccessfulCompletion(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsConcurrentExecutionOfSameJob(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+	jobID, err := mgr.Create(ctx, "proj-1", jobs.JobScan)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		finished <- mgr.Run(ctx, jobID, func(context.Context, *jobs.Reporter) error {
+			<-release
+			return nil
+		})
+	}()
+	waitFor(t, func() bool { return mgr.IsRunning(jobID) }, 2*time.Second)
+
+	err = mgr.Run(ctx, jobID, func(context.Context, *jobs.Reporter) error {
+		t.Fatal("second job function must not execute")
+		return nil
+	})
+	if !errors.Is(err, jobs.ErrJobAlreadyRunning) {
+		t.Fatalf("expected ErrJobAlreadyRunning, got %v", err)
+	}
+
+	close(release)
+	if err := <-finished; err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Run — failure
 // ---------------------------------------------------------------------------
