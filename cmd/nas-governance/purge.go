@@ -4,13 +4,20 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
-	"github.com/FNB2026/nas-data-governance/internal/executor"
-	"github.com/FNB2026/nas-data-governance/internal/purge"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
+
+// ============================================================================
+// runQuarantine — delegates to app.QuarantineService
+//
+// The CLI layer handles: flag parsing, store opening, JSON output, and stdout.
+// The service layer handles: business logic, executor creation, DB operations.
+// Per AGENTS.md rule 2, plan creation, approval, and execution are separate
+// steps that must not be merged.
+// ============================================================================
 
 func runQuarantine(args []string) error {
 	if len(args) == 0 {
@@ -53,7 +60,8 @@ func runQuarantineList(args []string) error {
 		return err
 	}
 	defer st.Close()
-	items, err := st.ListQuarantineItems(ctx, status)
+	svc := app.NewQuarantineService(st)
+	items, err := svc.ListItems(ctx, status)
 	if err != nil {
 		return err
 	}
@@ -83,15 +91,9 @@ func runRestorePlan(args []string) error {
 		return err
 	}
 	defer st.Close()
-	item, err := st.GetQuarantineItem(ctx, *itemID)
+	svc := app.NewQuarantineService(st)
+	plan, err := svc.CreateRestorePlan(ctx, *itemID)
 	if err != nil {
-		return err
-	}
-	plan, err := purge.BuildRestorePlan(item, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	if err := st.SaveRestorePlan(ctx, plan); err != nil {
 		return err
 	}
 	if err := writePrivateJSON(*out, plan); err != nil {
@@ -118,7 +120,8 @@ func runRestoreApprove(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if err := st.ApproveRestorePlan(ctx, *planID, *digest, time.Now().UTC()); err != nil {
+	svc := app.NewQuarantineService(st)
+	if err := svc.ApproveRestorePlan(ctx, *planID, *digest); err != nil {
 		return err
 	}
 	fmt.Println("approved 1 restore plan (paths omitted)")
@@ -147,32 +150,23 @@ func runRestoreExecute(args []string) error {
 		return err
 	}
 	defer st.Close()
-	plan, err := st.GetRestorePlan(ctx, *planID)
+	svc := app.NewQuarantineService(st)
+	result, err := svc.ExecuteRestore(ctx, app.RestoreExecuteInput{
+		PlanID:         *planID,
+		Digest:         *digest,
+		QuarantineRoot: *quarantineRoot,
+		SourceRoots:    sourceRoots,
+		DryRun:         *dryRun,
+	})
+	// Always write the audit file, even on failure, so the operator has
+	// a record of what the executor attempted.
+	if result != nil {
+		if werr := writePrivateJSON(*out, result.Result); werr != nil {
+			return werr
+		}
+	}
 	if err != nil {
 		return err
-	}
-	if plan.ApprovalDigest != *digest {
-		return fmt.Errorf("restore execution digest rejected")
-	}
-	item, err := st.GetQuarantineItem(ctx, plan.ItemID)
-	if err != nil {
-		return err
-	}
-	exec, err := executor.NewRestoreExecutor(*quarantineRoot, sourceRoots, st)
-	if err != nil {
-		return err
-	}
-	var result executor.RestoreResult
-	if *dryRun {
-		result = exec.ValidateRestore(ctx, plan, item)
-	} else {
-		result = exec.ExecuteRestore(ctx, &plan, &item)
-	}
-	if err := writePrivateJSON(*out, result); err != nil {
-		return err
-	}
-	if result.Err != nil {
-		return fmt.Errorf("restore failed: %s", result.ErrorType)
 	}
 	if *dryRun {
 		fmt.Printf("restore dry-run passed for 1 plan — audit: %s\n", *out)
@@ -201,11 +195,14 @@ func runRestoreRecover(args []string) error {
 		return err
 	}
 	defer st.Close()
-	exec, err := executor.NewRestoreExecutor(*quarantineRoot, sourceRoots, st)
+	svc := app.NewQuarantineService(st)
+	results, err := svc.RecoverRestores(ctx, app.RecoverRestoresInput{
+		QuarantineRoot: *quarantineRoot,
+		SourceRoots:    sourceRoots,
+	})
 	if err != nil {
 		return err
 	}
-	results := exec.RecoverRestores(ctx)
 	if err := writePrivateJSON(*out, results); err != nil {
 		return err
 	}
@@ -232,6 +229,14 @@ func validQuarantineStatus(status domain.QuarantineStatus) bool {
 		return false
 	}
 }
+
+// ============================================================================
+// runPurge — delegates to app.PurgeService
+//
+// Purge is restricted to item-by-item permanent deletion within the managed
+// quarantine area (user directive). The service preserves stale checks,
+// verification, audit, and rollback per AGENTS.md rule 7.
+// ============================================================================
 
 func runPurge(args []string) error {
 	if len(args) == 0 {
@@ -267,16 +272,10 @@ func runPurgePlan(args []string) error {
 		return err
 	}
 	defer st.Close()
-	now := time.Now().UTC()
-	items, err := st.ListPurgeCandidates(ctx, now)
+	svc := app.NewPurgeService(st)
+	plans, err := svc.CreatePlans(ctx)
 	if err != nil {
 		return err
-	}
-	plans := purge.BuildPlans(items, now)
-	if len(plans) > 0 {
-		if err := st.SavePurgePlans(ctx, plans); err != nil {
-			return err
-		}
 	}
 	if err := writePrivateJSON(*out, plans); err != nil {
 		return err
@@ -302,7 +301,8 @@ func runPurgeApprove(args []string) error {
 		return err
 	}
 	defer st.Close()
-	if err := st.ApprovePurgePlan(ctx, *planID, *digest, time.Now().UTC()); err != nil {
+	svc := app.NewPurgeService(st)
+	if err := svc.ApprovePlan(ctx, *planID, *digest); err != nil {
 		return err
 	}
 	fmt.Println("approved 1 purge plan (paths omitted)")
@@ -329,32 +329,22 @@ func runPurgeExecute(args []string) error {
 		return err
 	}
 	defer st.Close()
-	plan, err := st.GetPurgePlan(ctx, *planID)
+	svc := app.NewPurgeService(st)
+	result, err := svc.ExecutePurge(ctx, app.PurgeExecuteInput{
+		PlanID:         *planID,
+		Digest:         *digest,
+		QuarantineRoot: *quarantineRoot,
+		DryRun:         *dryRun,
+	})
+	// Always write the audit file, even on failure, so the operator has
+	// a record of what the executor attempted.
+	if result != nil {
+		if werr := writePrivateJSON(*out, result.Result); werr != nil {
+			return werr
+		}
+	}
 	if err != nil {
 		return err
-	}
-	if plan.ApprovalDigest != *digest {
-		return fmt.Errorf("purge execution digest rejected")
-	}
-	item, err := st.GetQuarantineItem(ctx, plan.ItemID)
-	if err != nil {
-		return err
-	}
-	exec, err := executor.NewPurgeExecutor(*quarantineRoot, st)
-	if err != nil {
-		return err
-	}
-	var result executor.PurgeResult
-	if *dryRun {
-		result = exec.ValidatePurge(ctx, plan, item)
-	} else {
-		result = exec.ExecutePurge(ctx, &plan, &item)
-	}
-	if err := writePrivateJSON(*out, result); err != nil {
-		return err
-	}
-	if result.Err != nil {
-		return fmt.Errorf("purge failed: %s", result.ErrorType)
 	}
 	if *dryRun {
 		fmt.Printf("purge dry-run passed for 1 plan — audit: %s\n", *out)
@@ -381,11 +371,11 @@ func runPurgeRecover(args []string) error {
 		return err
 	}
 	defer st.Close()
-	exec, err := executor.NewPurgeExecutor(*quarantineRoot, st)
+	svc := app.NewPurgeService(st)
+	results, err := svc.RecoverPurges(ctx, *quarantineRoot)
 	if err != nil {
 		return err
 	}
-	results := exec.RecoverPurges(ctx)
 	if err := writePrivateJSON(*out, results); err != nil {
 		return err
 	}
