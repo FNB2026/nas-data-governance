@@ -4,9 +4,15 @@ import {wails} from '../models';
 
 export function CloseProject():Promise<void>;
 
+export function GetGroupDetail(arg1:string, arg2:string):Promise<wails.GroupDetailResponse>;
+
 export function GetProjectInfo():Promise<wails.ProjectInfo>;
 
 export function GetVersion():Promise<wails.VersionInfo>;
+
+export function ListDuplicateGroups(arg1:wails.ListGroupsRequest):Promise<wails.ListGroupsResponse>;
+
+export function ListStorages():Promise<Array<wails.StorageInfo>>;
 
 export function OpenProject(arg1:string):Promise<wails.ProjectInfo>;
 

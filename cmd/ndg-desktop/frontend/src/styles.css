@@ -154,3 +154,131 @@ button.secondary {
   font-size: 0.8rem;
   border-top: 1px solid var(--border);
 }
+
+/* ---- Dashboard layout (project open) ---- */
+
+.app-main--dashboard {
+  display: flex;
+  flex-direction: column;
+  max-width: 1200px;
+  gap: 1rem;
+}
+
+.card--full {
+  grid-column: 1 / -1;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.card-header-row h2 {
+  margin-bottom: 0;
+}
+
+.count-badge {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+}
+
+/* ---- Buttons ---- */
+
+.btn-sm {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+  margin-top: 0;
+  border-radius: 6px;
+}
+
+/* ---- Data tables ---- */
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.data-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.data-table td.num,
+.data-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table tbody tr:hover {
+  background: var(--bg);
+}
+
+.data-table tr.row-selected {
+  background: rgba(0, 113, 227, 0.06);
+}
+
+.mono {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.path-cell {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Load more ---- */
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.load-more button {
+  margin-top: 0;
+}
+
+/* ---- Group detail ---- */
+
+.group-detail {
+  border: 1px solid var(--accent);
+}
+
+.detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.detail-summary span {
+  white-space: nowrap;
+}

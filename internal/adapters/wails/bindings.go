@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
+	"github.com/FNB2026/nas-data-governance/internal/query"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"github.com/FNB2026/nas-data-governance/internal/version"
 )
@@ -57,13 +59,16 @@ var ErrProjectAlreadyOpen = errors.New("wails: a project is already open; close 
 //   - CloseProject: closes the current project
 //   - GetProjectInfo: returns metadata about the open project
 //   - ValidateProjectPath: checks if a file looks like a valid project DB
+//   - ListStorages: lists all registered storage entries
+//   - ListDuplicateGroups: paginated duplicate group summaries
+//   - GetGroupDetail: full file list for a single duplicate group
 //
-// Future PRs will add: ListStorages, ListDuplicateGroups, GetGroupDetail,
-// StartScan, GetScanProgress, etc.
+// Future PRs will add: StartScan, GetScanProgress, etc.
 type API struct {
-	mu    sync.Mutex
-	store *store.SQLiteStore
-	path  string
+	mu     sync.Mutex
+	store  *store.SQLiteStore
+	dupSvc *app.DuplicateService
+	path   string
 }
 
 // NewAPI creates a new Wails API instance. The store starts nil;
@@ -109,6 +114,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	}
 
 	a.store = st
+	a.dupSvc = app.NewDuplicateServiceWithReader(st)
 	a.path = absPath
 
 	info, err := a.projectInfoLocked(context.Background())
@@ -133,6 +139,7 @@ func (a *API) CloseProject() error {
 
 	err := a.store.Close()
 	a.store = nil
+	a.dupSvc = nil
 	a.path = ""
 	return err
 }
@@ -199,4 +206,61 @@ func (a *API) projectInfoLocked(ctx context.Context) (ProjectInfo, error) {
 		IsOpen:       true,
 		StorageCount: len(storages),
 	}, nil
+}
+
+// ---- V3 Alpha query bindings ----
+
+// ListStorages returns all registered storage entries in the open project.
+func (a *API) ListStorages() ([]StorageInfo, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.store == nil {
+		return nil, ErrNoProjectOpen
+	}
+	storages, err := a.store.ListStorages(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: list storages: %w", err)
+	}
+	return mapStorages(storages), nil
+}
+
+// ListDuplicateGroups returns a page of duplicate group summaries.
+// Pagination is keyset-based: pass the NextCursor from the previous
+// response to fetch the next page.
+func (a *API) ListDuplicateGroups(req ListGroupsRequest) (ListGroupsResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.dupSvc == nil {
+		return ListGroupsResponse{}, ErrNoProjectOpen
+	}
+	q, err := req.toQuery()
+	if err != nil {
+		return ListGroupsResponse{}, err
+	}
+	page, err := a.dupSvc.ListGroups(context.Background(), q)
+	if err != nil {
+		return ListGroupsResponse{}, fmt.Errorf("wails: list duplicate groups: %w", err)
+	}
+	return mapGroupPage(page), nil
+}
+
+// GetGroupDetail loads the full file member list for a single duplicate
+// group identified by storageID and content SHA-256.
+func (a *API) GetGroupDetail(storageID, sha256 string) (GroupDetailResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.dupSvc == nil {
+		return GroupDetailResponse{}, ErrNoProjectOpen
+	}
+	detail, err := a.dupSvc.GroupDetail(context.Background(), storageID, sha256)
+	if err != nil {
+		if errors.Is(err, query.ErrNotFound) {
+			return GroupDetailResponse{}, fmt.Errorf("wails: group not found")
+		}
+		return GroupDetailResponse{}, fmt.Errorf("wails: get group detail: %w", err)
+	}
+	return mapGroupDetail(detail), nil
 }

@@ -6,12 +6,24 @@ export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
 }
 
+export function GetGroupDetail(arg1, arg2) {
+  return window['go']['wails']['API']['GetGroupDetail'](arg1, arg2);
+}
+
 export function GetProjectInfo() {
   return window['go']['wails']['API']['GetProjectInfo']();
 }
 
 export function GetVersion() {
   return window['go']['wails']['API']['GetVersion']();
+}
+
+export function ListDuplicateGroups(arg1) {
+  return window['go']['wails']['API']['ListDuplicateGroups'](arg1);
+}
+
+export function ListStorages() {
+  return window['go']['wails']['API']['ListStorages']();
 }
 
 export function OpenProject(arg1) {
