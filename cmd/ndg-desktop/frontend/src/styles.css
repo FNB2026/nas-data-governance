@@ -138,6 +138,58 @@ body {
   --wails-draggable: no-drag;
 }
 
+/* ---- Connection status indicator ---- */
+
+.header-conn-indicator {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.header-conn-indicator--reconnecting {
+  color: #bf5600;
+  background: rgba(255, 149, 0, 0.12);
+  animation: conn-pulse 1.6s ease-in-out infinite;
+}
+
+.header-conn-indicator--disconnected {
+  color: var(--error);
+  background: rgba(255, 59, 48, 0.12);
+}
+
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ---- Settings toggle ---- */
+
+.settings-toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-toggle-hint {
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.settings-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.settings-preview-path {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
 /* ---- Sidebar + content layout ---- */
 
 .app-body {

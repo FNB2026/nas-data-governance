@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "dist",
-    emptyOutDir: true,
+    // Don't empty the directory — the .gitkeep placeholder must survive
+    // builds to keep the dist/ directory tracked in git for Go embed.
+    emptyOutDir: false,
   },
   server: {
     port: 5173,

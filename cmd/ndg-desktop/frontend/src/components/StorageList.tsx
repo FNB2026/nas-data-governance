@@ -1,4 +1,5 @@
 import { wails } from "../wailsjs/go/models";
+import { useProject } from "../state/ProjectContext";
 
 export interface StorageListProps {
   storages: wails.StorageInfo[];
@@ -6,6 +7,8 @@ export interface StorageListProps {
 }
 
 export default function StorageList({ storages, storagesError }: StorageListProps) {
+  const { displayPath } = useProject();
+
   return (
     <section className="card card--full">
       <h2>存储列表</h2>
@@ -28,7 +31,7 @@ export default function StorageList({ storages, storagesError }: StorageListProp
               {storages.map((s) => (
                 <tr key={s.id}>
                   <td className="mono">{s.id}</td>
-                  <td className="path-cell">{s.root_path}</td>
+                  <td className="path-cell" title={displayPath(s.root_path)}>{displayPath(s.root_path)}</td>
                   <td>{s.kind}</td>
                   <td className="muted">{s.created_at || "—"}</td>
                 </tr>

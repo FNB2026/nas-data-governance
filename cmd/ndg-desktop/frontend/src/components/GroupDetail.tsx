@@ -3,6 +3,7 @@
 
 import { wails } from "../wailsjs/go/models";
 import { formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { useProject } from "../state/ProjectContext";
 import {
   computeCapacity,
   deriveRiskLevel,
@@ -27,6 +28,8 @@ export default function GroupDetail({
   detailError,
   onClose,
 }: GroupDetailProps) {
+  const { displayPath } = useProject();
+
   if (!selectedGroup && !detailLoading && !detailError) return null;
 
   const cap = selectedGroup
@@ -116,16 +119,17 @@ export default function GroupDetail({
                 </thead>
                 <tbody>
                   {selectedGroup.files.map((f, i) => {
-                    const segments = pathSegments(f.path);
-                    const ctx = compactPath(f.path, 3);
+                    const maskedPath = displayPath(f.path);
+                    const segments = pathSegments(maskedPath);
+                    const ctx = compactPath(maskedPath, 3);
                     const hardlink = isHardlinkAlias(f);
                     const physId = f.physical_reliable && f.physical_inode
                       ? `${f.physical_device}:${f.physical_inode}`
                       : "不可靠";
                     return (
                       <tr key={`${f.path}-${i}`} className={hardlink ? "row-hardlink" : ""}>
-                        <td className="path-cell" title={f.path}>
-                          <span className="path-segments" title={f.path}>
+                        <td className="path-cell" title={maskedPath}>
+                          <span className="path-segments" title={maskedPath}>
                             {segments.slice(-4, -1).map((seg, idx) => (
                               <span key={idx} className="path-seg">{seg}</span>
                             ))}
@@ -185,8 +189,8 @@ export default function GroupDetail({
                       </div>
                       <ul className="hardlink-paths">
                         {pg.map((f, fi) => (
-                          <li key={fi} className="hardlink-path" title={f.path}>
-                            {f.path}
+                          <li key={fi} className="hardlink-path" title={displayPath(f.path)}>
+                            {displayPath(f.path)}
                           </li>
                         ))}
                       </ul>

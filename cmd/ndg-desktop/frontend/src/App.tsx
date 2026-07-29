@@ -59,10 +59,18 @@ function AppContent() {
     }
   }, [project, refreshProject]);
 
+  const handleShortcutRouteChange = useCallback((route: AppRoute) => {
+    if (!isRouteEnabled(route, capabilities)) {
+      return false;
+    }
+    setActiveRoute(route);
+    return true;
+  }, [capabilities]);
+
   useKeyboardShortcuts({
-    onRouteChange: setActiveRoute,
+    onRouteChange: handleShortcutRouteChange,
     onFocusProjectPath: focusProjectPath,
-    onRefresh: handleRefresh,
+    onRefresh: project ? handleRefresh : undefined,
   });
 
   return (

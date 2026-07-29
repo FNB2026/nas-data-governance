@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { wails } from "../wailsjs/go/models";
 import { ValidateProjectPath } from "../wailsjs/go/wails/API";
 import { hasWailsRuntime, friendlyError } from "../lib/utils";
+import { useProject } from "../state/ProjectContext";
 
 export interface ProjectPanelProps {
   project: wails.ProjectInfo | null;
@@ -32,6 +33,7 @@ export default function ProjectPanel({
   onCloseProject,
   onRefreshProject,
 }: ProjectPanelProps) {
+  const { displayPath } = useProject();
   const projectOpen = project !== null;
 
   // Path pre-validation (debounced)
@@ -105,7 +107,7 @@ export default function ProjectPanel({
         <div className="project-info">
           <p>
             <strong>数据库：</strong>
-            <span className="project-path">{project!.path}</span>
+            <span className="project-path">{displayPath(project!.path)}</span>
           </p>
           <p>
             <strong>存储数量：</strong>

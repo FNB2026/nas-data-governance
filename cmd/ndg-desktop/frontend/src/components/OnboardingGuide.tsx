@@ -8,7 +8,7 @@ export default function OnboardingGuide() {
       <ol className="onboarding-steps">
         <li>
           <strong>选择数据库路径</strong>
-          <p className="muted">输入或拖入一个 .db 文件路径。新项目会自动创建。</p>
+          <p className="muted">输入一个 .db 文件路径。新项目会在读写打开时自动创建。</p>
         </li>
         <li>
           <strong>勾选「读写模式」</strong>
@@ -16,7 +16,7 @@ export default function OnboardingGuide() {
         </li>
         <li>
           <strong>点击「读写打开」</strong>
-          <p className="muted">打开后进入扫描任务页面，输入要扫描的目录路径。</p>
+          <p className="muted">打开后选择「扫描任务」，输入要扫描的目录路径。</p>
         </li>
         <li>
           <strong>开始扫描</strong>
@@ -29,7 +29,7 @@ export default function OnboardingGuide() {
       </ol>
       <div className="onboarding-shortcuts">
         <p className="muted">
-          <span className="kbd">⌘1</span>～<span className="kbd">⌘7</span> 快速切换页面 ·{" "}
+          <span className="kbd">⌘1</span>～<span className="kbd">⌘7</span> 切换到可用页面 ·{" "}
           <span className="kbd">⌘O</span> 打开项目 ·{" "}
           <span className="kbd">⌘R</span> 刷新数据
         </p>

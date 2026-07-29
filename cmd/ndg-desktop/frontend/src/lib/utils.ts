@@ -55,10 +55,10 @@ export function friendlyError(error: unknown): string {
   if (raw.includes("database is locked") || raw.includes("database locked")) {
     return "数据库被占用，可能是其他程序正在访问。请关闭其他 NDG 实例后重试。";
   }
-  if (raw.includes("unable to open database") || raw.includes("cannot open")) {
+  if (raw.includes("unable to open database") || (raw.includes("cannot open") && raw.includes("database"))) {
     return "无法打开数据库文件。请检查路径是否正确、文件是否存在、以及是否有读取权限。";
   }
-  if (raw.includes("read-only") && raw.includes("write")) {
+  if ((raw.includes("read-only") || raw.includes("readonly")) && raw.includes("write")) {
     return "当前为只读模式，无法执行写操作。请在数据源页面以读写模式重新打开项目。";
   }
   if (raw.includes("symbolic link") || raw.includes("symlink")) {
@@ -69,19 +69,22 @@ export function friendlyError(error: unknown): string {
   if (raw.includes("permission denied") || raw.includes("access denied")) {
     return "权限不足，无法读取该目录。请检查目录权限或使用具有访问权限的账户。";
   }
-  if (raw.includes("no such file or directory") || raw.includes("not found")) {
+  if (
+    raw.includes("no such file or directory") ||
+    (raw.includes("not found") && (raw.includes("path") || raw.includes("directory")))
+  ) {
     return "路径不存在。请检查输入的路径是否正确，包括拼写和大小写。";
   }
   if (raw.includes("root") && raw.includes("empty")) {
     return "扫描根目录不能为空。请输入要扫描的目录路径。";
   }
   if (raw.includes("worker") && raw.includes("panic")) {
-    return "扫描工作线程异常崩溃。请减少并发数后重试，或检查磁盘是否有坏道。";
+    return "扫描工作线程异常崩溃。请减少并发数后重试，并查看任务日志确认原因。";
   }
 
   // Execution errors
   if (raw.includes("purge confirmation rejected")) {
-    return "清理确认语句不匹配。请逐字复制确认语句到输入框中（注意全角/半角差异）。";
+    return "清理确认语句不匹配。请逐字输入确认语句（注意全角/半角差异）。";
   }
   if (raw.includes("dry-run is required") || raw.includes("dry_run")) {
     return "永久清理前必须先完成试运行校验。请先点击「试运行」按钮。";

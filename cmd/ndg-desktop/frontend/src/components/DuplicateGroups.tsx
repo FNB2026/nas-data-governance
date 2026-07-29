@@ -1,5 +1,7 @@
 import { wails } from "../wailsjs/go/models";
 import { formatBytes, shortHash } from "../lib/utils";
+import { useProject } from "../state/ProjectContext";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import {
   computeCapacity,
   deriveRiskLevel,
@@ -43,6 +45,15 @@ export default function DuplicateGroups({
   onLoadMore,
   onSelectGroup,
 }: DuplicateGroupsProps) {
+  const { displayPath } = useProject();
+
+  // Infinite scroll: auto-load when sentinel enters viewport
+  const sentinelRef = useInfiniteScroll({
+    hasMore: !!nextCursor,
+    loading: groupsLoading,
+    onLoadMore,
+  });
+
   return (
     <div className="dup-groups-panel">
       {/* Filter bar */}
@@ -133,7 +144,7 @@ export default function DuplicateGroups({
                       <td>
                         <span className={riskBadgeClass(risk)}>{riskLabel(risk)}</span>
                       </td>
-                      <td className="path-cell" title={g.sample_path || g.sha256}>
+                      <td className="path-cell" title={displayPath(g.sample_path || g.sha256)}>
                         {repName}
                       </td>
                       <td className="num">{formatBytes(g.size)}</td>
@@ -165,8 +176,9 @@ export default function DuplicateGroups({
             </table>
           </div>
           {nextCursor && (
-            <div className="load-more">
+            <div className="load-more" ref={sentinelRef}>
               <button
+                className="btn-sm secondary"
                 disabled={groupsLoading}
                 onClick={onLoadMore}
               >

@@ -262,11 +262,12 @@ export default function ScanPanel({
             className="btn-sm secondary scan-advanced-toggle"
             onClick={() => setShowAdvanced((v) => !v)}
             aria-expanded={showAdvanced}
+            aria-controls="scan-advanced-options"
           >
             {showAdvanced ? "收起选项" : "高级选项"}
           </button>
           {showAdvanced && (
-            <div className="scan-advanced">
+            <div id="scan-advanced-options" className="scan-advanced">
               <label>
                 存储 ID（可选）
                 <input

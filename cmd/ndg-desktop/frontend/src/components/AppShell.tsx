@@ -24,6 +24,7 @@ export default function AppShell({
     capabilities,
     activeJobId,
     scanProgress,
+    connectionStatus,
   } = useProject();
 
   const modeLabel = !project
@@ -51,6 +52,16 @@ export default function AppShell({
             <span className="header-scan-indicator">
               扫描中 {scanProgress.processed.toLocaleString()} /{" "}
               {scanProgress.discovered.toLocaleString()}
+            </span>
+          )}
+          {connectionStatus === "reconnecting" && (
+            <span className="header-conn-indicator header-conn-indicator--reconnecting">
+              重连中…
+            </span>
+          )}
+          {connectionStatus === "disconnected" && (
+            <span className="header-conn-indicator header-conn-indicator--disconnected">
+              已断开
             </span>
           )}
         </div>

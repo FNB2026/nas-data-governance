@@ -1,10 +1,10 @@
-// Settings page: version info, AI/telemetry status, developer info.
-// Settings persistence not yet implemented — values shown are defaults.
+// Settings page: version info, AI/telemetry status, privacy settings, developer info.
 
 import { useProject } from "../state/ProjectContext";
+import { maskPath } from "../state/settings";
 
 export default function SettingsPage() {
-  const { version, capabilities } = useProject();
+  const { version, capabilities, pathPrivacyMode, togglePathPrivacy } = useProject();
 
   return (
     <div className="page page--settings">
@@ -35,6 +35,32 @@ export default function SettingsPage() {
         ) : (
           <p className="muted">加载中...</p>
         )}
+      </div>
+
+      <div className="card">
+        <h3>隐私与路径脱敏</h3>
+        <div className="settings-toggle-row">
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              checked={pathPrivacyMode}
+              onChange={togglePathPrivacy}
+            />
+            路径脱敏模式
+          </label>
+          <p className="muted settings-toggle-hint">
+            开启后，界面中的文件路径将被部分遮蔽（如 <code>/data/**/Projects/report.pdf</code>），
+            适合截图分享或演示场景。
+          </p>
+          <div className="settings-preview">
+            <span className="muted">预览：</span>
+            <code className="settings-preview-path">
+              {pathPrivacyMode
+                ? maskPath("/data/archive/Documents/Work/Projects/report.pdf")
+                : "/data/archive/Documents/Work/Projects/report.pdf"}
+            </code>
+          </div>
+        </div>
       </div>
 
       <div className="card">
@@ -87,7 +113,7 @@ export default function SettingsPage() {
           </tbody>
         </table>
         <p className="muted diag-read-only-hint">
-          设置持久化、扫描参数默认值、隐私路径配置将在后续阶段接入。
+          扫描参数默认值等其他配置将在后续阶段接入。
         </p>
       </div>
     </div>

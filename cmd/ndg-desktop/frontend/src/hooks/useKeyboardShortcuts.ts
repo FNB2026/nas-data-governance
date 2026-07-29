@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { NAV_ITEMS, type AppRoute } from "../app/routes";
 
 export interface KeyboardShortcutHandlers {
-  onRouteChange: (route: AppRoute) => void;
+  onRouteChange: (route: AppRoute) => boolean;
   onFocusProjectPath?: () => void;
   onRefresh?: () => void;
 }
@@ -25,8 +25,9 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers) {
       if (e.key >= "1" && e.key <= "7") {
         const idx = parseInt(e.key, 10) - 1;
         if (idx < NAV_ITEMS.length) {
-          e.preventDefault();
-          onRouteChange(NAV_ITEMS[idx].id);
+          if (onRouteChange(NAV_ITEMS[idx].id)) {
+            e.preventDefault();
+          }
         }
         return;
       }

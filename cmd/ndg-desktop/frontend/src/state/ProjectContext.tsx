@@ -28,6 +28,8 @@ import { wails } from "../wailsjs/go/models";
 import { TERMINAL_STATES, hasWailsRuntime, friendlyError } from "../lib/utils";
 import type { ToastItem, ToastType } from "../components/Toast";
 import { deriveCapabilities, type AppCapabilities } from "../app/capability";
+import { loadSettings, saveSettings, maskPath } from "./settings";
+import { isNetworkError, computeBackoffDelay, retryWithBackoff } from "../lib/retry";
 
 // ---- Context value type ----
 
@@ -59,6 +61,9 @@ interface ProjectContextValue {
   cancelling: boolean;
   canRetryScan: boolean;
 
+  // Connection status (network drive tolerance)
+  connectionStatus: "connected" | "reconnecting" | "disconnected";
+
   // Jobs (shared)
   jobs: wails.JobSummary[];
   jobsError: string | null;
@@ -82,6 +87,11 @@ interface ProjectContextValue {
 
   // Capabilities
   capabilities: AppCapabilities;
+
+  // Settings (global — reactive across all pages)
+  pathPrivacyMode: boolean;
+  togglePathPrivacy: () => void;
+  displayPath: (path: string) => string;
 
   // Actions
   setProjectPath: (path: string) => void;
@@ -137,6 +147,28 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Recovery lock (checked after project open)
   const [recoveryLockActive, setRecoveryLockActive] = useState(false);
 
+  // Connection status (network drive tolerance)
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "reconnecting" | "disconnected">("connected");
+
+  // Settings (global — reactive across all pages)
+  const [pathPrivacyMode, setPathPrivacyMode] = useState<boolean>(() => loadSettings().pathPrivacyMode);
+
+  const togglePathPrivacy = useCallback(() => {
+    setPathPrivacyMode((prev) => {
+      const next = !prev;
+      saveSettings({ pathPrivacyMode: next });
+      return next;
+    });
+  }, []);
+
+  const displayPath = useCallback(
+    (path: string): string => {
+      if (!pathPrivacyMode) return path;
+      return maskPath(path);
+    },
+    [pathPrivacyMode],
+  );
+
   // Project revision: incremented on every open/close/switch. The polling
   // effect captures this value at start and checks it before writing back
   // state, preventing stale responses from a previous project session.
@@ -144,6 +176,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Poll-in-flight guard: prevents overlapping GetScanProgress requests
   // when the backend takes longer than the 1-second interval.
   const pollInFlightRef = useRef(false);
+  // Retry tracking for network drive disconnection tolerance
+  const pollRetryCountRef = useRef(0);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const MAX_POLL_RETRIES = 5;
 
   // ---- Toast helpers ----
 
@@ -165,11 +201,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const loadStorages = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const list = await ListStorages();
+      const list = await retryWithBackoff(() => ListStorages(), {
+        maxRetries: 3,
+        onRetry: (attempt) => {
+          if (attempt === 1) setConnectionStatus("reconnecting");
+        },
+      });
       setStorages(list || []);
       setStoragesError(null);
+      setConnectionStatus("connected");
     } catch (e: unknown) {
       setStoragesError(friendlyError(e));
+      if (isNetworkError(e)) setConnectionStatus("disconnected");
     }
   }, []);
 
@@ -177,7 +220,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!hasWailsRuntime()) return;
     try {
       const limit = jobsLimitRef.current;
-      const list = await ListRecentJobs(limit);
+      const list = await retryWithBackoff(() => ListRecentJobs(limit), { maxRetries: 3 });
       setJobs(list || []);
       setHasMoreJobs((list || []).length >= limit);
       setJobsError(null);
@@ -213,29 +256,36 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---- Scan polling (global — survives page navigation) ----
+  // Uses recursive setTimeout with exponential backoff for network drive tolerance.
 
   useEffect(() => {
     if (!activeJobId) return;
 
-    // Capture the project revision at poll start. If the project is
-    // closed or switched while a poll is in-flight, the revision will
-    // differ and we discard the stale response.
     const pollRev = projectRevRef.current;
 
-    const intervalId = setInterval(async () => {
+    const poll = async () => {
+      // Discard if project changed since poll started.
+      if (projectRevRef.current !== pollRev) return;
+
       // Guard against overlapping requests.
-      if (pollInFlightRef.current) return;
+      if (pollInFlightRef.current) {
+        scheduleNextPoll(1000);
+        return;
+      }
       pollInFlightRef.current = true;
+
       try {
         const p = await GetScanProgress(activeJobId);
 
-        // Discard if project changed since poll started.
         if (projectRevRef.current !== pollRev) return;
 
         setScanProgress(p);
 
+        // Reset retry counter on success
+        pollRetryCountRef.current = 0;
+        setConnectionStatus("connected");
+
         if (TERMINAL_STATES.has(p.state)) {
-          clearInterval(intervalId);
           setActiveJobId(null);
           setCancelling(false);
           void loadJobs();
@@ -257,20 +307,56 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           } else if (p.state === "CANCELLED") {
             pushToast("warning", "扫描已取消");
           }
+          return; // Don't schedule next poll for terminal states
         }
-      } catch {
-        // Discard if project changed.
+
+        // Normal: schedule next poll in 1 second
+        scheduleNextPoll(1000);
+      } catch (error) {
         if (projectRevRef.current !== pollRev) return;
-        clearInterval(intervalId);
-        setActiveJobId(null);
-        setCancelling(false);
-        pushToast("error", "扫描连接中断", "无法获取扫描进度，请检查后重试");
+
+        if (isNetworkError(error) && pollRetryCountRef.current < MAX_POLL_RETRIES) {
+          // Network error — retry with exponential backoff
+          pollRetryCountRef.current++;
+          const attempt = pollRetryCountRef.current;
+          const delay = computeBackoffDelay(attempt - 1);
+          setConnectionStatus("reconnecting");
+
+          if (attempt === 1) {
+            pushToast("warning", "连接中断", `正在尝试重新连接… (${attempt}/${MAX_POLL_RETRIES})`);
+          }
+
+          scheduleNextPoll(delay);
+        } else {
+          // Non-network error, or max retries exceeded — give up
+          setConnectionStatus("disconnected");
+          setActiveJobId(null);
+          setCancelling(false);
+          pollRetryCountRef.current = 0;
+
+          if (isNetworkError(error)) {
+            pushToast("error", "扫描连接中断", `重试 ${MAX_POLL_RETRIES} 次后仍无法连接，请检查网络盘状态后重试`);
+          } else {
+            pushToast("error", "扫描连接中断", "无法获取扫描进度，请检查后重试");
+          }
+        }
       } finally {
         pollInFlightRef.current = false;
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(intervalId);
+    const scheduleNextPoll = (delayMs: number) => {
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = setTimeout(() => void poll(), delayMs);
+    };
+
+    // Start polling
+    scheduleNextPoll(1000);
+
+    return () => {
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+      pollRetryCountRef.current = 0;
+    };
   }, [activeJobId, loadJobs, loadStorages, notifyDataChanged, pushToast]);
 
   // ---- Project actions ----
@@ -349,6 +435,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setScanFilterState("");
       setScanFilterType("");
       setRecoveryLockActive(false);
+      setConnectionStatus("connected");
       setError(null);
     } catch (e: unknown) {
       setError(friendlyError(e));
@@ -440,6 +527,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     scanProgress,
     cancelling,
     canRetryScan: lastScanParams !== null,
+    connectionStatus,
     jobs,
     jobsError,
     hasMoreJobs,
@@ -453,6 +541,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     dismissToast,
     dataRevision,
     capabilities,
+    pathPrivacyMode,
+    togglePathPrivacy,
+    displayPath,
     setProjectPath,
     openProject,
     closeProject,

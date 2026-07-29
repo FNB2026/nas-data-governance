@@ -91,7 +91,7 @@ function actionLabel(action: string): string {
 // ---- Component ----
 
 export default function GovernanceReviewPage() {
-  const { capabilities, isReadWrite, dataRevision, pushToast } = useProject();
+  const { capabilities, isReadWrite, dataRevision, pushToast, displayPath } = useProject();
 
   // Plan data
   const [plans, setPlans] = useState<wails.PlanDTO[]>([]);
@@ -398,7 +398,7 @@ export default function GovernanceReviewPage() {
                   {selectedPlan.retain_path && (
                     <div className="gov-retain-path">
                       <span className="muted">保留路径</span>
-                      <code>{selectedPlan.retain_path}</code>
+                      <code>{displayPath(selectedPlan.retain_path)}</code>
                     </div>
                   )}
                 </div>
@@ -426,8 +426,8 @@ export default function GovernanceReviewPage() {
                         <span className={`gov-action-badge gov-action-badge--${action.action.toLowerCase()}`}>
                           {actionLabel(action.action)}
                         </span>
-                        <span className="gov-action-path" title={action.path}>
-                          {action.path}
+                        <span className="gov-action-path" title={displayPath(action.path)}>
+                          {displayPath(action.path)}
                         </span>
                         {action.context_role && (
                           <span className="gov-role-tag">{action.context_role}</span>
@@ -437,7 +437,7 @@ export default function GovernanceReviewPage() {
                       {action.target_path && (
                         <div className="gov-action-target">
                           <span className="muted">目标：</span>
-                          <code>{action.target_path}</code>
+                          <code>{displayPath(action.target_path)}</code>
                         </div>
                       )}
                     </div>
