@@ -21,7 +21,10 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
+	"github.com/FNB2026/nas-data-governance/internal/formatdiag"
+	"github.com/FNB2026/nas-data-governance/internal/governancediag"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
+	"github.com/FNB2026/nas-data-governance/internal/merge"
 	"github.com/FNB2026/nas-data-governance/internal/query"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"github.com/FNB2026/nas-data-governance/internal/version"
@@ -65,12 +68,15 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 //
 // V4 (scan & jobs): OpenProjectReadWrite, StartScan, GetScanProgress,
 // CancelScan, ListRecentJobs, GetJobDetail.
+//
+// V5 (diagnostics): DiagnoseFormats, DiagnoseGovernance, DiagnoseMerges.
 type API struct {
 	mu         sync.RWMutex
 	store      *store.SQLiteStore
 	dupSvc     *app.DuplicateService
 	scanRunner *app.ScanJobRunner
 	jobMgr     *jobs.JobManager
+	diagSvc    *app.DiagnosticService
 	path       string
 	projectID  string // used as JobManager project scope; set to abs DB path
 }
@@ -119,6 +125,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 
 	a.store = st
 	a.dupSvc = app.NewDuplicateServiceWithReader(st)
+	a.diagSvc = app.NewDiagnosticService(st)
 	a.path = absPath
 
 	info, err := a.projectInfoLocked(context.Background())
@@ -126,6 +133,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 		_ = st.Close()
 		a.store = nil
 		a.dupSvc = nil
+		a.diagSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -148,6 +156,7 @@ func (a *API) CloseProject() error {
 	err := a.store.Close()
 	a.store = nil
 	a.dupSvc = nil
+	a.diagSvc = nil
 	a.scanRunner = nil
 	a.jobMgr = nil
 	a.path = ""
@@ -356,6 +365,7 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 
 	a.store = st
 	a.dupSvc = app.NewDuplicateServiceWithReader(st)
+	a.diagSvc = app.NewDiagnosticService(st)
 	a.jobMgr = mgr
 	a.scanRunner = app.NewScanJobRunner(app.NewScanService(st), mgr)
 	a.path = absPath
@@ -366,6 +376,7 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 		_ = st.Close()
 		a.store = nil
 		a.dupSvc = nil
+		a.diagSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -542,4 +553,72 @@ func (a *API) GetJobDetail(jobID string) (JobDetailResponse, error) {
 		ScanJobProgress: mapScanJobProgress(j),
 		Events:          events,
 	}, nil
+}
+
+// ---- V5 diagnostic bindings ----
+
+// DiagnoseFormats builds a read-only format review report from the
+// open project database. It identifies large unknown files, extension
+// mismatches, and metadata gaps. No filesystem access is performed.
+//
+// The project must be open (read-only or read-write).
+func (a *API) DiagnoseFormats(req DiagnoseFormatsRequest) (*formatdiag.Report, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.diagSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	report, err := a.diagSvc.DiagnoseFormats(context.Background(), app.DiagnoseFormatsInput{
+		StorageID:           req.StorageID,
+		LargeUnknownMinimum: req.LargeUnknownMinimum,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("wails: diagnose formats: %w", err)
+	}
+	return report, nil
+}
+
+// DiagnoseGovernance builds a read-only governance review report from
+// the open project database. It analyzes duplicate groups, zero-byte
+// files, and large media files with their relations.
+//
+// All generated plans are DRAFT. The service refuses non-draft results.
+// The project must be open (read-only or read-write).
+func (a *API) DiagnoseGovernance(req DiagnoseGovernanceRequest) (*governancediag.Report, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.diagSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	report, err := a.diagSvc.DiagnoseGovernance(context.Background(), app.DiagnoseGovernanceInput{
+		StorageID:         req.StorageID,
+		LargeMediaMinimum: req.LargeMediaMinimum,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("wails: diagnose governance: %w", err)
+	}
+	return report, nil
+}
+
+// DiagnoseMerges builds a read-only merge gate review report from the
+// open project database. It identifies sibling directories with similar
+// names and evaluates filename overlap using Jaccard similarity.
+//
+// The project must be open (read-only or read-write).
+func (a *API) DiagnoseMerges(req DiagnoseMergesRequest) (*merge.DiagnosticReport, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.diagSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	report, err := a.diagSvc.DiagnoseMerges(context.Background(), app.DiagnoseMergesInput{
+		StorageID: req.StorageID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("wails: diagnose merges: %w", err)
+	}
+	return report, nil
 }

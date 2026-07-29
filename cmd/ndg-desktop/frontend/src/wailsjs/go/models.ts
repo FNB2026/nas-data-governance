@@ -388,5 +388,293 @@ export namespace wails {
 	    }
 	}
 
+	// ---- V5 Diagnostic Types ----
+
+	export class DiagnoseFormatsRequest {
+	    storage_id?: string;
+	    large_unknown_minimum?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseFormatsRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.large_unknown_minimum = source["large_unknown_minimum"];
+	    }
+	}
+
+	export class DiagnoseGovernanceRequest {
+	    storage_id?: string;
+	    large_media_minimum?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseGovernanceRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.large_media_minimum = source["large_media_minimum"];
+	    }
+	}
+
+	export class DiagnoseMergesRequest {
+	    storage_id?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseMergesRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	    }
+	}
+
+	// Format diagnostic report types (mirror formatdiag package)
+	export class FormatDiagSummary {
+	    files: number;
+	    format_rows: number;
+	    missing_format_rows: number;
+	    large_unknown: number;
+	    extension_mismatches: number;
+	    formats_with_metadata_gap: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FormatDiagSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.format_rows = source["format_rows"];
+	        this.missing_format_rows = source["missing_format_rows"];
+	        this.large_unknown = source["large_unknown"];
+	        this.extension_mismatches = source["extension_mismatches"];
+	        this.formats_with_metadata_gap = source["formats_with_metadata_gap"];
+	    }
+	}
+
+	export class FormatDiagReport {
+	    generated_at: string;
+	    large_unknown_minimum: number;
+	    summary: FormatDiagSummary;
+	    large_unknown: any[];
+	    extension_mismatches: any[];
+	    metadata_gaps: any[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FormatDiagReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = source["generated_at"];
+	        this.large_unknown_minimum = source["large_unknown_minimum"];
+	        this.summary = this.convertValues(source["summary"], FormatDiagSummary);
+	        this.large_unknown = source["large_unknown"] || [];
+	        this.extension_mismatches = source["extension_mismatches"] || [];
+	        this.metadata_gaps = source["metadata_gaps"] || [];
+	        this.safety_notes = source["safety_notes"] || [];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	// Governance diagnostic report types (mirror governancediag package)
+	export class GovernanceDiagSummary {
+	    files: number;
+	    format_rows: number;
+	    missing_format_rows: number;
+	    duplicate_groups: number;
+	    duplicate_files: number;
+	    theoretical_redundant_bytes: number;
+	    draft_plans: number;
+	    non_draft_plans: number;
+	    critical_plans: number;
+	    review_actions: number;
+	    quarantine_candidate_actions: number;
+	    zero_byte_files: number;
+	    large_media_files: number;
+	    large_media_bytes: number;
+	    large_media_with_relations: number;
+	    large_media_with_business_anchor: number;
+	    large_media_project_work: number;
+	    large_media_protected: number;
+	    large_media_missing_codec: number;
+	    large_media_missing_duration: number;
+	    media_relations: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GovernanceDiagSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.format_rows = source["format_rows"];
+	        this.missing_format_rows = source["missing_format_rows"];
+	        this.duplicate_groups = source["duplicate_groups"];
+	        this.duplicate_files = source["duplicate_files"];
+	        this.theoretical_redundant_bytes = source["theoretical_redundant_bytes"];
+	        this.draft_plans = source["draft_plans"];
+	        this.non_draft_plans = source["non_draft_plans"];
+	        this.critical_plans = source["critical_plans"];
+	        this.review_actions = source["review_actions"];
+	        this.quarantine_candidate_actions = source["quarantine_candidate_actions"];
+	        this.zero_byte_files = source["zero_byte_files"];
+	        this.large_media_files = source["large_media_files"];
+	        this.large_media_bytes = source["large_media_bytes"];
+	        this.large_media_with_relations = source["large_media_with_relations"];
+	        this.large_media_with_business_anchor = source["large_media_with_business_anchor"];
+	        this.large_media_project_work = source["large_media_project_work"];
+	        this.large_media_protected = source["large_media_protected"];
+	        this.large_media_missing_codec = source["large_media_missing_codec"];
+	        this.large_media_missing_duration = source["large_media_missing_duration"];
+	        this.media_relations = source["media_relations"];
+	    }
+	}
+
+	export class GovernanceDiagReport {
+	    generated_at: string;
+	    large_media_minimum: number;
+	    execution_authorized: boolean;
+	    summary: GovernanceDiagSummary;
+	    duplicate_reviews: any[];
+	    zero_byte_reviews: any[];
+	    media_aggregates: any[];
+	    large_media_reviews: any[];
+	    media_relations: any[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GovernanceDiagReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = source["generated_at"];
+	        this.large_media_minimum = source["large_media_minimum"];
+	        this.execution_authorized = source["execution_authorized"];
+	        this.summary = this.convertValues(source["summary"], GovernanceDiagSummary);
+	        this.duplicate_reviews = source["duplicate_reviews"] || [];
+	        this.zero_byte_reviews = source["zero_byte_reviews"] || [];
+	        this.media_aggregates = source["media_aggregates"] || [];
+	        this.large_media_reviews = source["large_media_reviews"] || [];
+	        this.media_relations = source["media_relations"] || [];
+	        this.safety_notes = source["safety_notes"] || [];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	// Merge diagnostic report types (mirror merge package)
+	export class MergeDiagSummary {
+	    files: number;
+	    directories: number;
+	    sibling_parents: number;
+	    sibling_pairs: number;
+	    name_similar_pairs: number;
+	    positive_overlap_pairs: number;
+	    overlap_at_least_0_10: number;
+	    overlap_at_least_0_25: number;
+	    overlap_at_least_0_50: number;
+	    suggestions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MergeDiagSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.directories = source["directories"];
+	        this.sibling_parents = source["sibling_parents"];
+	        this.sibling_pairs = source["sibling_pairs"];
+	        this.name_similar_pairs = source["name_similar_pairs"];
+	        this.positive_overlap_pairs = source["positive_overlap_pairs"];
+	        this.overlap_at_least_0_10 = source["overlap_at_least_0_10"];
+	        this.overlap_at_least_0_25 = source["overlap_at_least_0_25"];
+	        this.overlap_at_least_0_50 = source["overlap_at_least_0_50"];
+	        this.suggestions = source["suggestions"];
+	    }
+	}
+
+	export class MergeDiagReport {
+	    generated_at: string;
+	    execution_authorized: boolean;
+	    suggestion_threshold: number;
+	    summary: MergeDiagSummary;
+	    name_similar_reviews: any[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MergeDiagReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = source["generated_at"];
+	        this.execution_authorized = source["execution_authorized"];
+	        this.suggestion_threshold = source["suggestion_threshold"];
+	        this.summary = this.convertValues(source["summary"], MergeDiagSummary);
+	        this.name_similar_reviews = source["name_similar_reviews"] || [];
+	        this.safety_notes = source["safety_notes"] || [];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 }
 

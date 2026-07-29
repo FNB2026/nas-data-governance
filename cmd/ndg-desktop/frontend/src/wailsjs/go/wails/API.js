@@ -10,6 +10,18 @@ export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
 }
 
+export function DiagnoseFormats(arg1) {
+  return window['go']['wails']['API']['DiagnoseFormats'](arg1);
+}
+
+export function DiagnoseGovernance(arg1) {
+  return window['go']['wails']['API']['DiagnoseGovernance'](arg1);
+}
+
+export function DiagnoseMerges(arg1) {
+  return window['go']['wails']['API']['DiagnoseMerges'](arg1);
+}
+
 export function GetGroupDetail(arg1, arg2) {
   return window['go']['wails']['API']['GetGroupDetail'](arg1, arg2);
 }

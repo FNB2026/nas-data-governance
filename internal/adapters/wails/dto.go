@@ -96,17 +96,17 @@ type StartScanResponse struct {
 // ScanJobProgress is the progress DTO returned by GetScanProgress.
 // All fields are privacy-safe aggregate counters (ADR-0006 §10).
 type ScanJobProgress struct {
-	JobID         string `json:"job_id"`
-	State         string `json:"state"`
-	Stage         string `json:"stage"`
-	Discovered    int64  `json:"discovered"`
-	Processed     int64  `json:"processed"`
-	Failed        int64  `json:"failed"`
-	WarningCount  int    `json:"warning_count"`
-	ErrorCode     string `json:"error_code,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	StartedAt     string `json:"started_at,omitempty"`
-	CompletedAt   string `json:"completed_at,omitempty"`
+	JobID        string `json:"job_id"`
+	State        string `json:"state"`
+	Stage        string `json:"stage"`
+	Discovered   int64  `json:"discovered"`
+	Processed    int64  `json:"processed"`
+	Failed       int64  `json:"failed"`
+	WarningCount int    `json:"warning_count"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	StartedAt    string `json:"started_at,omitempty"`
+	CompletedAt  string `json:"completed_at,omitempty"`
 }
 
 // JobSummary is the list-view DTO for a job in ListRecentJobs.
@@ -137,6 +137,25 @@ type JobEvent struct {
 type JobDetailResponse struct {
 	ScanJobProgress
 	Events []JobEvent `json:"events"`
+}
+
+// ---- V5 Diagnostic DTOs ----
+
+// DiagnoseFormatsRequest is the input DTO for DiagnoseFormats.
+type DiagnoseFormatsRequest struct {
+	StorageID           string `json:"storage_id,omitempty"`
+	LargeUnknownMinimum int64  `json:"large_unknown_minimum,omitempty"`
+}
+
+// DiagnoseGovernanceRequest is the input DTO for DiagnoseGovernance.
+type DiagnoseGovernanceRequest struct {
+	StorageID         string `json:"storage_id,omitempty"`
+	LargeMediaMinimum int64  `json:"large_media_minimum,omitempty"`
+}
+
+// DiagnoseMergesRequest is the input DTO for DiagnoseMerges.
+type DiagnoseMergesRequest struct {
+	StorageID string `json:"storage_id,omitempty"`
 }
 
 // ---- mapping helpers ----

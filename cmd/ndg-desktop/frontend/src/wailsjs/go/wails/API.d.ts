@@ -6,6 +6,12 @@ export function CancelScan(arg1:string):Promise<void>;
 
 export function CloseProject():Promise<void>;
 
+export function DiagnoseFormats(arg1:wails.DiagnoseFormatsRequest):Promise<wails.FormatDiagReport>;
+
+export function DiagnoseGovernance(arg1:wails.DiagnoseGovernanceRequest):Promise<wails.GovernanceDiagReport>;
+
+export function DiagnoseMerges(arg1:wails.DiagnoseMergesRequest):Promise<wails.MergeDiagReport>;
+
 export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetailResponse>;
 
 export function GetJobDetail(arg1:string):Promise<wails.JobDetailResponse>;
