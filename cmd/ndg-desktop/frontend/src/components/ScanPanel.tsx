@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { wails } from "../wailsjs/go/models";
 import {
   formatDateTime,
@@ -20,7 +20,6 @@ export interface ScanPanelProps {
   scanActive: boolean;
   scanProgress: wails.ScanJobProgress | null;
   cancelling: boolean;
-  progressPercent: number;
   // job history
   jobs: wails.JobSummary[];
   jobsError: string | null;
@@ -45,6 +44,58 @@ const STATE_FILTER_OPTIONS = [
   { value: "CANCELLED", label: "已取消" },
 ];
 
+// Stages where processed/discovered is a valid progress ratio.
+// DISCOVERING is excluded — the denominator is still changing.
+const DETERMINATE_STAGES = new Set(["QUICK_HASHING", "FULL_HASHING"]);
+
+// Stages where we show an indeterminate bar (activity without percentage).
+const INDETERMINATE_STAGES = new Set([
+  "DISCOVERING",
+  "METADATA_INDEXING",
+  "CONTEXT_CLASSIFYING",
+  "FORMAT_ANALYZING",
+  "GROUPING",
+  "PLANNING",
+  "FINALIZING",
+]);
+
+interface ProgressDisplay {
+  mode: "determinate" | "indeterminate" | "terminal";
+  percent: number;
+}
+
+function computeProgress(stage: string, state: string, progress: wails.ScanJobProgress): ProgressDisplay {
+  if (state === "COMPLETED") return { mode: "terminal", percent: 100 };
+  if (state === "FAILED" || state === "CANCELLED") return { mode: "terminal", percent: 0 };
+
+  if (DETERMINATE_STAGES.has(stage) && progress.discovered > 0) {
+    return {
+      mode: "determinate",
+      percent: Math.min(100, Math.round((progress.processed / progress.discovered) * 100)),
+    };
+  }
+
+  if (INDETERMINATE_STAGES.has(stage)) {
+    return { mode: "indeterminate", percent: 0 };
+  }
+
+  return { mode: "indeterminate", percent: 0 };
+}
+
+function formatDuration(startedAt?: string): string {
+  if (!startedAt) return "—";
+  const start = new Date(startedAt);
+  if (isNaN(start.getTime())) return "—";
+  const elapsed = Date.now() - start.getTime();
+  if (elapsed < 0) return "—";
+  const totalSec = Math.floor(elapsed / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export default function ScanPanel({
   scanRoot,
   scanStorageId,
@@ -55,7 +106,6 @@ export default function ScanPanel({
   scanActive,
   scanProgress,
   cancelling,
-  progressPercent,
   jobs,
   jobsError,
   jobDetailLoading,
@@ -70,6 +120,14 @@ export default function ScanPanel({
   // Job history filters (internal state — purely presentational)
   const [stateFilter, setStateFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+
+  // Tick state to refresh duration display every second
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!scanActive) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [scanActive]);
 
   // Derive unique job types from the data for the filter dropdown
   const jobTypes = useMemo(() => {
@@ -96,6 +154,10 @@ export default function ScanPanel({
     setStateFilter("");
     setTypeFilter("");
   };
+
+  const progressDisplay = scanProgress
+    ? computeProgress(scanProgress.stage, scanProgress.state, scanProgress)
+    : null;
 
   return (
     <section className="card card--full scan-panel">
@@ -161,17 +223,53 @@ export default function ScanPanel({
       </div>
       {scanError && <p className="error" role="alert">{scanError}</p>}
 
-      {/* Active scan progress */}
-      {scanProgress && (
+      {/* Active scan progress — stage-aware display */}
+      {scanProgress && progressDisplay && (
         <div className="scan-progress">
-          <div className="progress-bar">
-            <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }} />
-          </div>
+          {/* Progress bar: determinate or indeterminate */}
+          {progressDisplay.mode === "determinate" ? (
+            <div className="progress-bar">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${progressDisplay.percent}%` }}
+              />
+            </div>
+          ) : progressDisplay.mode === "indeterminate" ? (
+            <div className="progress-bar progress-bar--indeterminate">
+              <div className="progress-bar-fill progress-bar-fill--indeterminate" />
+            </div>
+          ) : null}
+
+          {/* Stats: always show stage + counts */}
           <div className="progress-stats">
             <span><strong>阶段：</strong>{stageLabel(scanProgress.stage)}</span>
+
+            {/* DISCOVERING: show discovered count without percentage */}
+            {scanProgress.stage === "DISCOVERING" && (
+              <span><strong>正在发现文件：</strong>{scanProgress.discovered.toLocaleString()} 项</span>
+            )}
+
+            {/* Determinate stages: show percentage + ratio */}
+            {progressDisplay.mode === "determinate" && (
+              <span>
+                <strong>进度：</strong>{progressDisplay.percent}%
+                （{scanProgress.processed.toLocaleString()} / {scanProgress.discovered.toLocaleString()}）
+              </span>
+            )}
+
+            {/* Non-DISCOVERING indeterminate: show processed count */}
+            {progressDisplay.mode === "indeterminate" && scanProgress.stage !== "DISCOVERING" && (
+              <span><strong>已处理：</strong>{scanProgress.processed.toLocaleString()}</span>
+            )}
+
             <span><strong>已发现：</strong>{scanProgress.discovered.toLocaleString()}</span>
-            <span><strong>已处理：</strong>{scanProgress.processed.toLocaleString()}</span>
             <span><strong>失败：</strong>{scanProgress.failed.toLocaleString()}</span>
+
+            {/* Duration */}
+            {scanActive && (
+              <span><strong>持续：</strong>{formatDuration(scanProgress.started_at)}</span>
+            )}
+
             {scanProgress.warning_count > 0 && (
               <span className="warn"><strong>警告：</strong>{scanProgress.warning_count}</span>
             )}
@@ -179,6 +277,7 @@ export default function ScanPanel({
               <span className="error-text"><strong>错误：</strong>{scanProgress.error_code}</span>
             )}
           </div>
+
           {scanActive && (
             <button
               className="btn-sm secondary"
@@ -241,7 +340,10 @@ export default function ScanPanel({
         {jobsError ? (
           <p className="error" role="alert">{jobsError}</p>
         ) : jobs.length === 0 ? (
-          <p className="muted">暂无任务记录</p>
+          <div className="empty-state">
+            <p className="muted">暂无任务记录</p>
+            <p className="muted">填写上方扫描参数并点击"开始扫描"以创建第一个任务。</p>
+          </div>
         ) : filteredJobs.length === 0 ? (
           <p className="muted">没有匹配筛选条件的任务</p>
         ) : (

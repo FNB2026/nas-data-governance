@@ -359,10 +359,3 @@ export function useProject(): ProjectContextValue {
   }
   return ctx;
 }
-
-// ---- Derived scan progress percent (shared utility) ----
-
-export function scanProgressPercent(progress: wails.ScanJobProgress | null): number {
-  if (!progress || progress.discovered <= 0) return 0;
-  return Math.min(100, Math.round((progress.processed / progress.discovered) * 100));
-}

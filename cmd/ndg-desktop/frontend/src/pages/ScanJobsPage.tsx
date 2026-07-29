@@ -4,7 +4,7 @@
 import { useState } from "react";
 import ScanPanel from "../components/ScanPanel";
 import JobDetail from "../components/JobDetail";
-import { useProject, scanProgressPercent } from "../state/ProjectContext";
+import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, errorText } from "../lib/utils";
 import { GetJobDetail } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
@@ -34,7 +34,6 @@ export default function ScanJobsPage() {
   const [jobDetailError, setJobDetailError] = useState<string | null>(null);
 
   const scanActive = activeJobId !== null;
-  const progressPercent = scanProgressPercent(scanProgress);
 
   const handleStartScan = async () => {
     if (!scanRoot.trim()) {
@@ -95,7 +94,6 @@ export default function ScanJobsPage() {
         scanActive={scanActive}
         scanProgress={scanProgress}
         cancelling={cancelling}
-        progressPercent={progressPercent}
         jobs={jobs}
         jobsError={jobsError}
         jobDetailLoading={jobDetailLoading}

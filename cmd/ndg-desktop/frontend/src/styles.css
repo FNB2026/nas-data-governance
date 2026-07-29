@@ -636,6 +636,61 @@ button.secondary {
   transition: width 0.3s ease;
 }
 
+/* Indeterminate progress bar */
+.progress-bar--indeterminate {
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-fill--indeterminate {
+  width: 40%;
+  background: var(--accent);
+  border-radius: 4px;
+  animation: indeterminate-slide 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminate-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* Path validation status */
+.path-status {
+  font-size: 0.8rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.path-status--checking {
+  color: var(--text-muted);
+}
+
+.path-status--valid {
+  color: #248a3d;
+}
+
+.path-status--invalid {
+  color: var(--error);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.path-error-detail {
+  font-size: 0.8rem;
+  margin-top: 0.3rem;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.empty-state p {
+  margin-bottom: 0.4rem;
+}
+
 .progress-stats {
   display: flex;
   flex-wrap: wrap;
