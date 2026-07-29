@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	_ "modernc.org/sqlite"
 )
 
 func newTestStore(t *testing.T) *SQLiteStore {
@@ -423,5 +425,179 @@ func TestSaveFormatsByPathAndListFormats(t *testing.T) {
 	records[0].Info.MIME = "audio/aiff"
 	if saved, missing, err := s.SaveFormatsByPath(ctx, records[:1]); err != nil || saved != 1 || missing != 0 {
 		t.Fatalf("repeat saved=%d missing=%d err=%v", saved, missing, err)
+	}
+}
+
+// TestLinkCountMigrationAndRoundTrip verifies two scenarios:
+//  1. Old database migration: a database created before migration 010
+//     (without the link_count column) is opened, and Init adds the column
+//     with a default of 0. Pre-existing rows must read back with LinkCount=0.
+//  2. New scan round-trip: a file upserted with Physical.LinkCount > 1
+//     (hardlink) must persist and read back with the exact value via
+//     ListFiles, and a re-upsert must update the value.
+func TestLinkCountMigrationAndRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "linkcount-migration.db")
+
+	// --- Phase 1: simulate an old database without link_count ---
+	// Create the database with raw SQL using only the original schema
+	// (schema 001, before migrations 004/010 added file_status,
+	// physical_reliable, and link_count).
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	// Create a minimal old-schema file_instances table — no link_count,
+	// no file_status, no physical_reliable.
+	oldSchema := `
+CREATE TABLE IF NOT EXISTS storages (id TEXT PRIMARY KEY, root_path TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS file_instances (
+  id INTEGER PRIMARY KEY, storage_id TEXT NOT NULL REFERENCES storages(id), path TEXT NOT NULL,
+  name TEXT NOT NULL, size INTEGER NOT NULL, mode INTEGER NOT NULL, mtime TEXT NOT NULL,
+  device INTEGER, inode INTEGER, quick_hash TEXT, content_sha256 TEXT, discovered_at TEXT NOT NULL,
+  verified_at TEXT, UNIQUE(storage_id, path)
+);`
+	if _, err := rawDB.ExecContext(ctx, oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	// Insert a storage and a file row the old way (no link_count).
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO storages(id, root_path, kind, created_at) VALUES('s1', '/old', 'local', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("insert old storage: %v", err)
+	}
+	if _, err := rawDB.ExecContext(ctx,
+		`INSERT INTO file_instances(storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at)
+		 VALUES('s1', '/old/file.txt', 'file.txt', 100, 0644, ?, 16777220, 12345, '', '', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("insert old file: %v", err)
+	}
+	// Verify the column does NOT exist yet.
+	var colCount int
+	if err := rawDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('file_instances') WHERE name='link_count'").Scan(&colCount); err != nil {
+		t.Fatalf("check old schema: %v", err)
+	}
+	if colCount != 0 {
+		t.Fatalf("link_count column should not exist in old schema, got count=%d", colCount)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	// --- Phase 2: open with Open(), which runs Init() and applies migrations ---
+	s, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open with migration: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	// The migration must have added link_count with DEFAULT 0.
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM pragma_table_info('file_instances') WHERE name='link_count'").Scan(&colCount); err != nil {
+		t.Fatalf("check migrated schema: %v", err)
+	}
+	if colCount != 1 {
+		t.Fatalf("link_count column should exist after migration, got count=%d", colCount)
+	}
+
+	// The pre-existing old file must read back with LinkCount=0 (default).
+	oldFiles, err := s.ListFiles(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list old files: %v", err)
+	}
+	if len(oldFiles) != 1 {
+		t.Fatalf("expected 1 old file, got %d", len(oldFiles))
+	}
+	if oldFiles[0].Physical.LinkCount != 0 {
+		t.Fatalf("old file LinkCount = %d, want 0 (migration default)", oldFiles[0].Physical.LinkCount)
+	}
+
+	// --- Phase 3: round-trip a new scan with hardlink evidence ---
+	// Upsert a file with LinkCount=3 (a hardlink with 3 names).
+	wantLinkCount := uint64(3)
+	newFiles := []domain.FileInstance{{
+		StorageID: "s1", Path: "/old/hardlink.txt", Name: "hardlink.txt",
+		Size: 200, Mode: 0644, ModifiedAt: time.Unix(1000, 0),
+		Device: 16777220, Inode: 99999, DiscoveredAt: time.Unix(2000, 0),
+		Physical: domain.PhysicalIdentity{
+			Device:    16777220,
+			Inode:     99999,
+			LinkCount: wantLinkCount,
+			Reliable:  true,
+		},
+	}}
+	if _, err := s.UpsertFiles(ctx, newFiles); err != nil {
+		t.Fatalf("upsert hardlink file: %v", err)
+	}
+
+	// Read back and verify LinkCount round-trips exactly.
+	gotFiles, err := s.ListFiles(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list after upsert: %v", err)
+	}
+	var hardlinkFile *domain.FileInstance
+	for i := range gotFiles {
+		if gotFiles[i].Path == "/old/hardlink.txt" {
+			hardlinkFile = &gotFiles[i]
+			break
+		}
+	}
+	if hardlinkFile == nil {
+		t.Fatalf("hardlink file not found in list")
+	}
+	if hardlinkFile.Physical.LinkCount != wantLinkCount {
+		t.Fatalf("hardlink LinkCount = %d, want %d", hardlinkFile.Physical.LinkCount, wantLinkCount)
+	}
+	if !hardlinkFile.Physical.Reliable {
+		t.Fatalf("hardlink Physical.Reliable = false, want true")
+	}
+
+	// --- Phase 4: re-upsert updates link_count ---
+	updatedLinkCount := uint64(1)
+	newFiles[0].Physical.LinkCount = updatedLinkCount
+	if _, err := s.UpsertFiles(ctx, newFiles); err != nil {
+		t.Fatalf("re-upsert hardlink file: %v", err)
+	}
+	gotFiles, err = s.ListFiles(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list after re-upsert: %v", err)
+	}
+	for i := range gotFiles {
+		if gotFiles[i].Path == "/old/hardlink.txt" {
+			if gotFiles[i].Physical.LinkCount != updatedLinkCount {
+				t.Fatalf("re-upserted LinkCount = %d, want %d", gotFiles[i].Physical.LinkCount, updatedLinkCount)
+			}
+			break
+		}
+	}
+
+	// --- Phase 5: high-bit LinkCount (edge case) ---
+	highBitLinkCount := uint64(1<<63 + 7)
+	edgeFiles := []domain.FileInstance{{
+		StorageID: "s1", Path: "/old/edge.bin", Name: "edge.bin",
+		Size: 1, Mode: 0644, ModifiedAt: time.Unix(1000, 0),
+		Device: 16777220, Inode: 88888, DiscoveredAt: time.Unix(2000, 0),
+		Physical: domain.PhysicalIdentity{
+			Device:    16777220,
+			Inode:     88888,
+			LinkCount: highBitLinkCount,
+			Reliable:  true,
+		},
+	}}
+	if _, err := s.UpsertFiles(ctx, edgeFiles); err != nil {
+		t.Fatalf("upsert high-bit link_count: %v", err)
+	}
+	gotFiles, err = s.ListFiles(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list after edge upsert: %v", err)
+	}
+	for i := range gotFiles {
+		if gotFiles[i].Path == "/old/edge.bin" {
+			if gotFiles[i].Physical.LinkCount != highBitLinkCount {
+				t.Fatalf("high-bit LinkCount = %d, want %d", gotFiles[i].Physical.LinkCount, highBitLinkCount)
+			}
+			break
+		}
 	}
 }
