@@ -76,22 +76,22 @@ type Recorder interface {
 // event payloads because they may contain paths, filenames, or other
 // location-identifying data.
 var sensitiveKeys = map[string]bool{
-	"path":           true,
-	"file":           true,
-	"filename":       true,
-	"filepath":       true,
-	"source_path":    true,
-	"target_path":    true,
-	"actual_path":    true,
-	"original_path":  true,
-	"db_path":        true,
-	"database":       true,
-	"quarantine":     true,
+	"path":            true,
+	"file":            true,
+	"filename":        true,
+	"filepath":        true,
+	"source_path":     true,
+	"target_path":     true,
+	"actual_path":     true,
+	"original_path":   true,
+	"db_path":         true,
+	"database":        true,
+	"quarantine":      true,
 	"quarantine_path": true,
-	"error":          true, // errors may embed paths
-	"err":            true,
-	"detail":         true, // free-form detail may embed paths
-	"reason":         true, // free-form reason may embed paths
+	"error":           true, // errors may embed paths
+	"err":             true,
+	"detail":          true, // free-form detail may embed paths
+	"reason":          true, // free-form reason may embed paths
 }
 
 // SanitizePayload returns a new map with all sensitive keys removed.

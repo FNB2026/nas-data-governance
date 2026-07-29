@@ -6,15 +6,15 @@ import (
 
 func TestSanitizePayload_RemovesSensitiveKeys(t *testing.T) {
 	payload := map[string]any{
-		"discovered":     int64(100),
-		"path":           "/secret/path/to/file",
-		"filename":       "secret.txt",
-		"source_path":    "/mnt/nas/source",
-		"target_path":    "/mnt/nas/target",
-		"error":          "open /secret/path: permission denied",
-		"quarantine":     "/var/quarantine/abc",
-		"db_path":        "<db_path_placeholder>",
-		"processed":      int64(50),
+		"discovered":  int64(100),
+		"path":        "/secret/path/to/file",
+		"filename":    "secret.txt",
+		"source_path": "/mnt/nas/source",
+		"target_path": "/mnt/nas/target",
+		"error":       "open /secret/path: permission denied",
+		"quarantine":  "/var/quarantine/abc",
+		"db_path":     "<db_path_placeholder>",
+		"processed":   int64(50),
 	}
 
 	result := SanitizePayload(payload)

@@ -173,11 +173,11 @@ func TestSmokeCancelAndHistory(t *testing.T) {
 }
 
 // TestSmokeCrashRecovery simulates a desktop crash during a scan:
-// 1. Open project RW, start a scan, close the project immediately
-//    (simulating app crash/quit while the job is non-terminal).
-// 2. Reopen the same database.
-// 3. Verify the stale job is marked FAILED with error_code
-//    "crash_recovery" and appears in history.
+//  1. Open project RW, start a scan, close the project immediately
+//     (simulating app crash/quit while the job is non-terminal).
+//  2. Reopen the same database.
+//  3. Verify the stale job is marked FAILED with error_code
+//     "crash_recovery" and appears in history.
 //
 // To reliably trigger the crash recovery path (rather than racing
 // against a fast scan), Phase 1 directly seeds a RUNNING job into

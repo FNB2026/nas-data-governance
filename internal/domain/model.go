@@ -110,18 +110,18 @@ func uint64ToString(n uint64) string {
 }
 
 type FileInstance struct {
-	StorageID     string            `json:"storage_id"`
-	Path          string            `json:"path"`
-	Name          string            `json:"name"`
-	Size          int64             `json:"size"`
-	Mode          uint32            `json:"mode"`
-	ModifiedAt    time.Time         `json:"modified_at"`
-	Device        uint64            `json:"device"`
-	Inode         uint64            `json:"inode"`
-	IsSymlink     bool              `json:"is_symlink"`
-	QuickHash     string            `json:"quick_hash,omitempty"`
-	ContentSHA256 string            `json:"content_sha256,omitempty"`
-	DiscoveredAt  time.Time         `json:"discovered_at"`
+	StorageID     string    `json:"storage_id"`
+	Path          string    `json:"path"`
+	Name          string    `json:"name"`
+	Size          int64     `json:"size"`
+	Mode          uint32    `json:"mode"`
+	ModifiedAt    time.Time `json:"modified_at"`
+	Device        uint64    `json:"device"`
+	Inode         uint64    `json:"inode"`
+	IsSymlink     bool      `json:"is_symlink"`
+	QuickHash     string    `json:"quick_hash,omitempty"`
+	ContentSHA256 string    `json:"content_sha256,omitempty"`
+	DiscoveredAt  time.Time `json:"discovered_at"`
 	// Physical captures the hardlink-level identity of this file instance.
 	// Populated by the scanner when Device and Inode are available; used by
 	// the duplicate report to avoid counting hardlinks as independent

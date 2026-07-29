@@ -36,19 +36,19 @@ type ExecutionInput struct {
 
 // ExecutionResult holds the outcome of executing one plan.
 type ExecutionResult struct {
-	PlanID     string                `json:"plan_id"`
-	FinalState domain.PlanState      `json:"final_state"`
-	Steps      []executor.AuditStep  `json:"steps"`
-	ErrorType  string                `json:"error_type,omitempty"`
-	Err        error                 `json:"-"`
+	PlanID     string               `json:"plan_id"`
+	FinalState domain.PlanState     `json:"final_state"`
+	Steps      []executor.AuditStep `json:"steps"`
+	ErrorType  string               `json:"error_type,omitempty"`
+	Err        error                `json:"-"`
 }
 
 // ExecutionSummary aggregates the counts from a batch run.
 type ExecutionSummary struct {
-	Results    []ExecutionResult
-	Executed   int
-	Skipped    int
-	Failed     int
+	Results      []ExecutionResult
+	Executed     int
+	Skipped      int
+	Failed       int
 	LifecycleErr error
 }
 

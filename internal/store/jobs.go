@@ -217,14 +217,14 @@ func (s *SQLiteStore) ListEvents(ctx context.Context, jobID string) ([]events.Ev
 	var result []events.Event
 	for rows.Next() {
 		var (
-			id              int64
-			jid             string
-			seq             int
-			eventType       string
-			stage           string
-			state           string
-			payloadJSON     string
-			createdAt       string
+			id          int64
+			jid         string
+			seq         int
+			eventType   string
+			stage       string
+			state       string
+			payloadJSON string
+			createdAt   string
 		)
 		if err := rows.Scan(&id, &jid, &seq, &eventType, &stage, &state, &payloadJSON, &createdAt); err != nil {
 			return nil, fmt.Errorf("store: ListEvents: scan: %w", err)

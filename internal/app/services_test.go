@@ -544,7 +544,7 @@ func TestExecutionService_RetentionMinimum(t *testing.T) {
 
 func TestReviewService_ConvertReviewToSkip(t *testing.T) {
 	plan := &domain.OperationPlan{
-		ID:     "p1",
+		ID: "p1",
 		Actions: []domain.PlannedAction{
 			{Action: domain.OperationReview, Reason: "needs human review"},
 			{Action: domain.OperationKeep, Reason: "retain"},

@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/dslipak/pdf v0.0.2
 	github.com/wailsapp/wails/v2 v2.13.0
-	golang.org/x/text v0.37.0
+	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.53.0
 )
 
