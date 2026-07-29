@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { wails } from "../wailsjs/go/models";
+import { wails, formatdiag, governancediag, merge } from "../wailsjs/go/models";
 import {
   DiagnoseFormats,
   DiagnoseGovernance,
@@ -25,9 +25,9 @@ export default function DiagnosticPanel({ storages }: DiagnosticPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [formatReport, setFormatReport] = useState<wails.FormatDiagReport | null>(null);
-  const [govReport, setGovReport] = useState<wails.GovernanceDiagReport | null>(null);
-  const [mergeReport, setMergeReport] = useState<wails.MergeDiagReport | null>(null);
+  const [formatReport, setFormatReport] = useState<formatdiag.Report | null>(null);
+  const [govReport, setGovReport] = useState<governancediag.Report | null>(null);
+  const [mergeReport, setMergeReport] = useState<merge.DiagnosticReport | null>(null);
 
   const runDiagnostic = async () => {
     if (!hasWailsRuntime()) return;
@@ -183,12 +183,15 @@ function JsonDetailTable({ title, rows }: { title: string; rows: any[] }) {
 
 // ---- Format report view ----
 
-function FormatReportView({ report }: { report: wails.FormatDiagReport }) {
+function FormatReportView({ report }: { report: formatdiag.Report }) {
   const s = report.summary;
+  const generatedAt = typeof report.generated_at === "string"
+    ? report.generated_at
+    : String(report.generated_at || "");
   return (
     <div className="diag-report">
       <p className="muted diag-generated-at">
-        生成时间：{formatDateTime(report.generated_at)} · 大文件阈值：{formatBytes(report.large_unknown_minimum)}
+        生成时间：{formatDateTime(generatedAt)} · 大文件阈值：{formatBytes(report.large_unknown_minimum)}
       </p>
       <StatGrid stats={[
         { label: "文件总数", value: s.files },
@@ -208,12 +211,15 @@ function FormatReportView({ report }: { report: wails.FormatDiagReport }) {
 
 // ---- Governance report view ----
 
-function GovernanceReportView({ report }: { report: wails.GovernanceDiagReport }) {
+function GovernanceReportView({ report }: { report: governancediag.Report }) {
   const s = report.summary;
+  const generatedAt = typeof report.generated_at === "string"
+    ? report.generated_at
+    : String(report.generated_at || "");
   return (
     <div className="diag-report">
       <p className="muted diag-generated-at">
-        生成时间：{formatDateTime(report.generated_at)} · 大媒体阈值：{formatBytes(report.large_media_minimum)}
+        生成时间：{formatDateTime(generatedAt)} · 大媒体阈值：{formatBytes(report.large_media_minimum)}
         {report.execution_authorized && <span className="warn"> 执行已授权</span>}
       </p>
       <StatGrid stats={[
@@ -251,12 +257,15 @@ function GovernanceReportView({ report }: { report: wails.GovernanceDiagReport }
 
 // ---- Merge report view ----
 
-function MergeReportView({ report }: { report: wails.MergeDiagReport }) {
+function MergeReportView({ report }: { report: merge.DiagnosticReport }) {
   const s = report.summary;
+  const generatedAt = typeof report.generated_at === "string"
+    ? report.generated_at
+    : String(report.generated_at || "");
   return (
     <div className="diag-report">
       <p className="muted diag-generated-at">
-        生成时间：{formatDateTime(report.generated_at)} · 建议阈值：{report.suggestion_threshold}
+        生成时间：{formatDateTime(generatedAt)} · 建议阈值：{report.suggestion_threshold}
         {report.execution_authorized && <span className="warn"> 执行已授权</span>}
       </p>
       <StatGrid stats={[

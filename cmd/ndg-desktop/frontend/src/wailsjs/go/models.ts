@@ -1,5 +1,863 @@
+export namespace domain {
+	
+	export class ChainNode {
+	    path: string;
+	    name: string;
+	    role: string;
+	    authority: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChainNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.role = source["role"];
+	        this.authority = source["authority"];
+	    }
+	}
+	export class DirectoryContext {
+	    role: string;
+	    authority_level: number;
+	    privacy_level: string;
+	    protected: boolean;
+	    matched_terms?: string[];
+	    parent_chain?: ChainNode[];
+	    branch_point?: string;
+	    business_anchor?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DirectoryContext(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.role = source["role"];
+	        this.authority_level = source["authority_level"];
+	        this.privacy_level = source["privacy_level"];
+	        this.protected = source["protected"];
+	        this.matched_terms = source["matched_terms"];
+	        this.parent_chain = this.convertValues(source["parent_chain"], ChainNode);
+	        this.branch_point = source["branch_point"];
+	        this.business_anchor = source["business_anchor"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FormatInfo {
+	    format?: string;
+	    category?: string;
+	    mime?: string;
+	    width?: number;
+	    height?: number;
+	    duration?: number;
+	    pages?: number;
+	    codec?: string;
+	    archive_entry_count?: number;
+	    role?: string;
+	    protected?: boolean;
+	    regenerable?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FormatInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.category = source["category"];
+	        this.mime = source["mime"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.duration = source["duration"];
+	        this.pages = source["pages"];
+	        this.codec = source["codec"];
+	        this.archive_entry_count = source["archive_entry_count"];
+	        this.role = source["role"];
+	        this.protected = source["protected"];
+	        this.regenerable = source["regenerable"];
+	    }
+	}
+	export class PhysicalIdentity {
+	    device: number;
+	    inode: number;
+	    link_count?: number;
+	    reliable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PhysicalIdentity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.device = source["device"];
+	        this.inode = source["inode"];
+	        this.link_count = source["link_count"];
+	        this.reliable = source["reliable"];
+	    }
+	}
+	export class FileInstance {
+	    storage_id: string;
+	    path: string;
+	    name: string;
+	    size: number;
+	    mode: number;
+	    // Go type: time
+	    modified_at: any;
+	    device: number;
+	    inode: number;
+	    is_symlink: boolean;
+	    quick_hash?: string;
+	    content_sha256?: string;
+	    // Go type: time
+	    discovered_at: any;
+	    physical?: PhysicalIdentity;
+	    format?: FormatInfo;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileInstance(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.mode = source["mode"];
+	        this.modified_at = this.convertValues(source["modified_at"], null);
+	        this.device = source["device"];
+	        this.inode = source["inode"];
+	        this.is_symlink = source["is_symlink"];
+	        this.quick_hash = source["quick_hash"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.discovered_at = this.convertValues(source["discovered_at"], null);
+	        this.physical = this.convertValues(source["physical"], PhysicalIdentity);
+	        this.format = this.convertValues(source["format"], FormatInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileRelation {
+	    type: string;
+	    a: string;
+	    b: string;
+	    score?: number;
+	    evidence?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FileRelation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.a = source["a"];
+	        this.b = source["b"];
+	        this.score = source["score"];
+	        this.evidence = source["evidence"];
+	    }
+	}
+	
+	export class PlannedAction {
+	    path: string;
+	    action: string;
+	    reason: string;
+	    target_path?: string;
+	    context: DirectoryContext;
+	    file?: FileInstance;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlannedAction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.target_path = source["target_path"];
+	        this.context = this.convertValues(source["context"], DirectoryContext);
+	        this.file = this.convertValues(source["file"], FileInstance);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RetentionScore {
+	    total: number;
+	    authority: number;
+	    stability: number;
+	    path_depth: number;
+	    role_bonus: number;
+	    reasons: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RetentionScore(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.authority = source["authority"];
+	        this.stability = source["stability"];
+	        this.path_depth = source["path_depth"];
+	        this.role_bonus = source["role_bonus"];
+	        this.reasons = source["reasons"];
+	    }
+	}
+	export class OperationPlan {
+	    id: string;
+	    task_id?: string;
+	    state: string;
+	    content_sha256: string;
+	    size: number;
+	    risk: string;
+	    retain_path?: string;
+	    retain_score?: RetentionScore;
+	    actions: PlannedAction[];
+	    evidence: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new OperationPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.task_id = source["task_id"];
+	        this.state = source["state"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.size = source["size"];
+	        this.risk = source["risk"];
+	        this.retain_path = source["retain_path"];
+	        this.retain_score = this.convertValues(source["retain_score"], RetentionScore);
+	        this.actions = this.convertValues(source["actions"], PlannedAction);
+	        this.evidence = source["evidence"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+
+}
+
+export namespace formatdiag {
+	
+	export class ExtensionMismatch {
+	    storage_id: string;
+	    path: string;
+	    size: number;
+	    extension: string;
+	    expected: string[];
+	    detected: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionMismatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.extension = source["extension"];
+	        this.expected = source["expected"];
+	        this.detected = source["detected"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class MetadataGap {
+	    format: string;
+	    category: string;
+	    missing_duration: number;
+	    missing_dimensions: number;
+	    bytes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MetadataGap(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.category = source["category"];
+	        this.missing_duration = source["missing_duration"];
+	        this.missing_dimensions = source["missing_dimensions"];
+	        this.bytes = source["bytes"];
+	    }
+	}
+	export class ReviewItem {
+	    storage_id: string;
+	    path: string;
+	    size: number;
+	    // Go type: time
+	    modified_at: any;
+	    quick_hash?: string;
+	    content_sha256?: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReviewItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.modified_at = this.convertValues(source["modified_at"], null);
+	        this.quick_hash = source["quick_hash"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.reason = source["reason"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Summary {
+	    files: number;
+	    format_rows: number;
+	    missing_format_rows: number;
+	    large_unknown: number;
+	    extension_mismatches: number;
+	    formats_with_metadata_gap: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Summary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.format_rows = source["format_rows"];
+	        this.missing_format_rows = source["missing_format_rows"];
+	        this.large_unknown = source["large_unknown"];
+	        this.extension_mismatches = source["extension_mismatches"];
+	        this.formats_with_metadata_gap = source["formats_with_metadata_gap"];
+	    }
+	}
+	export class Report {
+	    // Go type: time
+	    generated_at: any;
+	    large_unknown_minimum: number;
+	    summary: Summary;
+	    large_unknown: ReviewItem[];
+	    extension_mismatches: ExtensionMismatch[];
+	    metadata_gaps: MetadataGap[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = this.convertValues(source["generated_at"], null);
+	        this.large_unknown_minimum = source["large_unknown_minimum"];
+	        this.summary = this.convertValues(source["summary"], Summary);
+	        this.large_unknown = this.convertValues(source["large_unknown"], ReviewItem);
+	        this.extension_mismatches = this.convertValues(source["extension_mismatches"], ExtensionMismatch);
+	        this.metadata_gaps = this.convertValues(source["metadata_gaps"], MetadataGap);
+	        this.safety_notes = source["safety_notes"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+
+}
+
+export namespace governancediag {
+	
+	export class DuplicateReview {
+	    sha256: string;
+	    size: number;
+	    copies: number;
+	    redundant_bytes: number;
+	    draft_plan: domain.OperationPlan;
+	
+	    static createFrom(source: any = {}) {
+	        return new DuplicateReview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sha256 = source["sha256"];
+	        this.size = source["size"];
+	        this.copies = source["copies"];
+	        this.redundant_bytes = source["redundant_bytes"];
+	        this.draft_plan = this.convertValues(source["draft_plan"], domain.OperationPlan);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class LargeMediaReview {
+	    storage_id: string;
+	    path: string;
+	    size: number;
+	    format: domain.FormatInfo;
+	    context: domain.DirectoryContext;
+	    relation_count: number;
+	    recommendation: string;
+	    evidence: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LargeMediaReview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.format = this.convertValues(source["format"], domain.FormatInfo);
+	        this.context = this.convertValues(source["context"], domain.DirectoryContext);
+	        this.relation_count = source["relation_count"];
+	        this.recommendation = source["recommendation"];
+	        this.evidence = source["evidence"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MediaAggregate {
+	    format: string;
+	    codec: string;
+	    files: number;
+	    bytes: number;
+	    large_files: number;
+	    missing_duration: number;
+	    missing_dimensions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MediaAggregate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.codec = source["codec"];
+	        this.files = source["files"];
+	        this.bytes = source["bytes"];
+	        this.large_files = source["large_files"];
+	        this.missing_duration = source["missing_duration"];
+	        this.missing_dimensions = source["missing_dimensions"];
+	    }
+	}
+	export class ZeroByteReview {
+	    storage_id: string;
+	    path: string;
+	    classification: string;
+	    context: domain.DirectoryContext;
+	    evidence: string[];
+	    recommendation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ZeroByteReview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.path = source["path"];
+	        this.classification = source["classification"];
+	        this.context = this.convertValues(source["context"], domain.DirectoryContext);
+	        this.evidence = source["evidence"];
+	        this.recommendation = source["recommendation"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Summary {
+	    files: number;
+	    format_rows: number;
+	    missing_format_rows: number;
+	    duplicate_groups: number;
+	    duplicate_files: number;
+	    theoretical_redundant_bytes: number;
+	    draft_plans: number;
+	    non_draft_plans: number;
+	    critical_plans: number;
+	    review_actions: number;
+	    quarantine_candidate_actions: number;
+	    zero_byte_files: number;
+	    large_media_files: number;
+	    large_media_bytes: number;
+	    large_media_with_relations: number;
+	    large_media_with_business_anchor: number;
+	    large_media_project_work: number;
+	    large_media_protected: number;
+	    large_media_missing_codec: number;
+	    large_media_missing_duration: number;
+	    media_relations: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Summary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.format_rows = source["format_rows"];
+	        this.missing_format_rows = source["missing_format_rows"];
+	        this.duplicate_groups = source["duplicate_groups"];
+	        this.duplicate_files = source["duplicate_files"];
+	        this.theoretical_redundant_bytes = source["theoretical_redundant_bytes"];
+	        this.draft_plans = source["draft_plans"];
+	        this.non_draft_plans = source["non_draft_plans"];
+	        this.critical_plans = source["critical_plans"];
+	        this.review_actions = source["review_actions"];
+	        this.quarantine_candidate_actions = source["quarantine_candidate_actions"];
+	        this.zero_byte_files = source["zero_byte_files"];
+	        this.large_media_files = source["large_media_files"];
+	        this.large_media_bytes = source["large_media_bytes"];
+	        this.large_media_with_relations = source["large_media_with_relations"];
+	        this.large_media_with_business_anchor = source["large_media_with_business_anchor"];
+	        this.large_media_project_work = source["large_media_project_work"];
+	        this.large_media_protected = source["large_media_protected"];
+	        this.large_media_missing_codec = source["large_media_missing_codec"];
+	        this.large_media_missing_duration = source["large_media_missing_duration"];
+	        this.media_relations = source["media_relations"];
+	    }
+	}
+	export class Report {
+	    // Go type: time
+	    generated_at: any;
+	    large_media_minimum: number;
+	    execution_authorized: boolean;
+	    summary: Summary;
+	    duplicate_reviews: DuplicateReview[];
+	    zero_byte_reviews: ZeroByteReview[];
+	    media_aggregates: MediaAggregate[];
+	    large_media_reviews: LargeMediaReview[];
+	    media_relations: domain.FileRelation[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = this.convertValues(source["generated_at"], null);
+	        this.large_media_minimum = source["large_media_minimum"];
+	        this.execution_authorized = source["execution_authorized"];
+	        this.summary = this.convertValues(source["summary"], Summary);
+	        this.duplicate_reviews = this.convertValues(source["duplicate_reviews"], DuplicateReview);
+	        this.zero_byte_reviews = this.convertValues(source["zero_byte_reviews"], ZeroByteReview);
+	        this.media_aggregates = this.convertValues(source["media_aggregates"], MediaAggregate);
+	        this.large_media_reviews = this.convertValues(source["large_media_reviews"], LargeMediaReview);
+	        this.media_relations = this.convertValues(source["media_relations"], domain.FileRelation);
+	        this.safety_notes = source["safety_notes"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+
+}
+
+export namespace merge {
+	
+	export class PairReview {
+	    directory_a: string;
+	    directory_b: string;
+	    filename_jaccard: number;
+	    gate: string;
+	    evidence: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PairReview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.directory_a = source["directory_a"];
+	        this.directory_b = source["directory_b"];
+	        this.filename_jaccard = source["filename_jaccard"];
+	        this.gate = source["gate"];
+	        this.evidence = source["evidence"];
+	    }
+	}
+	export class DiagnosticSummary {
+	    files: number;
+	    directories: number;
+	    sibling_parents: number;
+	    sibling_pairs: number;
+	    name_similar_pairs: number;
+	    positive_overlap_pairs: number;
+	    overlap_at_least_0_10: number;
+	    overlap_at_least_0_25: number;
+	    overlap_at_least_0_50: number;
+	    suggestions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnosticSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = source["files"];
+	        this.directories = source["directories"];
+	        this.sibling_parents = source["sibling_parents"];
+	        this.sibling_pairs = source["sibling_pairs"];
+	        this.name_similar_pairs = source["name_similar_pairs"];
+	        this.positive_overlap_pairs = source["positive_overlap_pairs"];
+	        this.overlap_at_least_0_10 = source["overlap_at_least_0_10"];
+	        this.overlap_at_least_0_25 = source["overlap_at_least_0_25"];
+	        this.overlap_at_least_0_50 = source["overlap_at_least_0_50"];
+	        this.suggestions = source["suggestions"];
+	    }
+	}
+	export class DiagnosticReport {
+	    // Go type: time
+	    generated_at: any;
+	    execution_authorized: boolean;
+	    suggestion_threshold: number;
+	    summary: DiagnosticSummary;
+	    name_similar_reviews: PairReview[];
+	    safety_notes: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnosticReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generated_at = this.convertValues(source["generated_at"], null);
+	        this.execution_authorized = source["execution_authorized"];
+	        this.suggestion_threshold = source["suggestion_threshold"];
+	        this.summary = this.convertValues(source["summary"], DiagnosticSummary);
+	        this.name_similar_reviews = this.convertValues(source["name_similar_reviews"], PairReview);
+	        this.safety_notes = source["safety_notes"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+
+}
+
 export namespace wails {
 	
+	export class DiagnoseFormatsRequest {
+	    storage_id?: string;
+	    large_unknown_minimum?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseFormatsRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.large_unknown_minimum = source["large_unknown_minimum"];
+	    }
+	}
+	export class DiagnoseGovernanceRequest {
+	    storage_id?: string;
+	    large_media_minimum?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseGovernanceRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.large_media_minimum = source["large_media_minimum"];
+	    }
+	}
+	export class DiagnoseMergesRequest {
+	    storage_id?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnoseMergesRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	    }
+	}
 	export class FileItem {
 	    storage_id: string;
 	    path: string;
@@ -204,11 +1062,11 @@ export namespace wails {
 	    error_code?: string;
 	    created_at: string;
 	    completed_at?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new JobSummary(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.job_id = source["job_id"];
@@ -386,294 +1244,6 @@ export namespace wails {
 	        this.commit = source["commit"];
 	        this.build_time = source["build_time"];
 	    }
-	}
-
-	// ---- V5 Diagnostic Types ----
-
-	export class DiagnoseFormatsRequest {
-	    storage_id?: string;
-	    large_unknown_minimum?: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new DiagnoseFormatsRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.storage_id = source["storage_id"];
-	        this.large_unknown_minimum = source["large_unknown_minimum"];
-	    }
-	}
-
-	export class DiagnoseGovernanceRequest {
-	    storage_id?: string;
-	    large_media_minimum?: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new DiagnoseGovernanceRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.storage_id = source["storage_id"];
-	        this.large_media_minimum = source["large_media_minimum"];
-	    }
-	}
-
-	export class DiagnoseMergesRequest {
-	    storage_id?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DiagnoseMergesRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.storage_id = source["storage_id"];
-	    }
-	}
-
-	// Format diagnostic report types (mirror formatdiag package)
-	export class FormatDiagSummary {
-	    files: number;
-	    format_rows: number;
-	    missing_format_rows: number;
-	    large_unknown: number;
-	    extension_mismatches: number;
-	    formats_with_metadata_gap: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new FormatDiagSummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.files = source["files"];
-	        this.format_rows = source["format_rows"];
-	        this.missing_format_rows = source["missing_format_rows"];
-	        this.large_unknown = source["large_unknown"];
-	        this.extension_mismatches = source["extension_mismatches"];
-	        this.formats_with_metadata_gap = source["formats_with_metadata_gap"];
-	    }
-	}
-
-	export class FormatDiagReport {
-	    generated_at: string;
-	    large_unknown_minimum: number;
-	    summary: FormatDiagSummary;
-	    large_unknown: any[];
-	    extension_mismatches: any[];
-	    metadata_gaps: any[];
-	    safety_notes: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new FormatDiagReport(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.generated_at = source["generated_at"];
-	        this.large_unknown_minimum = source["large_unknown_minimum"];
-	        this.summary = this.convertValues(source["summary"], FormatDiagSummary);
-	        this.large_unknown = source["large_unknown"] || [];
-	        this.extension_mismatches = source["extension_mismatches"] || [];
-	        this.metadata_gaps = source["metadata_gaps"] || [];
-	        this.safety_notes = source["safety_notes"] || [];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-	// Governance diagnostic report types (mirror governancediag package)
-	export class GovernanceDiagSummary {
-	    files: number;
-	    format_rows: number;
-	    missing_format_rows: number;
-	    duplicate_groups: number;
-	    duplicate_files: number;
-	    theoretical_redundant_bytes: number;
-	    draft_plans: number;
-	    non_draft_plans: number;
-	    critical_plans: number;
-	    review_actions: number;
-	    quarantine_candidate_actions: number;
-	    zero_byte_files: number;
-	    large_media_files: number;
-	    large_media_bytes: number;
-	    large_media_with_relations: number;
-	    large_media_with_business_anchor: number;
-	    large_media_project_work: number;
-	    large_media_protected: number;
-	    large_media_missing_codec: number;
-	    large_media_missing_duration: number;
-	    media_relations: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new GovernanceDiagSummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.files = source["files"];
-	        this.format_rows = source["format_rows"];
-	        this.missing_format_rows = source["missing_format_rows"];
-	        this.duplicate_groups = source["duplicate_groups"];
-	        this.duplicate_files = source["duplicate_files"];
-	        this.theoretical_redundant_bytes = source["theoretical_redundant_bytes"];
-	        this.draft_plans = source["draft_plans"];
-	        this.non_draft_plans = source["non_draft_plans"];
-	        this.critical_plans = source["critical_plans"];
-	        this.review_actions = source["review_actions"];
-	        this.quarantine_candidate_actions = source["quarantine_candidate_actions"];
-	        this.zero_byte_files = source["zero_byte_files"];
-	        this.large_media_files = source["large_media_files"];
-	        this.large_media_bytes = source["large_media_bytes"];
-	        this.large_media_with_relations = source["large_media_with_relations"];
-	        this.large_media_with_business_anchor = source["large_media_with_business_anchor"];
-	        this.large_media_project_work = source["large_media_project_work"];
-	        this.large_media_protected = source["large_media_protected"];
-	        this.large_media_missing_codec = source["large_media_missing_codec"];
-	        this.large_media_missing_duration = source["large_media_missing_duration"];
-	        this.media_relations = source["media_relations"];
-	    }
-	}
-
-	export class GovernanceDiagReport {
-	    generated_at: string;
-	    large_media_minimum: number;
-	    execution_authorized: boolean;
-	    summary: GovernanceDiagSummary;
-	    duplicate_reviews: any[];
-	    zero_byte_reviews: any[];
-	    media_aggregates: any[];
-	    large_media_reviews: any[];
-	    media_relations: any[];
-	    safety_notes: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new GovernanceDiagReport(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.generated_at = source["generated_at"];
-	        this.large_media_minimum = source["large_media_minimum"];
-	        this.execution_authorized = source["execution_authorized"];
-	        this.summary = this.convertValues(source["summary"], GovernanceDiagSummary);
-	        this.duplicate_reviews = source["duplicate_reviews"] || [];
-	        this.zero_byte_reviews = source["zero_byte_reviews"] || [];
-	        this.media_aggregates = source["media_aggregates"] || [];
-	        this.large_media_reviews = source["large_media_reviews"] || [];
-	        this.media_relations = source["media_relations"] || [];
-	        this.safety_notes = source["safety_notes"] || [];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-	// Merge diagnostic report types (mirror merge package)
-	export class MergeDiagSummary {
-	    files: number;
-	    directories: number;
-	    sibling_parents: number;
-	    sibling_pairs: number;
-	    name_similar_pairs: number;
-	    positive_overlap_pairs: number;
-	    overlap_at_least_0_10: number;
-	    overlap_at_least_0_25: number;
-	    overlap_at_least_0_50: number;
-	    suggestions: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new MergeDiagSummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.files = source["files"];
-	        this.directories = source["directories"];
-	        this.sibling_parents = source["sibling_parents"];
-	        this.sibling_pairs = source["sibling_pairs"];
-	        this.name_similar_pairs = source["name_similar_pairs"];
-	        this.positive_overlap_pairs = source["positive_overlap_pairs"];
-	        this.overlap_at_least_0_10 = source["overlap_at_least_0_10"];
-	        this.overlap_at_least_0_25 = source["overlap_at_least_0_25"];
-	        this.overlap_at_least_0_50 = source["overlap_at_least_0_50"];
-	        this.suggestions = source["suggestions"];
-	    }
-	}
-
-	export class MergeDiagReport {
-	    generated_at: string;
-	    execution_authorized: boolean;
-	    suggestion_threshold: number;
-	    summary: MergeDiagSummary;
-	    name_similar_reviews: any[];
-	    safety_notes: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new MergeDiagReport(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.generated_at = source["generated_at"];
-	        this.execution_authorized = source["execution_authorized"];
-	        this.suggestion_threshold = source["suggestion_threshold"];
-	        this.summary = this.convertValues(source["summary"], MergeDiagSummary);
-	        this.name_similar_reviews = source["name_similar_reviews"] || [];
-	        this.safety_notes = source["safety_notes"] || [];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }
