@@ -12,6 +12,7 @@ import {
   groupByPhysicalIdentity,
   pathSegments,
   compactPath,
+  fileName,
   isHardlinkAlias,
 } from "../lib/evidence";
 
@@ -137,7 +138,7 @@ export default function GroupDetail({
                           </span>
                           <span className="path-compact muted">{ctx}</span>
                         </td>
-                        <td>{f.name}</td>
+                        <td>{fileName(maskedPath)}</td>
                         <td className="num">{formatBytes(f.size)}</td>
                         <td className="muted">{formatDateTime(f.modified_at)}</td>
                         <td className="mono phys-id">{physId}</td>

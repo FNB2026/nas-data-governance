@@ -16,8 +16,12 @@ export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return DEFAULT_SETTINGS;
+    return {
+      pathPrivacyMode:
+        "pathPrivacyMode" in parsed && parsed.pathPrivacyMode === true,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -33,11 +37,11 @@ export function saveSettings(settings: AppSettings): void {
 
 /**
  * Masks a file path for privacy mode.
- * Replaces the home directory and intermediate path segments with asterisks,
- * keeping the first segment and last two segments visible.
+ * Hides mount, share, user, and intermediate segments. The final segment is
+ * partially masked while preserving its extension so screenshots remain useful.
  *
  * Example: /data/archive/Documents/Work/Projects/report.pdf
- *       → /data/[hidden]/Projects/report.pdf
+ *       → …/[hidden]/r***t.pdf
  */
 export function maskPath(path: string): string {
   if (!path) return path;
@@ -46,15 +50,18 @@ export function maskPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const segments = normalized.split("/").filter(Boolean);
 
-  if (segments.length <= 2) return normalized;
+  if (segments.length === 0) return normalized;
 
-  // Keep first segment (root or home) and last two segments
-  const first = segments[0];
-  const last1 = segments[segments.length - 1];
-  const last2 = segments[segments.length - 2];
-  const hiddenCount = segments.length - 3;
+  const finalSegment = segments[segments.length - 1];
+  const dotIndex = finalSegment.lastIndexOf(".");
+  const hasExtension = dotIndex > 0;
+  const stem = hasExtension ? finalSegment.slice(0, dotIndex) : finalSegment;
+  const extension = hasExtension ? finalSegment.slice(dotIndex) : "";
+  const maskedStem = stem.length <= 1
+    ? "***"
+    : `${stem.slice(0, 1)}***${stem.length > 2 ? stem.slice(-1) : ""}`;
+  const maskedFinalSegment = `${maskedStem}${extension}`;
 
-  const prefix = normalized.startsWith("/") ? "/" : "";
-  const hidden = hiddenCount > 0 ? "/**" : "";
-  return `${prefix}${first}${hidden}/${last2}/${last1}`;
+  if (segments.length === 1) return maskedFinalSegment;
+  return `…/[hidden]/${maskedFinalSegment}`;
 }

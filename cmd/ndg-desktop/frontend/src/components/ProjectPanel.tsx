@@ -33,7 +33,7 @@ export default function ProjectPanel({
   onCloseProject,
   onRefreshProject,
 }: ProjectPanelProps) {
-  const { displayPath } = useProject();
+  const { displayPath, pathPrivacyMode } = useProject();
   const projectOpen = project !== null;
 
   // Path pre-validation (debounced)
@@ -129,6 +129,7 @@ export default function ProjectPanel({
           <div className="path-row">
             <input
               aria-label="项目数据库路径"
+              type={pathPrivacyMode ? "password" : "text"}
               value={projectPath}
               onChange={(event) => onProjectPathChange(event.target.value)}
               placeholder="/path/to/project.db"

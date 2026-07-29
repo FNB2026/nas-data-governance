@@ -78,7 +78,7 @@ interface ProjectContextValue {
 
   // Toast notifications
   toasts: ToastItem[];
-  pushToast: (type: ToastType, title: string, message?: string) => void;
+  pushToast: (type: ToastType, title: string, message?: string) => number;
   dismissToast: (id: number) => void;
 
   // Data refresh signal — incremented when scan completes or project refreshes.
@@ -179,6 +179,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Retry tracking for network drive disconnection tolerance
   const pollRetryCountRef = useRef(0);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectToastIdRef = useRef<number | null>(null);
   const MAX_POLL_RETRIES = 5;
 
   // ---- Toast helpers ----
@@ -186,6 +187,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const pushToast = useCallback((type: ToastType, title: string, message?: string) => {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev, { id, type, title, message }]);
+    return id;
   }, []);
 
   const dismissToast = useCallback((id: number) => {
@@ -200,45 +202,49 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const loadStorages = useCallback(async () => {
     if (!hasWailsRuntime()) return;
+    const loadRev = projectRevRef.current;
     try {
       const list = await retryWithBackoff(() => ListStorages(), {
         maxRetries: 3,
-        onRetry: (attempt) => {
-          if (attempt === 1) setConnectionStatus("reconnecting");
-        },
       });
+      if (projectRevRef.current !== loadRev) return;
       setStorages(list || []);
       setStoragesError(null);
-      setConnectionStatus("connected");
     } catch (e: unknown) {
+      if (projectRevRef.current !== loadRev) return;
       setStoragesError(friendlyError(e));
-      if (isNetworkError(e)) setConnectionStatus("disconnected");
     }
   }, []);
 
   const loadJobs = useCallback(async () => {
     if (!hasWailsRuntime()) return;
+    const loadRev = projectRevRef.current;
     try {
       const limit = jobsLimitRef.current;
       const list = await retryWithBackoff(() => ListRecentJobs(limit), { maxRetries: 3 });
+      if (projectRevRef.current !== loadRev) return;
       setJobs(list || []);
       setHasMoreJobs((list || []).length >= limit);
       setJobsError(null);
     } catch (e: unknown) {
+      if (projectRevRef.current !== loadRev) return;
       setJobsError(friendlyError(e));
     }
   }, []);
 
   const loadMoreJobs = useCallback(async () => {
     if (!hasWailsRuntime()) return;
+    const loadRev = projectRevRef.current;
     const nextLimit = jobsLimitRef.current + 20;
-    jobsLimitRef.current = nextLimit;
     try {
-      const list = await ListRecentJobs(nextLimit);
+      const list = await retryWithBackoff(() => ListRecentJobs(nextLimit), { maxRetries: 3 });
+      if (projectRevRef.current !== loadRev) return;
+      jobsLimitRef.current = nextLimit;
       setJobs(list || []);
       setHasMoreJobs((list || []).length >= nextLimit);
       setJobsError(null);
     } catch (e: unknown) {
+      if (projectRevRef.current !== loadRev) return;
       setJobsError(friendlyError(e));
     }
   }, []);
@@ -284,6 +290,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         // Reset retry counter on success
         pollRetryCountRef.current = 0;
         setConnectionStatus("connected");
+        if (reconnectToastIdRef.current !== null) {
+          dismissToast(reconnectToastIdRef.current);
+          reconnectToastIdRef.current = null;
+        }
 
         if (TERMINAL_STATES.has(p.state)) {
           setActiveJobId(null);
@@ -323,16 +333,24 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setConnectionStatus("reconnecting");
 
           if (attempt === 1) {
-            pushToast("warning", "连接中断", `正在尝试重新连接… (${attempt}/${MAX_POLL_RETRIES})`);
+            reconnectToastIdRef.current = pushToast(
+              "warning",
+              "连接中断",
+              `正在尝试重新连接… (${attempt}/${MAX_POLL_RETRIES})`,
+            );
           }
 
           scheduleNextPoll(delay);
         } else {
           // Non-network error, or max retries exceeded — give up
-          setConnectionStatus("disconnected");
+          setConnectionStatus(isNetworkError(error) ? "disconnected" : "connected");
           setActiveJobId(null);
           setCancelling(false);
           pollRetryCountRef.current = 0;
+          if (reconnectToastIdRef.current !== null) {
+            dismissToast(reconnectToastIdRef.current);
+            reconnectToastIdRef.current = null;
+          }
 
           if (isNetworkError(error)) {
             pushToast("error", "扫描连接中断", `重试 ${MAX_POLL_RETRIES} 次后仍无法连接，请检查网络盘状态后重试`);
@@ -357,7 +375,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
       pollRetryCountRef.current = 0;
     };
-  }, [activeJobId, loadJobs, loadStorages, notifyDataChanged, pushToast]);
+  }, [activeJobId, dismissToast, loadJobs, loadStorages, notifyDataChanged, pushToast]);
 
   // ---- Project actions ----
 
@@ -406,6 +424,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         loads.push(loadJobs());
       }
       await Promise.all(loads);
+      setConnectionStatus("connected");
       notifyDataChanged();
     } catch (e: unknown) {
       setError(friendlyError(e));
@@ -436,6 +455,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setScanFilterType("");
       setRecoveryLockActive(false);
       setConnectionStatus("connected");
+      if (reconnectToastIdRef.current !== null) {
+        const reconnectToastId = reconnectToastIdRef.current;
+        setToasts((prev) => prev.filter((toast) => toast.id !== reconnectToastId));
+        reconnectToastIdRef.current = null;
+      }
       setError(null);
     } catch (e: unknown) {
       setError(friendlyError(e));
@@ -454,6 +478,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         loadStorages(),
         ...(isReadWrite ? [loadJobs()] : []),
       ]);
+      setConnectionStatus("connected");
       notifyDataChanged();
     } catch (e: unknown) {
       setError(friendlyError(e));
@@ -481,6 +506,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setLastScanParams(normalizedParams);
       setActiveJobId(resp.job_id);
       setScanProgress(null);
+      setConnectionStatus("connected");
     } catch (e: unknown) {
       pushToast("error", "启动扫描失败", friendlyError(e));
     }

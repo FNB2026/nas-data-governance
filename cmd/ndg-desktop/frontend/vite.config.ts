@@ -2,12 +2,19 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "preserve-dist-placeholder",
+      generateBundle() {
+        this.emitFile({ type: "asset", fileName: ".gitkeep", source: "\n" });
+      },
+    },
+  ],
   build: {
     outDir: "dist",
-    // Don't empty the directory — the .gitkeep placeholder must survive
-    // builds to keep the dist/ directory tracked in git for Go embed.
-    emptyOutDir: false,
+    // Remove stale hashed assets, then recreate the tracked placeholder above.
+    emptyOutDir: true,
   },
   server: {
     port: 5173,

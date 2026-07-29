@@ -49,7 +49,7 @@ export default function SettingsPage() {
             路径脱敏模式
           </label>
           <p className="muted settings-toggle-hint">
-            开启后，界面中的文件路径将被部分遮蔽（如 <code>/data/**/Projects/report.pdf</code>），
+            开启后，界面中的路径和文件名将被部分遮蔽（如 <code>…/[hidden]/r***t.pdf</code>），
             适合截图分享或演示场景。
           </p>
           <div className="settings-preview">

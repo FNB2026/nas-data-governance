@@ -25,6 +25,7 @@ export default function AppShell({
     activeJobId,
     scanProgress,
     connectionStatus,
+    displayPath,
   } = useProject();
 
   const modeLabel = !project
@@ -42,7 +43,7 @@ export default function AppShell({
           <h1>NDG 数据治理</h1>
           {project && (
             <span className="header-project-name">
-              {project.path?.split("/").pop() || "项目"}
+              {displayPath(project.path)?.split("/").pop() || "项目"}
             </span>
           )}
           <span className={`mode-badge mode-badge--${capabilities.project_mode}`}>
@@ -55,12 +56,12 @@ export default function AppShell({
             </span>
           )}
           {connectionStatus === "reconnecting" && (
-            <span className="header-conn-indicator header-conn-indicator--reconnecting">
+            <span className="header-conn-indicator header-conn-indicator--reconnecting" role="status">
               重连中…
             </span>
           )}
           {connectionStatus === "disconnected" && (
-            <span className="header-conn-indicator header-conn-indicator--disconnected">
+            <span className="header-conn-indicator header-conn-indicator--disconnected" role="status">
               已断开
             </span>
           )}

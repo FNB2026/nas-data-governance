@@ -8,6 +8,7 @@ import {
   stageLabel,
 } from "../lib/utils";
 import CopyButton from "./CopyButton";
+import { useProject } from "../state/ProjectContext";
 
 export interface ScanPanelProps {
   // form state
@@ -151,6 +152,7 @@ export default function ScanPanel({
   onLoadMoreJobs,
   onRetryScan,
 }: ScanPanelProps) {
+  const { pathPrivacyMode } = useProject();
   // Tick state to refresh duration display every second
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -237,7 +239,7 @@ export default function ScanPanel({
           <label>
             根目录
             <input
-              type="text"
+              type={pathPrivacyMode ? "password" : "text"}
               value={scanRoot}
               onChange={(e) => onScanRootChange(e.target.value)}
               onKeyDown={(e) => {
@@ -271,7 +273,7 @@ export default function ScanPanel({
               <label>
                 存储 ID（可选）
                 <input
-                  type="text"
+                  type={pathPrivacyMode ? "password" : "text"}
                   value={scanStorageId}
                   onChange={(e) => onScanStorageIdChange(e.target.value)}
                   placeholder="default"

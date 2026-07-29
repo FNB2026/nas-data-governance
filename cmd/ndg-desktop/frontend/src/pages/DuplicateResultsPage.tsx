@@ -27,7 +27,8 @@ export default function DuplicateResultsPage() {
   const [minReclaimableMiB, setMinReclaimableMiB] = useState("");
   const [appliedStorageFilter, setAppliedStorageFilter] = useState("");
   const [appliedMinimumBytes, setAppliedMinimumBytes] = useState(0);
-  const groupsRequestInFlight = useRef(false);
+  const groupsRequestIdRef = useRef(0);
+  const paginationRequestInFlightRef = useRef(false);
 
   // Group detail (page-local)
   const [selectedGroup, setSelectedGroup] = useState<wails.GroupDetailResponse | null>(null);
@@ -39,8 +40,12 @@ export default function DuplicateResultsPage() {
     storageId: string,
     minReclaimableBytes: number,
   ) => {
-    if (!hasWailsRuntime() || groupsRequestInFlight.current) return;
-    groupsRequestInFlight.current = true;
+    if (!hasWailsRuntime()) return;
+    const isPagination = cursor !== "";
+    if (isPagination && paginationRequestInFlightRef.current) return;
+
+    const requestId = ++groupsRequestIdRef.current;
+    if (isPagination) paginationRequestInFlightRef.current = true;
     setGroupsLoading(true);
     try {
       const resp = await ListDuplicateGroups({
@@ -49,6 +54,7 @@ export default function DuplicateResultsPage() {
         cursor,
         min_reclaimable_bytes: minReclaimableBytes,
       } as wails.ListGroupsRequest);
+      if (requestId !== groupsRequestIdRef.current) return;
       if (cursor) {
         setGroups((prev) => [...prev, ...(resp.groups || [])]);
       } else {
@@ -58,11 +64,18 @@ export default function DuplicateResultsPage() {
       setTotalCount(resp.total_count || 0);
       setGroupsError(null);
     } catch (e: unknown) {
+      if (requestId !== groupsRequestIdRef.current) return;
       setGroupsError(friendlyError(e));
     } finally {
-      groupsRequestInFlight.current = false;
-      setGroupsLoading(false);
+      if (isPagination) paginationRequestInFlightRef.current = false;
+      if (requestId === groupsRequestIdRef.current) {
+        setGroupsLoading(false);
+      }
     }
+  }, []);
+
+  useEffect(() => () => {
+    groupsRequestIdRef.current++;
   }, []);
 
   // Initial load + reload on dataRevision change
@@ -74,11 +87,11 @@ export default function DuplicateResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataRevision]);
 
-  const handleLoadMore = () => {
+  const handleLoadMore = useCallback(() => {
     if (nextCursor && !groupsLoading) {
-      loadGroups(nextCursor, appliedStorageFilter, appliedMinimumBytes);
+      void loadGroups(nextCursor, appliedStorageFilter, appliedMinimumBytes);
     }
-  };
+  }, [nextCursor, groupsLoading, loadGroups, appliedStorageFilter, appliedMinimumBytes]);
 
   const parsedMinimumBytes = (): number | null => {
     if (!minReclaimableMiB.trim()) return 0;

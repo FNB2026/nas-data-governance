@@ -132,7 +132,9 @@ export default function DuplicateGroups({
                     g.hardlink_alias_count,
                     g.physical_reclaimable_bytes,
                   );
-                  const repName = g.sample_path ? fileName(g.sample_path) : shortHash(g.sha256);
+                  const repName = g.sample_path
+                    ? fileName(displayPath(g.sample_path))
+                    : shortHash(g.sha256);
 
                   return (
                     <tr
@@ -174,18 +176,18 @@ export default function DuplicateGroups({
                 })}
               </tbody>
             </table>
+            {nextCursor && (
+              <div className="load-more" ref={sentinelRef}>
+                <button
+                  className="btn-sm secondary"
+                  disabled={groupsLoading}
+                  onClick={onLoadMore}
+                >
+                  {groupsLoading ? "加载中…" : "加载更多"}
+                </button>
+              </div>
+            )}
           </div>
-          {nextCursor && (
-            <div className="load-more" ref={sentinelRef}>
-              <button
-                className="btn-sm secondary"
-                disabled={groupsLoading}
-                onClick={onLoadMore}
-              >
-                {groupsLoading ? "加载中…" : "加载更多"}
-              </button>
-            </div>
-          )}
           {totalCount > 0 && (
             <div className="dup-count">
               <span className="muted">共 {totalCount} 组</span>
