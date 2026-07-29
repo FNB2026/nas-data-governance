@@ -24,6 +24,7 @@ import DuplicateGroups from "./components/DuplicateGroups";
 import GroupDetail from "./components/GroupDetail";
 import JobDetail from "./components/JobDetail";
 import DiagnosticPanel from "./components/DiagnosticPanel";
+import ToastContainer, { type ToastItem, type ToastType } from "./components/Toast";
 
 export default function App() {
   const [version, setVersion] = useState<wails.VersionInfo | null>(null);
@@ -79,6 +80,19 @@ export default function App() {
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [jobDetailError, setJobDetailError] = useState<string | null>(null);
 
+  // Toast notifications
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
+
+  const pushToast = useCallback((type: ToastType, title: string, message?: string) => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   // ---- effects ----
 
   useEffect(() => {
@@ -105,15 +119,31 @@ export default function App() {
           setActiveJobId(null);
           setCancelling(false);
           void loadJobs();
+
+          // Scan completion notification
           if (p.state === "COMPLETED") {
             void loadStorages();
             void loadGroups("", appliedStorageFilter, appliedMinimumBytes);
+            pushToast(
+              "success",
+              "扫描完成",
+              `已发现 ${p.discovered.toLocaleString()} 个文件，处理 ${p.processed.toLocaleString()} 个`,
+            );
+          } else if (p.state === "FAILED") {
+            pushToast(
+              "error",
+              "扫描失败",
+              p.error_code ? `错误码：${p.error_code}` : "请查看任务详情",
+            );
+          } else if (p.state === "CANCELLED") {
+            pushToast("warning", "扫描已取消");
           }
         }
       } catch {
         clearInterval(intervalId);
         setActiveJobId(null);
         setCancelling(false);
+        pushToast("error", "扫描连接中断", "无法获取扫描进度，请检查后重试");
       }
     }, 1000);
 
@@ -480,6 +510,8 @@ export default function App() {
       <footer className="app-footer">
         <p>NDG — NAS Data Governance · {isReadWrite ? "读写模式" : "只读 Alpha"}</p>
       </footer>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

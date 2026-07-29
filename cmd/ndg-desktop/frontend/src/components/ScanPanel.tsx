@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { wails } from "../wailsjs/go/models";
 import {
   formatDateTime,
@@ -34,6 +35,16 @@ export interface ScanPanelProps {
   onSelectJob: (jobId: string) => void;
 }
 
+const STATE_FILTER_OPTIONS = [
+  { value: "", label: "全部状态" },
+  { value: "QUEUED", label: "排队中" },
+  { value: "RUNNING", label: "运行中" },
+  { value: "CANCEL_REQUESTED", label: "取消中" },
+  { value: "COMPLETED", label: "已完成" },
+  { value: "FAILED", label: "已失败" },
+  { value: "CANCELLED", label: "已取消" },
+];
+
 export default function ScanPanel({
   scanRoot,
   scanStorageId,
@@ -56,6 +67,36 @@ export default function ScanPanel({
   onCancelScan,
   onSelectJob,
 }: ScanPanelProps) {
+  // Job history filters (internal state — purely presentational)
+  const [stateFilter, setStateFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  // Derive unique job types from the data for the filter dropdown
+  const jobTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const j of jobs) {
+      if (j.job_type) types.add(j.job_type);
+    }
+    return Array.from(types).sort();
+  }, [jobs]);
+
+  // Apply filters client-side
+  const filteredJobs = useMemo(() => {
+    if (!stateFilter && !typeFilter) return jobs;
+    return jobs.filter((j) => {
+      if (stateFilter && j.state !== stateFilter) return false;
+      if (typeFilter && j.job_type !== typeFilter) return false;
+      return true;
+    });
+  }, [jobs, stateFilter, typeFilter]);
+
+  const hasActiveFilter = stateFilter !== "" || typeFilter !== "";
+
+  const clearFilters = () => {
+    setStateFilter("");
+    setTypeFilter("");
+  };
+
   return (
     <section className="card card--full scan-panel">
       <div className="card-header-row">
@@ -152,11 +193,57 @@ export default function ScanPanel({
 
       {/* Job history */}
       <div className="job-history">
-        <h3>任务历史</h3>
+        <div className="card-header-row">
+          <h3>任务历史</h3>
+          {jobs.length > 0 && (
+            <span className="count-badge">
+              {hasActiveFilter
+                ? `${filteredJobs.length} / ${jobs.length} 条`
+                : `共 ${jobs.length} 条`}
+            </span>
+          )}
+        </div>
+
+        {/* Job filters */}
+        {jobs.length > 0 && (
+          <div className="filter-row job-filter-row" aria-label="任务筛选">
+            <label>
+              状态
+              <select
+                value={stateFilter}
+                onChange={(e) => setStateFilter(e.target.value)}
+              >
+                {STATE_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              类型
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+              >
+                <option value="">全部类型</option>
+                {jobTypes.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+            {hasActiveFilter && (
+              <button className="btn-sm secondary" onClick={clearFilters}>
+                清除筛选
+              </button>
+            )}
+          </div>
+        )}
+
         {jobsError ? (
           <p className="error" role="alert">{jobsError}</p>
         ) : jobs.length === 0 ? (
           <p className="muted">暂无任务记录</p>
+        ) : filteredJobs.length === 0 ? (
+          <p className="muted">没有匹配筛选条件的任务</p>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
@@ -175,7 +262,7 @@ export default function ScanPanel({
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((j) => (
+                {filteredJobs.map((j) => (
                   <tr key={j.job_id}>
                     <td className="mono" title={j.job_id}>{shortHash(j.job_id)}</td>
                     <td>{j.job_type}</td>
