@@ -14,6 +14,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 )
@@ -34,6 +35,11 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: options.NewRGBA(255, 255, 255, 255),
+		OnStartup: func(ctx context.Context) {
+			// Center window on the primary screen to avoid
+			// off-screen placement on multi-monitor setups.
+			runtime.WindowCenter(ctx)
+		},
 		OnShutdown: func(ctx context.Context) {
 			// Ensure the project database is closed on exit.
 			_ = api.CloseProject()
