@@ -25,11 +25,18 @@ import {
   StartScan,
 } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
-import { TERMINAL_STATES, hasWailsRuntime, errorText } from "../lib/utils";
+import { TERMINAL_STATES, hasWailsRuntime, friendlyError } from "../lib/utils";
 import type { ToastItem, ToastType } from "../components/Toast";
 import { deriveCapabilities, type AppCapabilities } from "../app/capability";
 
 // ---- Context value type ----
+
+interface ScanStartParams {
+  root: string;
+  storageId: string;
+  fullScan: boolean;
+  workers?: number;
+}
 
 interface ProjectContextValue {
   // Version
@@ -50,6 +57,7 @@ interface ProjectContextValue {
   activeJobId: string | null;
   scanProgress: wails.ScanJobProgress | null;
   cancelling: boolean;
+  canRetryScan: boolean;
 
   // Jobs (shared)
   jobs: wails.JobSummary[];
@@ -80,12 +88,8 @@ interface ProjectContextValue {
   openProject: (readWrite: boolean) => Promise<void>;
   closeProject: () => Promise<void>;
   refreshProject: () => Promise<void>;
-  startScan: (params: {
-    root: string;
-    storageId: string;
-    fullScan: boolean;
-    workers?: number;
-  }) => Promise<void>;
+  startScan: (params: ScanStartParams) => Promise<void>;
+  retryLastScan: () => Promise<void>;
   cancelScan: () => Promise<void>;
   loadJobs: () => Promise<void>;
   refreshRecoveryLock: () => Promise<wails.RecoveryStatusDTO | null>;
@@ -111,6 +115,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState<wails.ScanJobProgress | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [lastScanParams, setLastScanParams] = useState<ScanStartParams | null>(null);
 
   // Jobs
   const [jobs, setJobs] = useState<wails.JobSummary[]>([]);
@@ -164,7 +169,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setStorages(list || []);
       setStoragesError(null);
     } catch (e: unknown) {
-      setStoragesError(errorText(e));
+      setStoragesError(friendlyError(e));
     }
   }, []);
 
@@ -177,7 +182,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setHasMoreJobs((list || []).length >= limit);
       setJobsError(null);
     } catch (e: unknown) {
-      setJobsError(errorText(e));
+      setJobsError(friendlyError(e));
     }
   }, []);
 
@@ -191,7 +196,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setHasMoreJobs((list || []).length >= nextLimit);
       setJobsError(null);
     } catch (e: unknown) {
-      setJobsError(errorText(e));
+      setJobsError(friendlyError(e));
     }
   }, []);
 
@@ -204,7 +209,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
     GetVersion()
       .then(setVersion)
-      .catch((e: unknown) => setError(errorText(e)));
+      .catch((e: unknown) => setError(friendlyError(e)));
   }, []);
 
   // ---- Scan polling (global — survives page navigation) ----
@@ -296,6 +301,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       projectRevRef.current++;
       setProject(info);
       setIsReadWrite(readWrite);
+      setLastScanParams(null);
       setError(null);
 
       // Check recovery lock after opening
@@ -316,7 +322,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       await Promise.all(loads);
       notifyDataChanged();
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -335,6 +341,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setActiveJobId(null);
       setScanProgress(null);
       setCancelling(false);
+      setLastScanParams(null);
       setJobs([]);
       setJobsError(null);
       jobsLimitRef.current = 20;
@@ -344,7 +351,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setRecoveryLockActive(false);
       setError(null);
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -362,7 +369,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       ]);
       notifyDataChanged();
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -370,26 +377,35 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // ---- Scan actions ----
 
-  const startScan = useCallback(async (params: {
-    root: string;
-    storageId: string;
-    fullScan: boolean;
-    workers?: number;
-  }) => {
+  const startScan = useCallback(async (params: ScanStartParams) => {
     if (!params.root.trim()) return;
     try {
-      const resp = await StartScan({
+      const normalizedParams = {
+        ...params,
         root: params.root.trim(),
-        storage_id: params.storageId.trim(),
-        full_scan: params.fullScan,
-        workers: params.workers,
+        storageId: params.storageId.trim(),
+      };
+      const resp = await StartScan({
+        root: normalizedParams.root,
+        storage_id: normalizedParams.storageId,
+        full_scan: normalizedParams.fullScan,
+        workers: normalizedParams.workers,
       } as wails.StartScanRequest);
+      setLastScanParams(normalizedParams);
       setActiveJobId(resp.job_id);
       setScanProgress(null);
     } catch (e: unknown) {
-      pushToast("error", "启动扫描失败", errorText(e));
+      pushToast("error", "启动扫描失败", friendlyError(e));
     }
   }, [pushToast]);
+
+  const retryLastScan = useCallback(async () => {
+    if (!lastScanParams) {
+      pushToast("warning", "无法重试扫描", "最近一次扫描参数不可用，请重新填写扫描参数");
+      return;
+    }
+    await startScan(lastScanParams);
+  }, [lastScanParams, pushToast, startScan]);
 
   const cancelScan = useCallback(async () => {
     if (!activeJobId) return;
@@ -397,7 +413,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       await CancelScan(activeJobId);
     } catch (e: unknown) {
-      pushToast("error", "取消扫描失败", errorText(e));
+      pushToast("error", "取消扫描失败", friendlyError(e));
       setCancelling(false);
     }
     // Polling will detect CANCELLED state and reset cancelling.
@@ -423,6 +439,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     activeJobId,
     scanProgress,
     cancelling,
+    canRetryScan: lastScanParams !== null,
     jobs,
     jobsError,
     hasMoreJobs,
@@ -441,6 +458,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     closeProject,
     refreshProject,
     startScan,
+    retryLastScan,
     cancelScan,
     loadJobs,
     refreshRecoveryLock,

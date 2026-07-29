@@ -1,10 +1,11 @@
 // App.tsx — thin shell: mounts ProjectProvider, renders AppShell with route switching.
 // No page-local state lives here. Target: under 100 lines.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { ProjectProvider, useProject } from "./state/ProjectContext";
 import { isRouteEnabled } from "./app/capability";
 import { DEFAULT_ROUTE, type AppRoute } from "./app/routes";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import AppShell from "./components/AppShell";
 import ToastContainer from "./components/Toast";
 import SourcesPage from "./pages/SourcesPage";
@@ -29,7 +30,7 @@ function renderPage(route: AppRoute) {
 }
 
 function AppContent() {
-  const { capabilities } = useProject();
+  const { capabilities, refreshProject, project } = useProject();
   const [activeRoute, setActiveRoute] = useState<AppRoute>(DEFAULT_ROUTE);
 
   // Reset to default route if current route becomes disabled (e.g. project closed)
@@ -38,6 +39,31 @@ function AppContent() {
       setActiveRoute(DEFAULT_ROUTE);
     }
   }, [activeRoute, capabilities]);
+
+  // Focus project path input (for Cmd+O shortcut)
+  const focusProjectPath = useCallback(() => {
+    setActiveRoute("sources");
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[aria-label="项目数据库路径"]',
+      );
+      input?.focus();
+      input?.select();
+    }, 50);
+  }, []);
+
+  // Refresh handler (for Cmd+R shortcut)
+  const handleRefresh = useCallback(() => {
+    if (project) {
+      void refreshProject();
+    }
+  }, [project, refreshProject]);
+
+  useKeyboardShortcuts({
+    onRouteChange: setActiveRoute,
+    onFocusProjectPath: focusProjectPath,
+    onRefresh: handleRefresh,
+  });
 
   return (
     <AppShell activeRoute={activeRoute} onRouteChange={setActiveRoute}>

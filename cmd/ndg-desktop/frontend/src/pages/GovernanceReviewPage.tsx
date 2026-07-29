@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, errorText, formatBytes, shortHash } from "../lib/utils";
+import { hasWailsRuntime, friendlyError, formatBytes, shortHash } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
 import {
   ApprovePlans,
@@ -129,7 +129,7 @@ export default function GovernanceReviewPage() {
       const list = await ListAllPlans();
       setPlans(list || []);
     } catch (e: unknown) {
-      setPlansError(errorText(e));
+      setPlansError(friendlyError(e));
       setPlans([]);
     } finally {
       setPlansLoading(false);
@@ -170,7 +170,7 @@ export default function GovernanceReviewPage() {
       setDraftPlans(drafts || []);
       pushToast("success", "草案生成完成", `共 ${drafts?.length || 0} 条规划`);
     } catch (e: unknown) {
-      pushToast("error", "生成草案失败", errorText(e));
+      pushToast("error", "生成草案失败", friendlyError(e));
     } finally {
       setBuildingDrafts(false);
     }
@@ -192,7 +192,7 @@ export default function GovernanceReviewPage() {
       });
       pushToast("success", "决策已保存", `${selectedPlan.group_id}: ${decisionLabel(decisionType)}`);
     } catch (e: unknown) {
-      pushToast("error", "保存决策失败", errorText(e));
+      pushToast("error", "保存决策失败", friendlyError(e));
     } finally {
       setSavingDecision(false);
     }
@@ -212,7 +212,7 @@ export default function GovernanceReviewPage() {
       );
       pushToast("success", "计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", errorText(e));
+      pushToast("error", "批准失败", friendlyError(e));
     } finally {
       setApproving(false);
     }
@@ -394,7 +394,7 @@ export default function GovernanceReviewPage() {
                 </div>
                 <div className="gov-detail-meta">
                   <div><span className="muted">容量</span> {formatBytes(selectedPlan.size)}</div>
-                  <div><span className="muted">哈希</span> {shortHash(selectedPlan.content_sha256)}<CopyButton text={selectedPlan.content_sha256} /></div>
+                  <div><span className="muted">哈希</span> {shortHash(selectedPlan.content_sha256)}<CopyButton text={selectedPlan.content_sha256} label="复制治理计划 SHA-256" /></div>
                   {selectedPlan.retain_path && (
                     <div className="gov-retain-path">
                       <span className="muted">保留路径</span>

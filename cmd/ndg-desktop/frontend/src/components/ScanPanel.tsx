@@ -28,6 +28,7 @@ export interface ScanPanelProps {
   hasMoreJobs: boolean;
   // capability
   canScan: boolean;
+  canRetryScan: boolean;
   // persistent filter state (from context)
   stateFilter: string;
   typeFilter: string;
@@ -135,6 +136,7 @@ export default function ScanPanel({
   jobDetailLoading,
   hasMoreJobs,
   canScan,
+  canRetryScan,
   stateFilter,
   typeFilter,
   onScanRootChange,
@@ -156,6 +158,9 @@ export default function ScanPanel({
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [scanActive]);
+
+  // Advanced settings collapse (storage ID, workers, full scan)
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Column sorting state for the job history table
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
@@ -242,38 +247,8 @@ export default function ScanPanel({
               }}
               placeholder="/path/to/scan"
               disabled={scanActive}
+              autoFocus
             />
-          </label>
-          <label>
-            存储 ID（可选）
-            <input
-              type="text"
-              value={scanStorageId}
-              onChange={(e) => onScanStorageIdChange(e.target.value)}
-              placeholder="default"
-              disabled={scanActive}
-            />
-          </label>
-          <label>
-            并发数（可选）
-            <input
-              type="number"
-              min="1"
-              max="32"
-              value={scanWorkers}
-              onChange={(e) => onScanWorkersChange(e.target.value)}
-              placeholder="4"
-              disabled={scanActive}
-            />
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={scanFullScan}
-              onChange={(e) => onScanFullScanChange(e.target.checked)}
-              disabled={scanActive}
-            />
-            全量扫描
           </label>
           <button
             className="btn-sm"
@@ -282,6 +257,49 @@ export default function ScanPanel({
           >
             {scanStarting ? "启动中…" : "开始扫描"}
           </button>
+          <button
+            type="button"
+            className="btn-sm secondary scan-advanced-toggle"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+          >
+            {showAdvanced ? "收起选项" : "高级选项"}
+          </button>
+          {showAdvanced && (
+            <div className="scan-advanced">
+              <label>
+                存储 ID（可选）
+                <input
+                  type="text"
+                  value={scanStorageId}
+                  onChange={(e) => onScanStorageIdChange(e.target.value)}
+                  placeholder="default"
+                  disabled={scanActive}
+                />
+              </label>
+              <label>
+                并发数（可选）
+                <input
+                  type="number"
+                  min="1"
+                  max="32"
+                  value={scanWorkers}
+                  onChange={(e) => onScanWorkersChange(e.target.value)}
+                  placeholder="4"
+                  disabled={scanActive}
+                />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={scanFullScan}
+                  onChange={(e) => onScanFullScanChange(e.target.checked)}
+                  disabled={scanActive}
+                />
+                全量扫描
+              </label>
+            </div>
+          )}
         </div>
       ) : (
         <p className="muted">只读模式：可查看任务历史，无法新建扫描。切换到读写模式以创建新扫描。</p>
@@ -354,7 +372,7 @@ export default function ScanPanel({
           )}
 
           {/* Retry button for failed/cancelled scans */}
-          {!scanActive && canScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
+          {!scanActive && canScan && canRetryScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
             <button
               className="btn-sm"
               disabled={scanStarting}
@@ -427,27 +445,41 @@ export default function ScanPanel({
             <table className="data-table">
               <thead>
                 <tr>
-                  <th className="sortable" onClick={() => toggleSort("job_id")}>
-                    任务 ID{sortKey === "job_id" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="sortable" aria-sort={sortKey === "job_id" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("job_id")}>
+                      任务 ID{sortKey === "job_id" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
-                  <th className="sortable" onClick={() => toggleSort("job_type")}>
-                    类型{sortKey === "job_type" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="sortable" aria-sort={sortKey === "job_type" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("job_type")}>
+                      类型{sortKey === "job_type" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
-                  <th className="sortable" onClick={() => toggleSort("state")}>
-                    状态{sortKey === "state" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="sortable" aria-sort={sortKey === "state" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("state")}>
+                      状态{sortKey === "state" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
                   <th>阶段</th>
-                  <th className="num sortable" onClick={() => toggleSort("discovered")}>
-                    已发现{sortKey === "discovered" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="num sortable" aria-sort={sortKey === "discovered" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("discovered")}>
+                      已发现{sortKey === "discovered" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
-                  <th className="num sortable" onClick={() => toggleSort("processed")}>
-                    已处理{sortKey === "processed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="num sortable" aria-sort={sortKey === "processed" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("processed")}>
+                      已处理{sortKey === "processed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
-                  <th className="num sortable" onClick={() => toggleSort("failed")}>
-                    失败{sortKey === "failed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="num sortable" aria-sort={sortKey === "failed" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("failed")}>
+                      失败{sortKey === "failed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
-                  <th className="sortable" onClick={() => toggleSort("created_at")}>
-                    创建时间{sortKey === "created_at" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  <th className="sortable" aria-sort={sortKey === "created_at" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                    <button type="button" className="sort-button" onClick={() => toggleSort("created_at")}>
+                      创建时间{sortKey === "created_at" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
                   </th>
                   <th>完成时间</th>
                   <th>操作</th>
@@ -458,7 +490,7 @@ export default function ScanPanel({
                   <tr key={j.job_id}>
                     <td className="mono" title={j.job_id}>
                       {shortHash(j.job_id)}
-                      <CopyButton text={j.job_id} />
+                      <CopyButton text={j.job_id} label="复制任务 ID" />
                     </td>
                     <td>{j.job_type}</td>
                     <td>
@@ -489,7 +521,7 @@ export default function ScanPanel({
         )}
 
         {/* Load more jobs */}
-        {hasMoreJobs && filteredJobs.length > 0 && (
+        {hasMoreJobs && (
           <div className="load-more">
             <button className="btn-sm secondary" onClick={() => void onLoadMoreJobs()}>
               加载更多

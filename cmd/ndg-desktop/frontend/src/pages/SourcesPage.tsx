@@ -4,6 +4,7 @@
 import { useState } from "react";
 import ProjectPanel from "../components/ProjectPanel";
 import StorageList from "../components/StorageList";
+import OnboardingGuide from "../components/OnboardingGuide";
 import { useProject } from "../state/ProjectContext";
 
 export default function SourcesPage() {
@@ -43,6 +44,8 @@ export default function SourcesPage() {
         onCloseProject={() => void closeProject()}
         onRefreshProject={() => void refreshProject()}
       />
+
+      {!project && <OnboardingGuide />}
 
       {project && (
         <StorageList storages={storages} storagesError={storagesError} />

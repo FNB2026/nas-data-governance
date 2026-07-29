@@ -7,7 +7,7 @@ export interface CopyButtonProps {
   className?: string;
 }
 
-export default function CopyButton({ text, label = "复制", className = "" }: CopyButtonProps) {
+export default function CopyButton({ text, label = "复制内容", className = "" }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const handleClick = useCallback(async () => {
@@ -21,10 +21,13 @@ export default function CopyButton({ text, label = "复制", className = "" }: C
   return (
     <button
       className={`btn-sm copy-btn ${className}`}
+      type="button"
       onClick={() => void handleClick()}
       title={copied ? "已复制" : label}
+      aria-label={copied ? `${label}成功` : label}
     >
       {copied ? "✓" : "⧉"}
+      <span className="sr-only" aria-live="polite">{copied ? "已复制" : ""}</span>
     </button>
   );
 }

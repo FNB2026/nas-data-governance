@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, errorText, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { hasWailsRuntime, friendlyError, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
 import {
   CheckRecoveryLock,
@@ -72,7 +72,7 @@ export default function AuditRecoveryPage() {
       const list = await ListOperationLogs(planFilter);
       setLogs(list || []);
     } catch (e: unknown) {
-      setLogsError(errorText(e));
+      setLogsError(friendlyError(e));
       setLogs([]);
     } finally {
       setLogsLoading(false);
@@ -87,7 +87,7 @@ export default function AuditRecoveryPage() {
       const list = await ListJournalEntries(planFilter);
       setJournal(list || []);
     } catch (e: unknown) {
-      setJournalError(errorText(e));
+      setJournalError(friendlyError(e));
       setJournal([]);
     } finally {
       setJournalLoading(false);
@@ -124,7 +124,7 @@ export default function AuditRecoveryPage() {
         : results.map((r) => `${r.plan_id}: ${r.action}`).join("\n"));
       pushToast("success", "普通执行恢复完成", `处理 ${results.length} 个计划`);
     } catch (e: unknown) {
-      pushToast("error", "普通执行恢复失败", errorText(e));
+      pushToast("error", "普通执行恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -142,7 +142,7 @@ export default function AuditRecoveryPage() {
         : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
       pushToast("success", "隔离还原恢复完成", `处理 ${results.length} 条记录`);
     } catch (e: unknown) {
-      pushToast("error", "隔离还原恢复失败", errorText(e));
+      pushToast("error", "隔离还原恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -157,7 +157,7 @@ export default function AuditRecoveryPage() {
         : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
       pushToast("success", "永久清理恢复完成", `处理 ${results.length} 条记录`);
     } catch (e: unknown) {
-      pushToast("error", "永久清理恢复失败", errorText(e));
+      pushToast("error", "永久清理恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -281,7 +281,7 @@ export default function AuditRecoveryPage() {
                       <td className="mono">{formatDateTime(log.created_at)}</td>
                       <td className="mono">
                         {log.plan_id}
-                        <CopyButton text={log.plan_id} />
+                        <CopyButton text={log.plan_id} label="复制审计计划 ID" />
                       </td>
                       <td>
                         <span className="audit-event-tag">
@@ -348,7 +348,7 @@ export default function AuditRecoveryPage() {
                       <td className="num">{formatBytes(entry.file_size)}</td>
                       <td className="mono">
                         {shortHash(entry.content_sha256)}
-                        <CopyButton text={entry.content_sha256} />
+                        <CopyButton text={entry.content_sha256} label="复制 Journal SHA-256" />
                       </td>
                       <td className="mono">{entry.started_at ? formatDateTime(entry.started_at) : "—"}</td>
                       <td className="mono">{entry.completed_at ? formatDateTime(entry.completed_at) : "—"}</td>

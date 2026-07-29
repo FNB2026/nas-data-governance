@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import DuplicateGroups from "../components/DuplicateGroups";
 import GroupDetail from "../components/GroupDetail";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, errorText, formatBytes } from "../lib/utils";
+import { hasWailsRuntime, friendlyError, formatBytes } from "../lib/utils";
 import { ListDuplicateGroups, GetGroupDetail } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
 import {
@@ -58,7 +58,7 @@ export default function DuplicateResultsPage() {
       setTotalCount(resp.total_count || 0);
       setGroupsError(null);
     } catch (e: unknown) {
-      setGroupsError(errorText(e));
+      setGroupsError(friendlyError(e));
     } finally {
       groupsRequestInFlight.current = false;
       setGroupsLoading(false);
@@ -107,7 +107,7 @@ export default function DuplicateResultsPage() {
       const detail = await GetGroupDetail(storageId, sha256);
       setSelectedGroup(detail);
     } catch (e: unknown) {
-      setDetailError(errorText(e));
+      setDetailError(friendlyError(e));
       setSelectedGroup(null);
     } finally {
       setDetailLoading(false);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { wails } from "../wailsjs/go/models";
 import { ValidateProjectPath } from "../wailsjs/go/wails/API";
-import { hasWailsRuntime, errorText } from "../lib/utils";
+import { hasWailsRuntime, friendlyError } from "../lib/utils";
 
 export interface ProjectPanelProps {
   project: wails.ProjectInfo | null;
@@ -89,7 +89,7 @@ export default function ProjectPanel({
         setPathHint("");
       } catch (e: unknown) {
         setPathStatus("invalid");
-        setPathHint(errorText(e));
+        setPathHint(friendlyError(e));
       }
     }, 300);
 

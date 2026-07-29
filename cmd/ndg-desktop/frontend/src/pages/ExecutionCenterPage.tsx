@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, errorText, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { hasWailsRuntime, friendlyError, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
 import {
   ApprovePurgePlan,
@@ -102,7 +102,7 @@ export default function ExecutionCenterPage() {
       const list = await ListQuarantineItems(statusFilter);
       setQuarantineItems(list || []);
     } catch (e: unknown) {
-      setQuarantineError(errorText(e));
+      setQuarantineError(friendlyError(e));
       setQuarantineItems([]);
     } finally {
       setQuarantineLoading(false);
@@ -129,7 +129,7 @@ export default function ExecutionCenterPage() {
       setRestorePlans(restores || []);
       setPurgePlans(purges || []);
     } catch (e: unknown) {
-      setPurgeError(errorText(e));
+      setPurgeError(friendlyError(e));
     }
   }, []);
 
@@ -153,7 +153,7 @@ export default function ExecutionCenterPage() {
       });
       pushToast("success", "恢复草案已创建", `计划 ${plan.id}`);
     } catch (e: unknown) {
-      pushToast("error", "创建恢复计划失败", errorText(e));
+      pushToast("error", "创建恢复计划失败", friendlyError(e));
     } finally {
       setRestoring(false);
     }
@@ -167,7 +167,7 @@ export default function ExecutionCenterPage() {
       );
       pushToast("success", "恢复计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", errorText(e));
+      pushToast("error", "批准失败", friendlyError(e));
     }
   };
 
@@ -186,9 +186,9 @@ export default function ExecutionCenterPage() {
       } else {
         pushToast("error", dryRun ? "校验失败" : "恢复执行失败", result.error || result.error_type || planId);
       }
-      void loadQuarantine();
+      await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
     } catch (e: unknown) {
-      pushToast("error", "执行恢复失败", errorText(e));
+      pushToast("error", "执行恢复失败", friendlyError(e));
     } finally {
       setRestoring(false);
     }
@@ -204,8 +204,8 @@ export default function ExecutionCenterPage() {
       setPurgePlans(plans || []);
       pushToast("success", "清理草案已生成", `共 ${plans?.length || 0} 条`);
     } catch (e: unknown) {
-      setPurgeError(errorText(e));
-      pushToast("error", "生成清理计划失败", errorText(e));
+      setPurgeError(friendlyError(e));
+      pushToast("error", "生成清理计划失败", friendlyError(e));
     } finally {
       setPurging(false);
     }
@@ -219,7 +219,7 @@ export default function ExecutionCenterPage() {
       );
       pushToast("success", "清理计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", errorText(e));
+      pushToast("error", "批准失败", friendlyError(e));
     }
   };
 
@@ -238,9 +238,9 @@ export default function ExecutionCenterPage() {
       } else {
         pushToast("error", dryRun ? "校验失败" : "清理执行失败", result.error || result.error_type || planId);
       }
-      void loadQuarantine();
+      await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
     } catch (e: unknown) {
-      pushToast("error", "执行清理失败", errorText(e));
+      pushToast("error", "执行清理失败", friendlyError(e));
     } finally {
       setPurging(false);
     }
@@ -263,7 +263,7 @@ export default function ExecutionCenterPage() {
       void loadRecoveryStatus();
       void loadQuarantine();
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", errorText(e));
+      pushToast("error", "恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -283,7 +283,7 @@ export default function ExecutionCenterPage() {
       }
       pushToast("success", "恢复操作完成", `处理了 ${results.length} 条`);
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", errorText(e));
+      pushToast("error", "恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -300,7 +300,7 @@ export default function ExecutionCenterPage() {
       }
       pushToast("success", "清理恢复完成", `处理了 ${results.length} 条`);
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", errorText(e));
+      pushToast("error", "恢复失败", friendlyError(e));
     } finally {
       setRecoveryLoading(false);
     }
@@ -419,7 +419,7 @@ export default function ExecutionCenterPage() {
                       <tr key={item.id}>
                         <td className="mono">
                           {item.id}
-                          <CopyButton text={item.id} />
+                          <CopyButton text={item.id} label="复制隔离项 ID" />
                         </td>
                         <td>
                           <span className={quarantineStatusBadgeClass(item.status)}>
@@ -429,7 +429,7 @@ export default function ExecutionCenterPage() {
                         <td className="num">{formatBytes(item.file_size)}</td>
                         <td className="mono">
                           {shortHash(item.content_sha256)}
-                          <CopyButton text={item.content_sha256} />
+                          <CopyButton text={item.content_sha256} label="复制隔离项 SHA-256" />
                         </td>
                         <td>{formatDateTime(item.quarantined_at)}</td>
                         <td>{formatDateTime(item.retain_until)}</td>
@@ -535,7 +535,7 @@ export default function ExecutionCenterPage() {
                     <tr key={plan.id}>
                       <td className="mono">
                         {plan.id}
-                        <CopyButton text={plan.id} />
+                        <CopyButton text={plan.id} label="复制清理计划 ID" />
                       </td>
                       <td>
                         <span className={planStateBadgeClass(plan.state, "purge")}>
@@ -545,7 +545,7 @@ export default function ExecutionCenterPage() {
                       <td className="num">{formatBytes(plan.expected_size)}</td>
                       <td className="mono">
                         {shortHash(plan.expected_sha256)}
-                        <CopyButton text={plan.expected_sha256} />
+                        <CopyButton text={plan.expected_sha256} label="复制清理计划 SHA-256" />
                       </td>
                       <td>{formatDateTime(plan.retain_until)}</td>
                       <td>
@@ -569,10 +569,7 @@ export default function ExecutionCenterPage() {
                               </button>
                               <div className="exec-confirmation">
                                 <label htmlFor={`purge-confirm-${plan.id}`}>逐字输入确认语句</label>
-                                <code>
-                                  {plan.confirmation_text}
-                                  <CopyButton text={plan.confirmation_text} />
-                                </code>
+                                <code>{plan.confirmation_text}</code>
                                 <input
                                   id={`purge-confirm-${plan.id}`}
                                   type="text"
