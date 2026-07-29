@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   CancelScan,
+  CheckRecoveryLock,
   CloseProject,
   GetProjectInfo,
   GetScanProgress,
@@ -112,6 +113,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // Data revision
   const [dataRevision, setDataRevision] = useState(0);
+
+  // Recovery lock (checked after project open)
+  const [recoveryLockActive, setRecoveryLockActive] = useState(false);
 
   // Project revision: incremented on every open/close/switch. The polling
   // effect captures this value at start and checks it before writing back
@@ -251,6 +255,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setProject(info);
       setIsReadWrite(readWrite);
       setError(null);
+
+      // Check recovery lock after opening
+      try {
+        const status = await CheckRecoveryLock();
+        setRecoveryLockActive(status.lock_active);
+        if (status.lock_active) {
+          pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
+        }
+      } catch {
+        setRecoveryLockActive(false);
+      }
+
       const loads: Promise<void>[] = [loadStorages()];
       if (readWrite) {
         loads.push(loadJobs());
@@ -279,6 +295,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setCancelling(false);
       setJobs([]);
       setJobsError(null);
+      setRecoveryLockActive(false);
       setError(null);
     } catch (e: unknown) {
       setError(errorText(e));
@@ -343,7 +360,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // ---- Derived values ----
 
   const projectOpen = project !== null;
-  const capabilities = deriveCapabilities({ projectOpen, isReadWrite });
+  const capabilities = deriveCapabilities({ projectOpen, isReadWrite, recoveryLockActive });
 
   // Scan progress percent (kept as-is; Phase 2 will fix DISCOVERING phase)
   // Exported via context for pages that need it.

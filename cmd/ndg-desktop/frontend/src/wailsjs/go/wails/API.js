@@ -6,6 +6,14 @@ export function ApprovePlans(arg1) {
   return window['go']['wails']['API']['ApprovePlans'](arg1);
 }
 
+export function ApprovePurgePlan(arg1, arg2) {
+  return window['go']['wails']['API']['ApprovePurgePlan'](arg1, arg2);
+}
+
+export function ApproveRestorePlan(arg1, arg2) {
+  return window['go']['wails']['API']['ApproveRestorePlan'](arg1, arg2);
+}
+
 export function BuildDraftPlans(arg1) {
   return window['go']['wails']['API']['BuildDraftPlans'](arg1);
 }
@@ -14,8 +22,20 @@ export function CancelScan(arg1) {
   return window['go']['wails']['API']['CancelScan'](arg1);
 }
 
+export function CheckRecoveryLock() {
+  return window['go']['wails']['API']['CheckRecoveryLock']();
+}
+
 export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
+}
+
+export function CreatePurgePlans() {
+  return window['go']['wails']['API']['CreatePurgePlans']();
+}
+
+export function CreateRestorePlan(arg1) {
+  return window['go']['wails']['API']['CreateRestorePlan'](arg1);
 }
 
 export function DiagnoseFormats(arg1) {
@@ -28,6 +48,14 @@ export function DiagnoseGovernance(arg1) {
 
 export function DiagnoseMerges(arg1) {
   return window['go']['wails']['API']['DiagnoseMerges'](arg1);
+}
+
+export function ExecutePurge(arg1) {
+  return window['go']['wails']['API']['ExecutePurge'](arg1);
+}
+
+export function ExecuteRestore(arg1) {
+  return window['go']['wails']['API']['ExecuteRestore'](arg1);
 }
 
 export function GetGroupDecision(arg1) {
@@ -66,6 +94,18 @@ export function ListGroupDecisions(arg1) {
   return window['go']['wails']['API']['ListGroupDecisions'](arg1);
 }
 
+export function ListJournalEntries(arg1) {
+  return window['go']['wails']['API']['ListJournalEntries'](arg1);
+}
+
+export function ListOperationLogs(arg1) {
+  return window['go']['wails']['API']['ListOperationLogs'](arg1);
+}
+
+export function ListQuarantineItems(arg1) {
+  return window['go']['wails']['API']['ListQuarantineItems'](arg1);
+}
+
 export function ListRecentJobs(arg1) {
   return window['go']['wails']['API']['ListRecentJobs'](arg1);
 }
@@ -84,6 +124,18 @@ export function OpenProject(arg1) {
 
 export function OpenProjectReadWrite(arg1) {
   return window['go']['wails']['API']['OpenProjectReadWrite'](arg1);
+}
+
+export function RecoverPurges(arg1) {
+  return window['go']['wails']['API']['RecoverPurges'](arg1);
+}
+
+export function RecoverRestores(arg1) {
+  return window['go']['wails']['API']['RecoverRestores'](arg1);
+}
+
+export function RecoverSourcePlans() {
+  return window['go']['wails']['API']['RecoverSourcePlans']();
 }
 
 export function SaveGroupDecision(arg1) {

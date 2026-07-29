@@ -22,16 +22,15 @@ export interface AppCapabilities {
 export function deriveCapabilities(opts: {
   projectOpen: boolean;
   isReadWrite: boolean;
+  recoveryLockActive?: boolean;
 }): AppCapabilities {
   const { projectOpen, isReadWrite } = opts;
+  const recoveryLock = opts.recoveryLockActive ?? false;
   const mode: ProjectMode = !projectOpen
     ? "closed"
     : isReadWrite
       ? "read_write"
       : "read_only";
-
-  // Recovery lock not yet exposed by backend — always false until API is wired.
-  const recoveryLock = false;
 
   const disabled_reasons: Partial<Record<AppRoute, string>> = {};
 
@@ -60,9 +59,8 @@ export function deriveCapabilities(opts: {
     can_view_results: projectOpen,
     can_edit_reviews: isReadWrite && !recoveryLock,
     can_approve_plans: isReadWrite && !recoveryLock,
-    // Execution capabilities not yet wired to desktop bindings.
-    can_execute_quarantine: false,
-    can_execute_purge: false,
+    can_execute_quarantine: isReadWrite && !recoveryLock,
+    can_execute_purge: isReadWrite && !recoveryLock,
     recovery_lock_active: recoveryLock,
     disabled_reasons,
   };

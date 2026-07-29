@@ -1396,5 +1396,341 @@ export namespace wails {
 		}
 	}
 
+	// ---- V7 Execution DTOs (manually added) ----
+
+	export class QuarantineItemDTO {
+    id: string;
+    plan_id: string;
+    action_index: number;
+    source_path: string;
+    quarantine_path: string;
+    content_sha256: string;
+    file_size: number;
+    quarantined_at: string;
+    retain_until: string;
+    status: string;
+    hold_reason?: string;
+    restored_at?: string;
+    purged_at?: string;
+
+    static createFrom(source: any = {}) {
+        return new QuarantineItemDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.id = source["id"];
+        this.plan_id = source["plan_id"];
+        this.action_index = source["action_index"];
+        this.source_path = source["source_path"];
+        this.quarantine_path = source["quarantine_path"];
+        this.content_sha256 = source["content_sha256"];
+        this.file_size = source["file_size"];
+        this.quarantined_at = source["quarantined_at"];
+        this.retain_until = source["retain_until"];
+        this.status = source["status"];
+        this.hold_reason = source["hold_reason"];
+        this.restored_at = source["restored_at"];
+        this.purged_at = source["purged_at"];
+    }
+}
+
+export class RestorePlanDTO {
+    id: string;
+    item_id: string;
+    state: string;
+    quarantine_path: string;
+    restore_path: string;
+    expected_sha256: string;
+    expected_size: number;
+    approval_digest: string;
+    created_at: string;
+    approved_at?: string;
+    restored_at?: string;
+
+    static createFrom(source: any = {}) {
+        return new RestorePlanDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.id = source["id"];
+        this.item_id = source["item_id"];
+        this.state = source["state"];
+        this.quarantine_path = source["quarantine_path"];
+        this.restore_path = source["restore_path"];
+        this.expected_sha256 = source["expected_sha256"];
+        this.expected_size = source["expected_size"];
+        this.approval_digest = source["approval_digest"];
+        this.created_at = source["created_at"];
+        this.approved_at = source["approved_at"];
+        this.restored_at = source["restored_at"];
+    }
+}
+
+export class PurgePlanDTO {
+    id: string;
+    item_id: string;
+    state: string;
+    expected_path: string;
+    expected_sha256: string;
+    expected_size: number;
+    retain_until: string;
+    approval_digest: string;
+    created_at: string;
+    approved_at?: string;
+    purged_at?: string;
+
+    static createFrom(source: any = {}) {
+        return new PurgePlanDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.id = source["id"];
+        this.item_id = source["item_id"];
+        this.state = source["state"];
+        this.expected_path = source["expected_path"];
+        this.expected_sha256 = source["expected_sha256"];
+        this.expected_size = source["expected_size"];
+        this.retain_until = source["retain_until"];
+        this.approval_digest = source["approval_digest"];
+        this.created_at = source["created_at"];
+        this.approved_at = source["approved_at"];
+        this.purged_at = source["purged_at"];
+    }
+}
+
+export class ExecuteRestoreRequest {
+    plan_id: string;
+    digest: string;
+    quarantine_root: string;
+    source_roots: string[];
+    dry_run: boolean;
+
+    static createFrom(source: any = {}) {
+        return new ExecuteRestoreRequest(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.digest = source["digest"];
+        this.quarantine_root = source["quarantine_root"];
+        this.source_roots = source["source_roots"];
+        this.dry_run = source["dry_run"];
+    }
+}
+
+export class ExecuteRestoreResponse {
+    plan_id: string;
+    final_state: string;
+    status: string;
+    error_type?: string;
+    error?: string;
+
+    static createFrom(source: any = {}) {
+        return new ExecuteRestoreResponse(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.final_state = source["final_state"];
+        this.status = source["status"];
+        this.error_type = source["error_type"];
+        this.error = source["error"];
+    }
+}
+
+export class ExecutePurgeRequest {
+    plan_id: string;
+    digest: string;
+    quarantine_root: string;
+    dry_run: boolean;
+
+    static createFrom(source: any = {}) {
+        return new ExecutePurgeRequest(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.digest = source["digest"];
+        this.quarantine_root = source["quarantine_root"];
+        this.dry_run = source["dry_run"];
+    }
+}
+
+export class ExecutePurgeResponse {
+    plan_id: string;
+    final_state: string;
+    status: string;
+    error_type?: string;
+    error?: string;
+
+    static createFrom(source: any = {}) {
+        return new ExecutePurgeResponse(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.final_state = source["final_state"];
+        this.status = source["status"];
+        this.error_type = source["error_type"];
+        this.error = source["error"];
+    }
+}
+
+export class RecoveryStatusDTO {
+    lock_active: boolean;
+    executing_count: number;
+
+    static createFrom(source: any = {}) {
+        return new RecoveryStatusDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.lock_active = source["lock_active"];
+        this.executing_count = source["executing_count"];
+    }
+}
+
+export class RecoveryResultDTO {
+    plan_id: string;
+    action: string;
+    rolled_back: number;
+    errors?: string[];
+
+    static createFrom(source: any = {}) {
+        return new RecoveryResultDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.action = source["action"];
+        this.rolled_back = source["rolled_back"];
+        this.errors = source["errors"];
+    }
+}
+
+export class RestoreRecoveryResultDTO {
+    plan_id?: string;
+    final_state?: string;
+    status: string;
+    error_type?: string;
+    error?: string;
+
+    static createFrom(source: any = {}) {
+        return new RestoreRecoveryResultDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.final_state = source["final_state"];
+        this.status = source["status"];
+        this.error_type = source["error_type"];
+        this.error = source["error"];
+    }
+}
+
+export class PurgeRecoveryResultDTO {
+    plan_id?: string;
+    final_state?: string;
+    status: string;
+    error_type?: string;
+    error?: string;
+
+    static createFrom(source: any = {}) {
+        return new PurgeRecoveryResultDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.final_state = source["final_state"];
+        this.status = source["status"];
+        this.error_type = source["error_type"];
+        this.error = source["error"];
+    }
+}
+
+export class RecoverRestoresRequest {
+    quarantine_root: string;
+    source_roots: string[];
+
+    static createFrom(source: any = {}) {
+        return new RecoverRestoresRequest(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.quarantine_root = source["quarantine_root"];
+        this.source_roots = source["source_roots"];
+    }
+}
+
+// ---- V8 Audit DTOs (manually added) ----
+
+export class OperationLogDTO {
+    id: number;
+    plan_id: string;
+    event_type: string;
+    detail?: Record<string, any>;
+    created_at: string;
+
+    static createFrom(source: any = {}) {
+        return new OperationLogDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.id = source["id"];
+        this.plan_id = source["plan_id"];
+        this.event_type = source["event_type"];
+        this.detail = source["detail"];
+        this.created_at = source["created_at"];
+    }
+}
+
+export class JournalEntryDTO {
+    plan_id: string;
+    task_id: string;
+    action_index: number;
+    action_type: string;
+    source_path: string;
+    target_path?: string;
+    content_sha256: string;
+    file_size: number;
+    status: string;
+    rollback_status?: string;
+    started_at?: string;
+    completed_at?: string;
+
+    static createFrom(source: any = {}) {
+        return new JournalEntryDTO(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.plan_id = source["plan_id"];
+        this.task_id = source["task_id"];
+        this.action_index = source["action_index"];
+        this.action_type = source["action_type"];
+        this.source_path = source["source_path"];
+        this.target_path = source["target_path"];
+        this.content_sha256 = source["content_sha256"];
+        this.file_size = source["file_size"];
+        this.status = source["status"];
+        this.rollback_status = source["rollback_status"];
+        this.started_at = source["started_at"];
+        this.completed_at = source["completed_at"];
+    }
+}
+
 }
 

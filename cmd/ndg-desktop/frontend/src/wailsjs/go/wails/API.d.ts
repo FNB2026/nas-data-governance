@@ -7,17 +7,31 @@ import {merge} from '../models';
 
 export function ApprovePlans(arg1:wails.ApprovePlansRequest):Promise<wails.ApprovePlansResponse>;
 
+export function ApprovePurgePlan(arg1:string,arg2:string):Promise<void>;
+
+export function ApproveRestorePlan(arg1:string,arg2:string):Promise<void>;
+
 export function BuildDraftPlans(arg1:string):Promise<Array<wails.PlanDTO>>;
 
 export function CancelScan(arg1:string):Promise<void>;
 
+export function CheckRecoveryLock():Promise<wails.RecoveryStatusDTO>;
+
 export function CloseProject():Promise<void>;
+
+export function CreatePurgePlans():Promise<Array<wails.PurgePlanDTO>>;
+
+export function CreateRestorePlan(arg1:string):Promise<wails.RestorePlanDTO>;
 
 export function DiagnoseFormats(arg1:wails.DiagnoseFormatsRequest):Promise<formatdiag.Report>;
 
 export function DiagnoseGovernance(arg1:wails.DiagnoseGovernanceRequest):Promise<governancediag.Report>;
 
 export function DiagnoseMerges(arg1:wails.DiagnoseMergesRequest):Promise<merge.DiagnosticReport>;
+
+export function ExecutePurge(arg1:wails.ExecutePurgeRequest):Promise<wails.ExecutePurgeResponse>;
+
+export function ExecuteRestore(arg1:wails.ExecuteRestoreRequest):Promise<wails.ExecuteRestoreResponse>;
 
 export function GetGroupDecision(arg1:string):Promise<wails.GroupDecisionDTO>;
 
@@ -37,6 +51,12 @@ export function ListDuplicateGroups(arg1:wails.ListGroupsRequest):Promise<wails.
 
 export function ListGroupDecisions(arg1:string):Promise<Array<wails.GroupDecisionDTO>>;
 
+export function ListJournalEntries(arg1:string):Promise<Array<wails.JournalEntryDTO>>;
+
+export function ListOperationLogs(arg1:string):Promise<Array<wails.OperationLogDTO>>;
+
+export function ListQuarantineItems(arg1:string):Promise<Array<wails.QuarantineItemDTO>>;
+
 export function ListRecentJobs(arg1:number):Promise<Array<wails.JobSummary>>;
 
 export function ListReviewPlans():Promise<Array<wails.PlanDTO>>;
@@ -46,6 +66,12 @@ export function ListStorages():Promise<Array<wails.StorageInfo>>;
 export function OpenProject(arg1:string):Promise<wails.ProjectInfo>;
 
 export function OpenProjectReadWrite(arg1:string):Promise<wails.ProjectInfo>;
+
+export function RecoverPurges(arg1:string):Promise<Array<wails.PurgeRecoveryResultDTO>>;
+
+export function RecoverRestores(arg1:wails.RecoverRestoresRequest):Promise<Array<wails.RestoreRecoveryResultDTO>>;
+
+export function RecoverSourcePlans():Promise<Array<wails.RecoveryResultDTO>>;
 
 export function SaveGroupDecision(arg1:wails.SaveDecisionRequest):Promise<wails.GroupDecisionDTO>;
 

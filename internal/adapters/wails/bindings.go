@@ -74,17 +74,27 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 //
 // V6 (governance): ListAllPlans, ListReviewPlans, BuildDraftPlans,
 // GetGroupDecision, SaveGroupDecision, ListGroupDecisions, ApprovePlans.
+//
+// V7 (execution): ListQuarantineItems, CreateRestorePlan, ApproveRestorePlan,
+// ExecuteRestore, CreatePurgePlans, ApprovePurgePlan, ExecutePurge,
+// CheckRecoveryLock, RecoverSourcePlans, RecoverRestores, RecoverPurges.
+//
+// V8 (audit): ListOperationLogs, ListJournalEntries.
 type API struct {
-	mu         sync.RWMutex
-	store      *store.SQLiteStore
-	dupSvc     *app.DuplicateService
-	scanRunner *app.ScanJobRunner
-	jobMgr     *jobs.JobManager
-	diagSvc    *app.DiagnosticService
-	planSvc    *app.PlanService
-	reviewSvc  *app.ReviewService
-	path       string
-	projectID  string // used as JobManager project scope; set to abs DB path
+	mu            sync.RWMutex
+	store         *store.SQLiteStore
+	dupSvc        *app.DuplicateService
+	scanRunner    *app.ScanJobRunner
+	jobMgr        *jobs.JobManager
+	diagSvc       *app.DiagnosticService
+	planSvc       *app.PlanService
+	reviewSvc     *app.ReviewService
+	quarantineSvc *app.QuarantineService
+	purgeSvc      *app.PurgeService
+	recoverySvc   *app.RecoveryService
+	executionSvc  *app.ExecutionService
+	path          string
+	projectID     string // used as JobManager project scope; set to abs DB path
 }
 
 // NewAPI creates a new Wails API instance. The store starts nil;
@@ -134,6 +144,10 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.diagSvc = app.NewDiagnosticService(st)
 	a.planSvc = app.NewPlanService()
 	a.reviewSvc = app.NewReviewService(st)
+	a.quarantineSvc = app.NewQuarantineService(st)
+	a.purgeSvc = app.NewPurgeService(st)
+	a.recoverySvc = app.NewRecoveryService(st)
+	a.executionSvc = app.NewExecutionService(st)
 	a.path = absPath
 
 	info, err := a.projectInfoLocked(context.Background())
@@ -144,6 +158,10 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 		a.diagSvc = nil
 		a.planSvc = nil
 		a.reviewSvc = nil
+		a.quarantineSvc = nil
+		a.purgeSvc = nil
+		a.recoverySvc = nil
+		a.executionSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -169,6 +187,10 @@ func (a *API) CloseProject() error {
 	a.diagSvc = nil
 	a.planSvc = nil
 	a.reviewSvc = nil
+	a.quarantineSvc = nil
+	a.purgeSvc = nil
+	a.recoverySvc = nil
+	a.executionSvc = nil
 	a.scanRunner = nil
 	a.jobMgr = nil
 	a.path = ""
@@ -380,6 +402,10 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 	a.diagSvc = app.NewDiagnosticService(st)
 	a.planSvc = app.NewPlanService()
 	a.reviewSvc = app.NewReviewService(st)
+	a.quarantineSvc = app.NewQuarantineService(st)
+	a.purgeSvc = app.NewPurgeService(st)
+	a.recoverySvc = app.NewRecoveryService(st)
+	a.executionSvc = app.NewExecutionService(st)
 	a.jobMgr = mgr
 	a.scanRunner = app.NewScanJobRunner(app.NewScanService(st), mgr)
 	a.path = absPath
@@ -393,6 +419,10 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 		a.diagSvc = nil
 		a.planSvc = nil
 		a.reviewSvc = nil
+		a.quarantineSvc = nil
+		a.purgeSvc = nil
+		a.recoverySvc = nil
+		a.executionSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -839,4 +869,365 @@ func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error
 		approved[i] = mapPlan(p)
 	}
 	return ApprovePlansResponse{Approved: approved}, nil
+}
+
+// ---- V7 execution bindings ----
+
+// ListQuarantineItems returns quarantined file entries, optionally filtered
+// by lifecycle status. Pass an empty string for status to return all items.
+// Available in both read-only and read-write modes.
+func (a *API) ListQuarantineItems(status string) ([]QuarantineItemDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.quarantineSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	items, err := a.quarantineSvc.ListItems(context.Background(), domain.QuarantineStatus(status))
+	if err != nil {
+		return nil, fmt.Errorf("wails: list quarantine items: %w", err)
+	}
+	out := make([]QuarantineItemDTO, len(items))
+	for i, item := range items {
+		out[i] = mapQuarantineItem(item)
+	}
+	return out, nil
+}
+
+// CreateRestorePlan builds a DRAFT restore plan for a single quarantine item.
+// The plan is persisted to the database. Requires read-write mode.
+func (a *API) CreateRestorePlan(itemID string) (RestorePlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.quarantineSvc == nil {
+		return RestorePlanDTO{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return RestorePlanDTO{}, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(itemID) == "" {
+		return RestorePlanDTO{}, errors.New("wails: item_id is required")
+	}
+	plan, err := a.quarantineSvc.CreateRestorePlan(context.Background(), itemID)
+	if err != nil {
+		return RestorePlanDTO{}, fmt.Errorf("wails: create restore plan: %w", err)
+	}
+	return mapRestorePlan(*plan), nil
+}
+
+// ApproveRestorePlan transitions a restore plan from DRAFT to APPROVED using
+// the plan's digest. Requires read-write mode.
+func (a *API) ApproveRestorePlan(planID, digest string) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.quarantineSvc == nil {
+		return ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(planID) == "" {
+		return errors.New("wails: plan_id is required")
+	}
+	if strings.TrimSpace(digest) == "" {
+		return errors.New("wails: digest is required")
+	}
+	if err := a.quarantineSvc.ApproveRestorePlan(context.Background(), planID, digest); err != nil {
+		return fmt.Errorf("wails: approve restore plan: %w", err)
+	}
+	return nil
+}
+
+// ExecuteRestore executes an approved restore plan. When dry_run is true,
+// only validation is performed. Requires read-write mode.
+func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.quarantineSvc == nil {
+		return ExecuteRestoreResponse{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ExecuteRestoreResponse{}, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(req.PlanID) == "" {
+		return ExecuteRestoreResponse{}, errors.New("wails: plan_id is required")
+	}
+	if strings.TrimSpace(req.Digest) == "" {
+		return ExecuteRestoreResponse{}, errors.New("wails: digest is required")
+	}
+	if strings.TrimSpace(req.QuarantineRoot) == "" {
+		return ExecuteRestoreResponse{}, errors.New("wails: quarantine_root is required")
+	}
+
+	result, err := a.quarantineSvc.ExecuteRestore(context.Background(), app.RestoreExecuteInput{
+		PlanID:         req.PlanID,
+		Digest:         req.Digest,
+		QuarantineRoot: req.QuarantineRoot,
+		SourceRoots:    req.SourceRoots,
+		DryRun:         req.DryRun,
+	})
+	if err != nil {
+		return ExecuteRestoreResponse{}, fmt.Errorf("wails: execute restore: %w", err)
+	}
+	return ExecuteRestoreResponse{
+		PlanID:     result.Result.PlanID,
+		FinalState: string(result.Result.FinalState),
+		Status:     string(result.Result.Status),
+		ErrorType:  result.Result.ErrorType,
+		Error:      errText(result.Result.Err),
+	}, nil
+}
+
+// CreatePurgePlans builds DRAFT purge plans for all eligible quarantine items
+// whose retention period has expired. Plans are persisted to the database.
+// Requires read-write mode.
+func (a *API) CreatePurgePlans() ([]PurgePlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.purgeSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return nil, ErrProjectNotReadWrite
+	}
+	plans, err := a.purgeSvc.CreatePlans(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: create purge plans: %w", err)
+	}
+	out := make([]PurgePlanDTO, len(plans))
+	for i, p := range plans {
+		out[i] = mapPurgePlan(p)
+	}
+	return out, nil
+}
+
+// ApprovePurgePlan transitions a purge plan from DRAFT to APPROVED using
+// the plan's digest. Requires read-write mode.
+func (a *API) ApprovePurgePlan(planID, digest string) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.purgeSvc == nil {
+		return ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(planID) == "" {
+		return errors.New("wails: plan_id is required")
+	}
+	if strings.TrimSpace(digest) == "" {
+		return errors.New("wails: digest is required")
+	}
+	if err := a.purgeSvc.ApprovePlan(context.Background(), planID, digest); err != nil {
+		return fmt.Errorf("wails: approve purge plan: %w", err)
+	}
+	return nil
+}
+
+// ExecutePurge executes an approved purge plan. When dry_run is true, only
+// validation is performed. Requires read-write mode.
+func (a *API) ExecutePurge(req ExecutePurgeRequest) (ExecutePurgeResponse, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.purgeSvc == nil {
+		return ExecutePurgeResponse{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ExecutePurgeResponse{}, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(req.PlanID) == "" {
+		return ExecutePurgeResponse{}, errors.New("wails: plan_id is required")
+	}
+	if strings.TrimSpace(req.Digest) == "" {
+		return ExecutePurgeResponse{}, errors.New("wails: digest is required")
+	}
+	if strings.TrimSpace(req.QuarantineRoot) == "" {
+		return ExecutePurgeResponse{}, errors.New("wails: quarantine_root is required")
+	}
+
+	result, err := a.purgeSvc.ExecutePurge(context.Background(), app.PurgeExecuteInput{
+		PlanID:         req.PlanID,
+		Digest:         req.Digest,
+		QuarantineRoot: req.QuarantineRoot,
+		DryRun:         req.DryRun,
+	})
+	if err != nil {
+		return ExecutePurgeResponse{}, fmt.Errorf("wails: execute purge: %w", err)
+	}
+	return ExecutePurgeResponse{
+		PlanID:     result.Result.PlanID,
+		FinalState: string(result.Result.FinalState),
+		Status:     string(result.Result.Status),
+		ErrorType:  result.Result.ErrorType,
+		Error:      errText(result.Result.Err),
+	}, nil
+}
+
+// CheckRecoveryLock reports whether any operation plans are stuck in
+// EXECUTING state, indicating a crash that needs recovery.
+// Available in both read-only and read-write modes.
+func (a *API) CheckRecoveryLock() (RecoveryStatusDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return RecoveryStatusDTO{}, ErrNoProjectOpen
+	}
+	ids, err := a.store.ListExecutingPlans(context.Background())
+	if err != nil {
+		return RecoveryStatusDTO{}, fmt.Errorf("wails: check recovery lock: %w", err)
+	}
+	return RecoveryStatusDTO{
+		LockActive:     len(ids) > 0,
+		ExecutingCount: len(ids),
+	}, nil
+}
+
+// RecoverSourcePlans scans for plans stuck in EXECUTING state and brings
+// them to a safe terminal state (rolled back or reset to APPROVED).
+// Requires read-write mode.
+func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.recoverySvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return nil, ErrProjectNotReadWrite
+	}
+	results, err := a.recoverySvc.Recover(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: recover source plans: %w", err)
+	}
+	out := make([]RecoveryResultDTO, len(results))
+	for i, r := range results {
+		out[i] = RecoveryResultDTO{
+			PlanID:     r.PlanID,
+			Action:     string(r.Action),
+			RolledBack: r.RolledBack,
+			Errors:     r.Errors,
+		}
+	}
+	return out, nil
+}
+
+// RecoverRestores coordinates crash recovery for non-terminal restore
+// operations. Requires read-write mode.
+func (a *API) RecoverRestores(req struct {
+	QuarantineRoot string   `json:"quarantine_root"`
+	SourceRoots    []string `json:"source_roots"`
+}) ([]RestoreRecoveryResultDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.quarantineSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return nil, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(req.QuarantineRoot) == "" {
+		return nil, errors.New("wails: quarantine_root is required")
+	}
+	results, err := a.quarantineSvc.RecoverRestores(context.Background(), app.RecoverRestoresInput{
+		QuarantineRoot: req.QuarantineRoot,
+		SourceRoots:    req.SourceRoots,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("wails: recover restores: %w", err)
+	}
+	out := make([]RestoreRecoveryResultDTO, len(results))
+	for i, r := range results {
+		out[i] = RestoreRecoveryResultDTO{
+			PlanID:     r.PlanID,
+			FinalState: string(r.FinalState),
+			Status:     string(r.Status),
+			ErrorType:  r.ErrorType,
+			Error:      errText(r.Err),
+		}
+	}
+	return out, nil
+}
+
+// RecoverPurges coordinates crash recovery for non-terminal purge
+// operations. Requires read-write mode.
+func (a *API) RecoverPurges(quarantineRoot string) ([]PurgeRecoveryResultDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.purgeSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return nil, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(quarantineRoot) == "" {
+		return nil, errors.New("wails: quarantine_root is required")
+	}
+	results, err := a.purgeSvc.RecoverPurges(context.Background(), quarantineRoot)
+	if err != nil {
+		return nil, fmt.Errorf("wails: recover purges: %w", err)
+	}
+	out := make([]PurgeRecoveryResultDTO, len(results))
+	for i, r := range results {
+		out[i] = PurgeRecoveryResultDTO{
+			PlanID:     r.PlanID,
+			FinalState: string(r.FinalState),
+			Status:     string(r.Status),
+			ErrorType:  r.ErrorType,
+			Error:      errText(r.Err),
+		}
+	}
+	return out, nil
+}
+
+// ---- V8 audit bindings ----
+
+// ListOperationLogs returns audit log entries for a specific plan.
+// Pass an empty planID to return logs for all plans.
+// Available in both read-only and read-write modes.
+func (a *API) ListOperationLogs(planID string) ([]OperationLogDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return nil, ErrNoProjectOpen
+	}
+	logs, err := a.store.ListLogs(context.Background(), planID)
+	if err != nil {
+		return nil, fmt.Errorf("wails: list operation logs: %w", err)
+	}
+	out := make([]OperationLogDTO, len(logs))
+	for i, l := range logs {
+		out[i] = mapOperationLog(l)
+	}
+	return out, nil
+}
+
+// ListJournalEntries returns execution journal entries for a specific plan.
+// Pass an empty planID to return entries for all plans.
+// Available in both read-only and read-write modes.
+func (a *API) ListJournalEntries(planID string) ([]JournalEntryDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return nil, ErrNoProjectOpen
+	}
+	entries, err := a.store.ListJournalAll(context.Background(), planID)
+	if err != nil {
+		return nil, fmt.Errorf("wails: list journal entries: %w", err)
+	}
+	out := make([]JournalEntryDTO, len(entries))
+	for i, e := range entries {
+		out[i] = mapJournalEntry(e)
+	}
+	return out, nil
 }

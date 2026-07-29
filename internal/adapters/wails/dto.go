@@ -10,6 +10,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/events"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/query"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // StorageInfo is the DTO for a storage entry returned by ListStorages.
@@ -436,4 +437,255 @@ func mapDecision(d domain.GroupDecision) GroupDecisionDTO {
 		CreatedAt:      d.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      d.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// ---- V7 Execution DTOs ----
+
+// QuarantineItemDTO is the DTO for a quarantined file lifecycle entry.
+type QuarantineItemDTO struct {
+	ID             string `json:"id"`
+	PlanID         string `json:"plan_id"`
+	ActionIndex    int    `json:"action_index"`
+	SourcePath     string `json:"source_path"`
+	QuarantinePath string `json:"quarantine_path"`
+	ContentSHA256  string `json:"content_sha256"`
+	FileSize       int64  `json:"file_size"`
+	QuarantinedAt  string `json:"quarantined_at"`
+	RetainUntil    string `json:"retain_until"`
+	Status         string `json:"status"`
+	HoldReason     string `json:"hold_reason,omitempty"`
+	RestoredAt     string `json:"restored_at,omitempty"`
+	PurgedAt       string `json:"purged_at,omitempty"`
+}
+
+// RestorePlanDTO is the DTO for a restore plan.
+type RestorePlanDTO struct {
+	ID             string `json:"id"`
+	ItemID         string `json:"item_id"`
+	State          string `json:"state"`
+	QuarantinePath string `json:"quarantine_path"`
+	RestorePath    string `json:"restore_path"`
+	ExpectedSHA256 string `json:"expected_sha256"`
+	ExpectedSize   int64  `json:"expected_size"`
+	ApprovalDigest string `json:"approval_digest"`
+	CreatedAt      string `json:"created_at"`
+	ApprovedAt     string `json:"approved_at,omitempty"`
+	RestoredAt     string `json:"restored_at,omitempty"`
+}
+
+// PurgePlanDTO is the DTO for a purge plan.
+type PurgePlanDTO struct {
+	ID             string `json:"id"`
+	ItemID         string `json:"item_id"`
+	State          string `json:"state"`
+	ExpectedPath   string `json:"expected_path"`
+	ExpectedSHA256 string `json:"expected_sha256"`
+	ExpectedSize   int64  `json:"expected_size"`
+	RetainUntil    string `json:"retain_until"`
+	ApprovalDigest string `json:"approval_digest"`
+	CreatedAt      string `json:"created_at"`
+	ApprovedAt     string `json:"approved_at,omitempty"`
+	PurgedAt       string `json:"purged_at,omitempty"`
+}
+
+// ExecuteRestoreRequest is the input DTO for ExecuteRestore.
+type ExecuteRestoreRequest struct {
+	PlanID         string   `json:"plan_id"`
+	Digest         string   `json:"digest"`
+	QuarantineRoot string   `json:"quarantine_root"`
+	SourceRoots    []string `json:"source_roots"`
+	DryRun         bool     `json:"dry_run"`
+}
+
+// ExecuteRestoreResponse is the output DTO for ExecuteRestore.
+type ExecuteRestoreResponse struct {
+	PlanID     string `json:"plan_id"`
+	FinalState string `json:"final_state"`
+	Status     string `json:"status"`
+	ErrorType  string `json:"error_type,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// ExecutePurgeRequest is the input DTO for ExecutePurge.
+type ExecutePurgeRequest struct {
+	PlanID         string `json:"plan_id"`
+	Digest         string `json:"digest"`
+	QuarantineRoot string `json:"quarantine_root"`
+	DryRun         bool   `json:"dry_run"`
+}
+
+// ExecutePurgeResponse is the output DTO for ExecutePurge.
+type ExecutePurgeResponse struct {
+	PlanID     string `json:"plan_id"`
+	FinalState string `json:"final_state"`
+	Status     string `json:"status"`
+	ErrorType  string `json:"error_type,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// RecoveryStatusDTO reports whether any plans are stuck in EXECUTING state.
+type RecoveryStatusDTO struct {
+	LockActive     bool `json:"lock_active"`
+	ExecutingCount int  `json:"executing_count"`
+}
+
+// RecoveryResultDTO is the DTO for a single source-execution recovery outcome.
+type RecoveryResultDTO struct {
+	PlanID     string   `json:"plan_id"`
+	Action     string   `json:"action"`
+	RolledBack int      `json:"rolled_back"`
+	Errors     []string `json:"errors,omitempty"`
+}
+
+// RestoreRecoveryResultDTO is the DTO for a restore crash-recovery outcome.
+type RestoreRecoveryResultDTO struct {
+	PlanID     string `json:"plan_id,omitempty"`
+	FinalState string `json:"final_state,omitempty"`
+	Status     string `json:"status"`
+	ErrorType  string `json:"error_type,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// PurgeRecoveryResultDTO is the DTO for a purge crash-recovery outcome.
+type PurgeRecoveryResultDTO struct {
+	PlanID     string `json:"plan_id,omitempty"`
+	FinalState string `json:"final_state,omitempty"`
+	Status     string `json:"status"`
+	ErrorType  string `json:"error_type,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// ---- V7 mapping helpers ----
+
+func mapQuarantineItem(item domain.QuarantineItem) QuarantineItemDTO {
+	dto := QuarantineItemDTO{
+		ID:             item.ID,
+		PlanID:         item.PlanID,
+		ActionIndex:    item.ActionIndex,
+		SourcePath:     item.SourcePath,
+		QuarantinePath: item.QuarantinePath,
+		ContentSHA256:  item.ContentSHA256,
+		FileSize:       item.FileSize,
+		QuarantinedAt:  item.QuarantinedAt.UTC().Format(time.RFC3339),
+		RetainUntil:    item.RetainUntil.UTC().Format(time.RFC3339),
+		Status:         string(item.Status),
+		HoldReason:     item.HoldReason,
+	}
+	if item.RestoredAt != nil && !item.RestoredAt.IsZero() {
+		dto.RestoredAt = item.RestoredAt.UTC().Format(time.RFC3339)
+	}
+	if item.PurgedAt != nil && !item.PurgedAt.IsZero() {
+		dto.PurgedAt = item.PurgedAt.UTC().Format(time.RFC3339)
+	}
+	return dto
+}
+
+func mapRestorePlan(p domain.RestorePlan) RestorePlanDTO {
+	dto := RestorePlanDTO{
+		ID:             p.ID,
+		ItemID:         p.ItemID,
+		State:          string(p.State),
+		QuarantinePath: p.QuarantinePath,
+		RestorePath:    p.RestorePath,
+		ExpectedSHA256: p.ExpectedSHA256,
+		ExpectedSize:   p.ExpectedSize,
+		ApprovalDigest: p.ApprovalDigest,
+		CreatedAt:      p.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if p.ApprovedAt != nil && !p.ApprovedAt.IsZero() {
+		dto.ApprovedAt = p.ApprovedAt.UTC().Format(time.RFC3339)
+	}
+	if p.RestoredAt != nil && !p.RestoredAt.IsZero() {
+		dto.RestoredAt = p.RestoredAt.UTC().Format(time.RFC3339)
+	}
+	return dto
+}
+
+func mapPurgePlan(p domain.PurgePlan) PurgePlanDTO {
+	dto := PurgePlanDTO{
+		ID:             p.ID,
+		ItemID:         p.ItemID,
+		State:          string(p.State),
+		ExpectedPath:   p.ExpectedPath,
+		ExpectedSHA256: p.ExpectedSHA256,
+		ExpectedSize:   p.ExpectedSize,
+		RetainUntil:    p.RetainUntil.UTC().Format(time.RFC3339),
+		ApprovalDigest: p.ApprovalDigest,
+		CreatedAt:      p.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if p.ApprovedAt != nil && !p.ApprovedAt.IsZero() {
+		dto.ApprovedAt = p.ApprovedAt.UTC().Format(time.RFC3339)
+	}
+	if p.PurgedAt != nil && !p.PurgedAt.IsZero() {
+		dto.PurgedAt = p.PurgedAt.UTC().Format(time.RFC3339)
+	}
+	return dto
+}
+
+func errText(e error) string {
+	if e == nil {
+		return ""
+	}
+	return e.Error()
+}
+
+// ---- V8 Audit DTOs ----
+
+// OperationLogDTO is the DTO for an audit log entry.
+type OperationLogDTO struct {
+	ID        int            `json:"id"`
+	PlanID    string         `json:"plan_id"`
+	EventType string         `json:"event_type"`
+	Detail    map[string]any `json:"detail,omitempty"`
+	CreatedAt string         `json:"created_at"`
+}
+
+// JournalEntryDTO is the DTO for an execution journal entry.
+type JournalEntryDTO struct {
+	PlanID         string `json:"plan_id"`
+	TaskID         string `json:"task_id"`
+	ActionIndex    int    `json:"action_index"`
+	ActionType     string `json:"action_type"`
+	SourcePath     string `json:"source_path"`
+	TargetPath     string `json:"target_path,omitempty"`
+	ContentSHA256  string `json:"content_sha256"`
+	FileSize       int64  `json:"file_size"`
+	Status         string `json:"status"`
+	RollbackStatus string `json:"rollback_status,omitempty"`
+	StartedAt      string `json:"started_at,omitempty"`
+	CompletedAt    string `json:"completed_at,omitempty"`
+}
+
+// ---- V8 mapping helpers ----
+
+func mapOperationLog(l domain.OperationLog) OperationLogDTO {
+	return OperationLogDTO{
+		ID:        int(l.ID),
+		PlanID:    l.PlanID,
+		EventType: l.EventType,
+		Detail:    l.Detail,
+		CreatedAt: l.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func mapJournalEntry(e store.JournalEntry) JournalEntryDTO {
+	dto := JournalEntryDTO{
+		PlanID:         e.PlanID,
+		TaskID:         e.TaskID,
+		ActionIndex:    e.ActionIndex,
+		ActionType:     e.ActionType,
+		SourcePath:     e.SourcePath,
+		TargetPath:     e.TargetPath,
+		ContentSHA256:  e.ContentSHA256,
+		FileSize:       e.FileSize,
+		Status:         e.Status,
+		RollbackStatus: e.RollbackStatus,
+	}
+	if e.StartedAt != nil && !e.StartedAt.IsZero() {
+		dto.StartedAt = e.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if e.CompletedAt != nil && !e.CompletedAt.IsZero() {
+		dto.CompletedAt = e.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	return dto
 }
