@@ -34,14 +34,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 2rem;
+  padding: 1rem 2rem 1rem 5rem; /* left padding for traffic lights */
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
+  --wails-draggable: drag;
 }
 
 .app-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
+  --wails-draggable: no-drag;
 }
 
 .version-badge {
@@ -50,6 +52,7 @@ body {
   background: var(--bg);
   padding: 0.25rem 0.75rem;
   border-radius: 999px;
+  --wails-draggable: no-drag;
 }
 
 .app-main {

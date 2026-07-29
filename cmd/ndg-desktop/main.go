@@ -36,9 +36,11 @@ func main() {
 		},
 		BackgroundColour: options.NewRGBA(255, 255, 255, 255),
 		OnStartup: func(ctx context.Context) {
-			// Center window on the primary screen to avoid
-			// off-screen placement on multi-monitor setups.
-			runtime.WindowCenter(ctx)
+			// Force window onto the primary screen's visible area.
+			// WindowCenter can fail on multi-monitor setups with a
+			// disconnected external display, so we use an explicit
+			// position that is always on the primary screen.
+			runtime.WindowSetPosition(ctx, 100, 100)
 		},
 		OnShutdown: func(ctx context.Context) {
 			// Ensure the project database is closed on exit.
