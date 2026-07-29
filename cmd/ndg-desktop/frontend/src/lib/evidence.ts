@@ -119,24 +119,22 @@ export function computeCapacity(
 
 /**
  * Derive a risk indicator from group properties.
- * Higher physical copies + larger size = higher risk.
+ * Until the backend provides a risk DTO with directory role, business
+ * anchor, and protection rules, we return "UNASSESSED" to avoid
+ * misleading the user with incomplete heuristics.
  */
 export function deriveRiskLevel(
-  physicalCopyCount: number,
-  hardlinkAliasCount: number,
-  reclaimableBytes: number,
-): "LOW" | "MEDIUM" | "HIGH" {
-  if (hardlinkAliasCount > 0 && physicalCopyCount <= 1) return "LOW";
-  if (physicalCopyCount >= 4) return "HIGH";
-  if (physicalCopyCount >= 2 && reclaimableBytes > 1024 * 1024 * 1024) return "HIGH";
-  if (physicalCopyCount >= 2) return "MEDIUM";
-  return "LOW";
+  _physicalCopyCount: number,
+  _hardlinkAliasCount: number,
+  _reclaimableBytes: number,
+): "UNASSESSED" {
+  return "UNASSESSED";
 }
 
-export function riskLabel(risk: "LOW" | "MEDIUM" | "HIGH"): string {
-  return { LOW: "低", MEDIUM: "中", HIGH: "高" }[risk];
+export function riskLabel(risk: "LOW" | "MEDIUM" | "HIGH" | "UNASSESSED"): string {
+  return { LOW: "低", MEDIUM: "中", HIGH: "高", UNASSESSED: "未评估" }[risk];
 }
 
-export function riskBadgeClass(risk: "LOW" | "MEDIUM" | "HIGH"): string {
+export function riskBadgeClass(risk: "LOW" | "MEDIUM" | "HIGH" | "UNASSESSED"): string {
   return `risk-badge risk-badge--${risk.toLowerCase()}`;
 }

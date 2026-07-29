@@ -99,7 +99,7 @@ SELECT
     pg.storage_id, pg.content_sha256, pg.path_count, pg.group_size,
     pg.sample_path, pg.reclaimable_estimate,
     fi.path, fi.name, fi.size, fi.mode, fi.mtime, fi.device, fi.inode, fi.physical_reliable,
-    fi.quick_hash, fi.discovered_at
+    fi.link_count, fi.quick_hash, fi.discovered_at
 FROM page_groups pg
 JOIN file_instances fi
     ON fi.content_sha256 = pg.content_sha256
@@ -140,7 +140,7 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 			path, name, mtime, discoveredAt      string
 			size                                 int64
 			mode                                 uint32
-			device, inode                        int64
+			device, inode, linkCount             int64
 			physicalReliable                     bool
 			quickHash                            string
 		)
@@ -149,7 +149,7 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 			&storageID, &contentSHA256, &pathCount, &groupSize,
 			&samplePath, &reclaimableEstimate,
 			&path, &name, &size, &mode, &mtime, &device, &inode, &physicalReliable,
-			&quickHash, &discoveredAt,
+			&linkCount, &quickHash, &discoveredAt,
 		); err != nil {
 			return query.GroupPage{}, fmt.Errorf("store: scan duplicate group row: %w", err)
 		}
@@ -184,9 +184,10 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 		// reliability was persisted explicitly.
 		if physicalReliable && device != 0 && inode != 0 {
 			f.Physical = domain.PhysicalIdentity{
-				Device:   uint64(device),
-				Inode:    uint64(inode),
-				Reliable: true,
+				Device:    uint64(device),
+				Inode:     uint64(inode),
+				LinkCount: uint64(linkCount),
+				Reliable:  true,
 			}
 		}
 		f.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
@@ -261,7 +262,7 @@ ORDER BY pg.reclaimable_estimate DESC, pg.content_sha256 ASC,
 func (s *SQLiteStore) GetGroupDetail(ctx context.Context, storageID, sha256 string) (query.GroupDetail, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT storage_id, path, name, size, mode, mtime, device, inode, physical_reliable,
-       quick_hash, content_sha256, discovered_at
+       link_count, quick_hash, content_sha256, discovered_at
 FROM file_instances
 WHERE file_status = 'active' AND storage_id = ? AND content_sha256 = ?
 ORDER BY path`, storageID, sha256)
@@ -274,20 +275,21 @@ ORDER BY path`, storageID, sha256)
 	for rows.Next() {
 		var f domain.FileInstance
 		var mtime, discoveredAt string
-		var device, inode int64
+		var device, inode, linkCount int64
 		var physicalReliable bool
 		if err := rows.Scan(&f.StorageID, &f.Path, &f.Name, &f.Size, &f.Mode, &mtime,
-			&device, &inode, &physicalReliable, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
+			&device, &inode, &physicalReliable, &linkCount, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
 			return query.GroupDetail{}, fmt.Errorf("store: scan group detail row: %w", err)
 		}
 		f.Device = uint64(device)
 		f.Inode = uint64(inode)
-		// Reconstruct PhysicalIdentity from device/inode columns.
+		// Reconstruct PhysicalIdentity from device/inode/link_count columns.
 		if physicalReliable && device != 0 && inode != 0 {
 			f.Physical = domain.PhysicalIdentity{
-				Device:   uint64(device),
-				Inode:    uint64(inode),
-				Reliable: true,
+				Device:    uint64(device),
+				Inode:     uint64(inode),
+				LinkCount: uint64(linkCount),
+				Reliable:  true,
 			}
 		}
 		f.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)

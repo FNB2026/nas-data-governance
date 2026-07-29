@@ -158,9 +158,12 @@ export default function GroupDetail({
           </div>
 
           {/* Physical identity grouping summary */}
-          {physGroups.length > 1 && (
+          {physGroups.length > 0 && (
             <div className="evidence-section">
-              <h3 className="evidence-section-title">硬链接关系图</h3>
+              <h3 className="evidence-section-title">
+                硬链接关系图
+                <span className="muted evidence-section-count">{physGroups.length} 组</span>
+              </h3>
               <div className="hardlink-groups">
                 {physGroups.map((pg, idx) => {
                   const isHardlinkGroup = pg.length > 1;
@@ -172,10 +175,12 @@ export default function GroupDetail({
                         ) : (
                           <span className="muted">独立物理副本</span>
                         )}
-                        {pg[0].physical_reliable && pg[0].physical_inode && (
+                        {pg[0].physical_reliable && pg[0].physical_inode ? (
                           <span className="mono muted phys-id">
                             {pg[0].physical_device}:{pg[0].physical_inode}
                           </span>
+                        ) : (
+                          <span className="muted">物理身份不可靠</span>
                         )}
                       </div>
                       <ul className="hardlink-paths">

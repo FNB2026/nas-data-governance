@@ -60,6 +60,29 @@ export default function ProjectPanel({
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      // In read-write mode, the database file may not exist yet (new
+      // project). The backend ValidateProjectPath requires the file to
+      // already exist, so for RW mode we do client-side validation only:
+      // check the extension and that the path has a parent directory.
+      if (readWriteMode) {
+        const ext = trimmed.toLowerCase().match(/\.(db|sqlite|sqlite3)$/);
+        if (!ext) {
+          setPathStatus("invalid");
+          setPathHint("路径需要 .db、.sqlite 或 .sqlite3 扩展名");
+          return;
+        }
+        const lastSlash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+        if (lastSlash <= 0) {
+          setPathStatus("invalid");
+          setPathHint("请输入完整路径，包含父目录");
+          return;
+        }
+        setPathStatus("valid");
+        setPathHint("新数据库将在读写打开时自动创建");
+        return;
+      }
+
+      // Read-only mode: the database file must already exist.
       try {
         await ValidateProjectPath(trimmed);
         setPathStatus("valid");
@@ -73,7 +96,7 @@ export default function ProjectPanel({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [projectPath, projectOpen]);
+  }, [projectPath, projectOpen, readWriteMode]);
 
   return (
     <section className="card project-card">

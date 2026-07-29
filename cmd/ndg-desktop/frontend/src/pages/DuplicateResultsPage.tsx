@@ -12,9 +12,6 @@ import { ListDuplicateGroups, GetGroupDetail } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
 import {
   computeCapacity,
-  deriveRiskLevel,
-  riskLabel,
-  riskBadgeClass,
 } from "../lib/evidence";
 
 export default function DuplicateResultsPage() {
@@ -122,13 +119,11 @@ export default function DuplicateResultsPage() {
     setDetailError(null);
   };
 
-  // Aggregate capacity across all loaded groups
+  // Aggregate capacity across all loaded groups (page-local, not total)
   const aggregateCapacity = useMemo(() => {
     let totalLogical = 0;
     let totalReclaimable = 0;
     let totalHardlinkAlias = 0;
-    let highRiskCount = 0;
-    let mediumRiskCount = 0;
     for (const g of groups) {
       const cap = computeCapacity(
         g.size,
@@ -140,15 +135,8 @@ export default function DuplicateResultsPage() {
       totalLogical += cap.totalLogical;
       totalReclaimable += cap.physicalReclaimable;
       totalHardlinkAlias += cap.hardlinkAliasBytes;
-      const risk = deriveRiskLevel(
-        g.physical_copy_count,
-        g.hardlink_alias_count,
-        g.physical_reclaimable_bytes,
-      );
-      if (risk === "HIGH") highRiskCount++;
-      else if (risk === "MEDIUM") mediumRiskCount++;
     }
-    return { totalLogical, totalReclaimable, totalHardlinkAlias, highRiskCount, mediumRiskCount };
+    return { totalLogical, totalReclaimable, totalHardlinkAlias };
   }, [groups]);
 
   return (
@@ -163,31 +151,21 @@ export default function DuplicateResultsPage() {
         <div className="dup-summary-bar">
           <div className="dup-summary-stats">
             <div className="dup-summary-stat">
-              <span className="dup-summary-label">重复组</span>
+              <span className="dup-summary-label">重复组（全量）</span>
               <span className="dup-summary-value">{totalCount}</span>
             </div>
             <div className="dup-summary-stat">
-              <span className="dup-summary-label">逻辑总量</span>
+              <span className="dup-summary-label">逻辑总量（已加载 {groups.length} 组）</span>
               <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalLogical)}</span>
             </div>
             <div className="dup-summary-stat dup-summary-stat--reclaimable">
-              <span className="dup-summary-label">可回收物理空间</span>
+              <span className="dup-summary-label">可回收物理空间（已加载）</span>
               <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalReclaimable)}</span>
             </div>
             <div className="dup-summary-stat">
-              <span className="dup-summary-label">硬链接别名字节</span>
+              <span className="dup-summary-label">硬链接别名字节（已加载）</span>
               <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalHardlinkAlias)}</span>
             </div>
-            {aggregateCapacity.highRiskCount > 0 && (
-              <div className="dup-summary-stat dup-summary-stat--high">
-                <span className={riskBadgeClass("HIGH")}>{riskLabel("HIGH")} {aggregateCapacity.highRiskCount}</span>
-              </div>
-            )}
-            {aggregateCapacity.mediumRiskCount > 0 && (
-              <div className="dup-summary-stat">
-                <span className={riskBadgeClass("MEDIUM")}>{riskLabel("MEDIUM")} {aggregateCapacity.mediumRiskCount}</span>
-              </div>
-            )}
           </div>
         </div>
       )}

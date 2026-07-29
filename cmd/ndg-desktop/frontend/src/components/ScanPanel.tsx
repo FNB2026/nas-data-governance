@@ -24,6 +24,8 @@ export interface ScanPanelProps {
   jobs: wails.JobSummary[];
   jobsError: string | null;
   jobDetailLoading: boolean;
+  // capability
+  canScan: boolean;
   // handlers
   onScanRootChange: (v: string) => void;
   onScanStorageIdChange: (v: string) => void;
@@ -109,6 +111,7 @@ export default function ScanPanel({
   jobs,
   jobsError,
   jobDetailLoading,
+  canScan,
   onScanRootChange,
   onScanStorageIdChange,
   onScanFullScanChange,
@@ -170,57 +173,61 @@ export default function ScanPanel({
         )}
       </div>
 
-      {/* Scan form */}
-      <div className="scan-form" aria-label="扫描参数">
-        <label>
-          根目录
-          <input
-            type="text"
-            value={scanRoot}
-            onChange={(e) => onScanRootChange(e.target.value)}
-            placeholder="/path/to/scan"
-            disabled={scanActive}
-          />
-        </label>
-        <label>
-          存储 ID（可选）
-          <input
-            type="text"
-            value={scanStorageId}
-            onChange={(e) => onScanStorageIdChange(e.target.value)}
-            placeholder="default"
-            disabled={scanActive}
-          />
-        </label>
-        <label>
-          并发数（可选）
-          <input
-            type="number"
-            min="1"
-            max="32"
-            value={scanWorkers}
-            onChange={(e) => onScanWorkersChange(e.target.value)}
-            placeholder="4"
-            disabled={scanActive}
-          />
-        </label>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={scanFullScan}
-            onChange={(e) => onScanFullScanChange(e.target.checked)}
-            disabled={scanActive}
-          />
-          全量扫描
-        </label>
-        <button
-          className="btn-sm"
-          disabled={scanActive || scanStarting}
-          onClick={onStartScan}
-        >
-          {scanStarting ? "启动中…" : "开始扫描"}
-        </button>
-      </div>
+      {/* Scan form — hidden in read-only mode */}
+      {canScan ? (
+        <div className="scan-form" aria-label="扫描参数">
+          <label>
+            根目录
+            <input
+              type="text"
+              value={scanRoot}
+              onChange={(e) => onScanRootChange(e.target.value)}
+              placeholder="/path/to/scan"
+              disabled={scanActive}
+            />
+          </label>
+          <label>
+            存储 ID（可选）
+            <input
+              type="text"
+              value={scanStorageId}
+              onChange={(e) => onScanStorageIdChange(e.target.value)}
+              placeholder="default"
+              disabled={scanActive}
+            />
+          </label>
+          <label>
+            并发数（可选）
+            <input
+              type="number"
+              min="1"
+              max="32"
+              value={scanWorkers}
+              onChange={(e) => onScanWorkersChange(e.target.value)}
+              placeholder="4"
+              disabled={scanActive}
+            />
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={scanFullScan}
+              onChange={(e) => onScanFullScanChange(e.target.checked)}
+              disabled={scanActive}
+            />
+            全量扫描
+          </label>
+          <button
+            className="btn-sm"
+            disabled={scanActive || scanStarting}
+            onClick={onStartScan}
+          >
+            {scanStarting ? "启动中…" : "开始扫描"}
+          </button>
+        </div>
+      ) : (
+        <p className="muted">只读模式：可查看任务历史，无法新建扫描。切换到读写模式以创建新扫描。</p>
+      )}
       {scanError && <p className="error" role="alert">{scanError}</p>}
 
       {/* Active scan progress — stage-aware display */}

@@ -1157,6 +1157,11 @@ button.secondary {
   color: var(--error);
 }
 
+.risk-badge--unassessed {
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
 /* ---- Hardlink flags ---- */
 
 .hardlink-flag {

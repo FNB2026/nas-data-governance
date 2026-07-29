@@ -18,6 +18,7 @@ export default function ScanJobsPage() {
     jobsError,
     startScan,
     cancelScan,
+    capabilities,
   } = useProject();
 
   // Form state (page-local)
@@ -97,6 +98,7 @@ export default function ScanJobsPage() {
         jobs={jobs}
         jobsError={jobsError}
         jobDetailLoading={jobDetailLoading}
+        canScan={capabilities.can_scan}
         onScanRootChange={setScanRoot}
         onScanStorageIdChange={setScanStorageId}
         onScanFullScanChange={setScanFullScan}

@@ -113,6 +113,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Data revision
   const [dataRevision, setDataRevision] = useState(0);
 
+  // Project revision: incremented on every open/close/switch. The polling
+  // effect captures this value at start and checks it before writing back
+  // state, preventing stale responses from a previous project session.
+  const projectRevRef = useRef(0);
+  // Poll-in-flight guard: prevents overlapping GetScanProgress requests
+  // when the backend takes longer than the 1-second interval.
+  const pollInFlightRef = useRef(false);
+
   // ---- Toast helpers ----
 
   const pushToast = useCallback((type: ToastType, title: string, message?: string) => {
@@ -169,9 +177,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!activeJobId) return;
 
+    // Capture the project revision at poll start. If the project is
+    // closed or switched while a poll is in-flight, the revision will
+    // differ and we discard the stale response.
+    const pollRev = projectRevRef.current;
+
     const intervalId = setInterval(async () => {
+      // Guard against overlapping requests.
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
       try {
         const p = await GetScanProgress(activeJobId);
+
+        // Discard if project changed since poll started.
+        if (projectRevRef.current !== pollRev) return;
+
         setScanProgress(p);
 
         if (TERMINAL_STATES.has(p.state)) {
@@ -199,10 +219,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch {
+        // Discard if project changed.
+        if (projectRevRef.current !== pollRev) return;
         clearInterval(intervalId);
         setActiveJobId(null);
         setCancelling(false);
         pushToast("error", "扫描连接中断", "无法获取扫描进度，请检查后重试");
+      } finally {
+        pollInFlightRef.current = false;
       }
     }, 1000);
 
@@ -221,6 +245,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const info = readWrite
         ? await OpenProjectReadWrite(projectPath.trim())
         : await OpenProject(projectPath.trim());
+      // Bump project revision to invalidate any in-flight poll from a
+      // previous project session.
+      projectRevRef.current++;
       setProject(info);
       setIsReadWrite(readWrite);
       setError(null);
@@ -241,6 +268,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setBusy(true);
     try {
       await CloseProject();
+      // Bump project revision to invalidate in-flight polls.
+      projectRevRef.current++;
       setProject(null);
       setIsReadWrite(false);
       setStorages([]);

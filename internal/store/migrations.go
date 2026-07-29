@@ -47,6 +47,13 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("store: migration 4 alter file_instances: %w", err)
 	}
+	// Migration 010: persist filesystem link_count (nlink) captured at
+	// scan time so the desktop UI can display hardlink evidence per file.
+	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{
+		{"link_count", "INTEGER NOT NULL DEFAULT 0"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 10 alter file_instances: %w", err)
+	}
 	// Migration 007: denormalize directory_contexts query fields for fast
 	// desktop filtering by role, protected flag, business anchor, authority
 	// level, branch point and privacy level. context_json remains the full

@@ -42,7 +42,9 @@ export function deriveCapabilities(opts: {
     disabled_reasons["execution-center"] = "请先打开项目";
     disabled_reasons["audit-recovery"] = "请先打开项目";
   } else if (!isReadWrite) {
-    disabled_reasons["scan-jobs"] = "只读模式，无法新建扫描";
+    // Read-only mode: scan history is viewable, but new scans and
+    // execution are disabled. The scan-jobs page itself remains
+    // accessible; the new-scan form checks can_scan.
     disabled_reasons["execution-center"] = "只读模式，无法执行写操作";
   }
 
