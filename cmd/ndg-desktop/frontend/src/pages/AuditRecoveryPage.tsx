@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, errorText, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import CopyButton from "../components/CopyButton";
 import {
   CheckRecoveryLock,
   ListJournalEntries,
@@ -205,7 +206,7 @@ export default function AuditRecoveryPage() {
         <section className="audit-recovery-panel" aria-label="恢复操作">
           <h3>恢复操作</h3>
           <p className="muted">
-            共 {recoveryStatus.executing_count} 条未完成写入
+            普通执行 {recoveryStatus.source_executing_count} · 隔离还原 {recoveryStatus.restore_pending_count} · 永久清理 {recoveryStatus.purge_recoverable_count}
           </p>
           {isReadWrite ? (
             <>
@@ -224,9 +225,9 @@ export default function AuditRecoveryPage() {
                 />
               </div>
               <div className="exec-recovery-buttons">
-                <button className="btn-sm" onClick={() => void recoverSourcePlans()} disabled={recoveryLoading || recoveryStatus.executing_count === 0}>恢复普通执行</button>
-                <button className="btn-sm" onClick={() => void recoverRestores()} disabled={recoveryLoading || recoveryStatus.executing_count === 0 || !quarantineRoot.trim() || !sourceRoots.trim()}>恢复隔离还原</button>
-                <button className="btn-sm" onClick={() => void recoverPurges()} disabled={recoveryLoading || recoveryStatus.executing_count === 0 || !quarantineRoot.trim()}>恢复永久清理</button>
+                <button className="btn-sm" onClick={() => void recoverSourcePlans()} disabled={recoveryLoading || recoveryStatus.source_executing_count === 0}>恢复普通执行</button>
+                <button className="btn-sm" onClick={() => void recoverRestores()} disabled={recoveryLoading || recoveryStatus.restore_pending_count === 0 || !quarantineRoot.trim() || !sourceRoots.trim()}>恢复隔离还原</button>
+                <button className="btn-sm" onClick={() => void recoverPurges()} disabled={recoveryLoading || recoveryStatus.purge_recoverable_count === 0 || !quarantineRoot.trim()}>恢复永久清理</button>
               </div>
               {recoveryResult && <pre className="exec-recovery-log">{recoveryResult}</pre>}
             </>
@@ -278,7 +279,10 @@ export default function AuditRecoveryPage() {
                   {logs.slice(0, 100).map((log) => (
                     <tr key={log.id}>
                       <td className="mono">{formatDateTime(log.created_at)}</td>
-                      <td className="mono">{log.plan_id}</td>
+                      <td className="mono">
+                        {log.plan_id}
+                        <CopyButton text={log.plan_id} />
+                      </td>
                       <td>
                         <span className="audit-event-tag">
                           {LOG_EVENT_LABELS[log.event_type] || log.event_type}
@@ -342,7 +346,10 @@ export default function AuditRecoveryPage() {
                         )}
                       </td>
                       <td className="num">{formatBytes(entry.file_size)}</td>
-                      <td className="mono">{shortHash(entry.content_sha256)}</td>
+                      <td className="mono">
+                        {shortHash(entry.content_sha256)}
+                        <CopyButton text={entry.content_sha256} />
+                      </td>
                       <td className="mono">{entry.started_at ? formatDateTime(entry.started_at) : "—"}</td>
                       <td className="mono">{entry.completed_at ? formatDateTime(entry.completed_at) : "—"}</td>
                     </tr>

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, errorText, formatBytes, shortHash } from "../lib/utils";
+import CopyButton from "../components/CopyButton";
 import {
   ApprovePlans,
   BuildDraftPlans,
@@ -393,7 +394,7 @@ export default function GovernanceReviewPage() {
                 </div>
                 <div className="gov-detail-meta">
                   <div><span className="muted">容量</span> {formatBytes(selectedPlan.size)}</div>
-                  <div><span className="muted">哈希</span> {shortHash(selectedPlan.content_sha256)}</div>
+                  <div><span className="muted">哈希</span> {shortHash(selectedPlan.content_sha256)}<CopyButton text={selectedPlan.content_sha256} /></div>
                   {selectedPlan.retain_path && (
                     <div className="gov-retain-path">
                       <span className="muted">保留路径</span>

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, errorText, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import CopyButton from "../components/CopyButton";
 import {
   ApprovePurgePlan,
   ApproveRestorePlan,
@@ -416,14 +417,20 @@ export default function ExecutionCenterPage() {
                     const restorePlan = restorePlans.find((p) => p.item_id === item.id);
                     return (
                       <tr key={item.id}>
-                        <td className="mono">{item.id}</td>
+                        <td className="mono">
+                          {item.id}
+                          <CopyButton text={item.id} />
+                        </td>
                         <td>
                           <span className={quarantineStatusBadgeClass(item.status)}>
                             {QUARANTINE_STATUS_LABELS[item.status] || item.status}
                           </span>
                         </td>
                         <td className="num">{formatBytes(item.file_size)}</td>
-                        <td className="mono">{shortHash(item.content_sha256)}</td>
+                        <td className="mono">
+                          {shortHash(item.content_sha256)}
+                          <CopyButton text={item.content_sha256} />
+                        </td>
                         <td>{formatDateTime(item.quarantined_at)}</td>
                         <td>{formatDateTime(item.retain_until)}</td>
                         {isReadWrite && (
@@ -526,14 +533,20 @@ export default function ExecutionCenterPage() {
                 <tbody>
                   {purgePlans.map((plan) => (
                     <tr key={plan.id}>
-                      <td className="mono">{plan.id}</td>
+                      <td className="mono">
+                        {plan.id}
+                        <CopyButton text={plan.id} />
+                      </td>
                       <td>
                         <span className={planStateBadgeClass(plan.state, "purge")}>
                           {PURGE_STATE_LABELS[plan.state] || plan.state}
                         </span>
                       </td>
                       <td className="num">{formatBytes(plan.expected_size)}</td>
-                      <td className="mono">{shortHash(plan.expected_sha256)}</td>
+                      <td className="mono">
+                        {shortHash(plan.expected_sha256)}
+                        <CopyButton text={plan.expected_sha256} />
+                      </td>
                       <td>{formatDateTime(plan.retain_until)}</td>
                       <td>
                         <div className="exec-plan-actions">
@@ -556,13 +569,17 @@ export default function ExecutionCenterPage() {
                               </button>
                               <div className="exec-confirmation">
                                 <label htmlFor={`purge-confirm-${plan.id}`}>逐字输入确认语句</label>
-                                <code>{plan.confirmation_text}</code>
+                                <code>
+                                  {plan.confirmation_text}
+                                  <CopyButton text={plan.confirmation_text} />
+                                </code>
                                 <input
                                   id={`purge-confirm-${plan.id}`}
                                   type="text"
                                   value={purgeConfirmations[plan.id] || ""}
                                   onChange={(e) => setPurgeConfirmations((prev) => ({ ...prev, [plan.id]: e.target.value }))}
                                   placeholder="输入上方确认语句"
+                                  className={purgeConfirmations[plan.id] === plan.confirmation_text ? "exec-confirm-match" : ""}
                                 />
                               </div>
                               <button

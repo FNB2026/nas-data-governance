@@ -7,6 +7,7 @@ import {
   stateLabel,
   stageLabel,
 } from "../lib/utils";
+import CopyButton from "./CopyButton";
 
 export interface ScanPanelProps {
   // form state
@@ -116,6 +117,9 @@ function formatDuration(startedAt?: string): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+type SortKey = "job_id" | "created_at" | "discovered" | "processed" | "failed" | "job_type" | "state";
+type SortDir = "asc" | "desc";
+
 export default function ScanPanel({
   scanRoot,
   scanStorageId,
@@ -153,6 +157,19 @@ export default function ScanPanel({
     return () => clearInterval(id);
   }, [scanActive]);
 
+  // Column sorting state for the job history table
+  const [sortKey, setSortKey] = useState<SortKey>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
   // Derive unique job types from the data for the filter dropdown
   const jobTypes = useMemo(() => {
     const types = new Set<string>();
@@ -171,6 +188,21 @@ export default function ScanPanel({
       return true;
     });
   }, [jobs, stateFilter, typeFilter]);
+
+  const sortedJobs = useMemo(() => {
+    const arr = [...filteredJobs];
+    arr.sort((a, b) => {
+      let va: string | number = a[sortKey] ?? "";
+      let vb: string | number = b[sortKey] ?? "";
+      if (typeof va === "string" && typeof vb === "string") {
+        return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+      va = Number(va) || 0;
+      vb = Number(vb) || 0;
+      return sortDir === "asc" ? va - vb : vb - va;
+    });
+    return arr;
+  }, [filteredJobs, sortKey, sortDir]);
 
   const hasActiveFilter = stateFilter !== "" || typeFilter !== "";
 
@@ -203,6 +235,11 @@ export default function ScanPanel({
               type="text"
               value={scanRoot}
               onChange={(e) => onScanRootChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !scanActive && !scanStarting && scanRoot.trim()) {
+                  onStartScan();
+                }
+              }}
               placeholder="/path/to/scan"
               disabled={scanActive}
             />
@@ -390,22 +427,39 @@ export default function ScanPanel({
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>任务 ID</th>
-                  <th>类型</th>
-                  <th>状态</th>
+                  <th className="sortable" onClick={() => toggleSort("job_id")}>
+                    任务 ID{sortKey === "job_id" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                  <th className="sortable" onClick={() => toggleSort("job_type")}>
+                    类型{sortKey === "job_type" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                  <th className="sortable" onClick={() => toggleSort("state")}>
+                    状态{sortKey === "state" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
                   <th>阶段</th>
-                  <th className="num">已发现</th>
-                  <th className="num">已处理</th>
-                  <th className="num">失败</th>
-                  <th>创建时间</th>
+                  <th className="num sortable" onClick={() => toggleSort("discovered")}>
+                    已发现{sortKey === "discovered" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                  <th className="num sortable" onClick={() => toggleSort("processed")}>
+                    已处理{sortKey === "processed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                  <th className="num sortable" onClick={() => toggleSort("failed")}>
+                    失败{sortKey === "failed" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                  <th className="sortable" onClick={() => toggleSort("created_at")}>
+                    创建时间{sortKey === "created_at" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
                   <th>完成时间</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredJobs.map((j) => (
+                {sortedJobs.map((j) => (
                   <tr key={j.job_id}>
-                    <td className="mono" title={j.job_id}>{shortHash(j.job_id)}</td>
+                    <td className="mono" title={j.job_id}>
+                      {shortHash(j.job_id)}
+                      <CopyButton text={j.job_id} />
+                    </td>
                     <td>{j.job_type}</td>
                     <td>
                       <span className={stateBadgeClass(j.state)}>
