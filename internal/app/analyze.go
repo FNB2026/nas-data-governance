@@ -215,17 +215,17 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 			!(in.RefreshUnknown && IsUnknownFormat(info)) &&
 			!(in.RefreshMetadata && NeedsMetadataRefresh(info)) {
 			result.Entries[i] = FormatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
-			result.Reused++
+			atomic.AddInt64(&result.Reused, 1)
 			if IsUnknownFormat(info) {
-				result.Unrecognized++
+				atomic.AddInt64(&result.Unrecognized, 1)
 			} else {
-				result.Analyzed++
+				atomic.AddInt64(&result.Analyzed, 1)
 			}
 			continue
 		}
 		pending = append(pending, pendingFile{index: i, file: file})
 	}
-	s.reused.Store(result.Reused)
+	s.reused.Store(atomic.LoadInt64(&result.Reused))
 
 	// Persistence goroutine: batches SQLite writes. Never writes to the NAS.
 	var persistCh chan store.FormatRecord
@@ -281,9 +281,9 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 				entry.Error = analyzeErr.Error()
 				atomic.AddInt64(&result.Failed, 1)
 			} else if IsUnknownFormat(info) {
-				result.Unrecognized++
+				atomic.AddInt64(&result.Unrecognized, 1)
 			} else {
-				result.Analyzed++
+				atomic.AddInt64(&result.Analyzed, 1)
 			}
 			if persistCh != nil && analyzeErr == nil && info.Format != "" {
 				persistCh <- store.FormatRecord{StorageID: file.StorageID, Path: file.Path, Info: info}
@@ -291,7 +291,7 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 			entriesMu.Lock()
 			result.Entries[idx] = entry
 			entriesMu.Unlock()
-			done := result.Reused + atomic.AddInt64(&processedNew, 1)
+			done := atomic.LoadInt64(&result.Reused) + atomic.AddInt64(&processedNew, 1)
 			s.processed.Store(done)
 			return nil
 		}); err != nil {
@@ -309,7 +309,7 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 	}
 
 	// Check completeness.
-	completed := result.Reused + atomic.LoadInt64(&processedNew)
+	completed := atomic.LoadInt64(&result.Reused) + atomic.LoadInt64(&processedNew)
 	if completed != int64(len(files)) {
 		s.stage.Store("interrupted")
 		if submitErr != nil {
@@ -321,7 +321,7 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 		return nil, fmt.Errorf("app: analysis incomplete: %d/%d", completed, len(files))
 	}
 
-	s.failed.Store(result.Failed)
+	s.failed.Store(atomic.LoadInt64(&result.Failed))
 	s.stage.Store("completed")
 	return result, nil
 }

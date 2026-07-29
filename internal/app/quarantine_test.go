@@ -43,8 +43,8 @@ func seedQuarantineItem(
 		t.Fatal(err)
 	}
 	action := domain.PlannedAction{
-		Path:   sourcePath,
-		Action: domain.OperationQuarantine,
+		Path:    sourcePath,
+		Action:  domain.OperationQuarantine,
 		Context: domain.DirectoryContext{Role: domain.RoleTemporary},
 		File: domain.FileInstance{
 			Path: sourcePath, Size: snapshot.Size, ContentSHA256: snapshot.Hash,
