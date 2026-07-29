@@ -36,8 +36,8 @@ export function saveSettings(settings: AppSettings): void {
  * Replaces the home directory and intermediate path segments with asterisks,
  * keeping the first segment and last two segments visible.
  *
- * Example: /Users/john/Documents/Work/Projects/report.pdf
- *       → /Users/[hidden]/Projects/report.pdf
+ * Example: /data/archive/Documents/Work/Projects/report.pdf
+ *       → /data/[hidden]/Projects/report.pdf
  */
 export function maskPath(path: string): string {
   if (!path) return path;
@@ -55,5 +55,6 @@ export function maskPath(path: string): string {
   const hiddenCount = segments.length - 3;
 
   const prefix = normalized.startsWith("/") ? "/" : "";
-  return `${prefix}${first}/${"**".repeat(Math.min(hiddenCount, 1))}/${last2}/${last1}`;
+  const hidden = hiddenCount > 0 ? "/**" : "";
+  return `${prefix}${first}${hidden}/${last2}/${last1}`;
 }
