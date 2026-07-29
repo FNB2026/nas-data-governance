@@ -71,8 +71,9 @@ func TestScanPopulatesPhysicalIdentity(t *testing.T) {
 	if f.Device == 0 || f.Inode == 0 {
 		t.Skip("filesystem does not expose device/inode identity")
 	}
-	if !f.Physical.Reliable {
-		t.Fatal("filesystem identity was present but not marked reliable")
+	wantReliable := physicalIdentityReliable(root)
+	if f.Physical.Reliable != wantReliable {
+		t.Fatalf("physical identity reliability = %t, want %t", f.Physical.Reliable, wantReliable)
 	}
 	if f.Physical.Device != f.Device || f.Physical.Inode != f.Inode {
 		t.Fatalf("physical identity does not match legacy fields: %#v", f)
