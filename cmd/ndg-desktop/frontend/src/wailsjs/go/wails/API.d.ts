@@ -5,6 +5,10 @@ import {formatdiag} from '../models';
 import {governancediag} from '../models';
 import {merge} from '../models';
 
+export function ApprovePlans(arg1:wails.ApprovePlansRequest):Promise<wails.ApprovePlansResponse>;
+
+export function BuildDraftPlans(arg1:string):Promise<Array<wails.PlanDTO>>;
+
 export function CancelScan(arg1:string):Promise<void>;
 
 export function CloseProject():Promise<void>;
@@ -14,6 +18,8 @@ export function DiagnoseFormats(arg1:wails.DiagnoseFormatsRequest):Promise<forma
 export function DiagnoseGovernance(arg1:wails.DiagnoseGovernanceRequest):Promise<governancediag.Report>;
 
 export function DiagnoseMerges(arg1:wails.DiagnoseMergesRequest):Promise<merge.DiagnosticReport>;
+
+export function GetGroupDecision(arg1:string):Promise<wails.GroupDecisionDTO>;
 
 export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetailResponse>;
 
@@ -25,15 +31,23 @@ export function GetScanProgress(arg1:string):Promise<wails.ScanJobProgress>;
 
 export function GetVersion():Promise<wails.VersionInfo>;
 
+export function ListAllPlans():Promise<Array<wails.PlanDTO>>;
+
 export function ListDuplicateGroups(arg1:wails.ListGroupsRequest):Promise<wails.ListGroupsResponse>;
 
+export function ListGroupDecisions(arg1:string):Promise<Array<wails.GroupDecisionDTO>>;
+
 export function ListRecentJobs(arg1:number):Promise<Array<wails.JobSummary>>;
+
+export function ListReviewPlans():Promise<Array<wails.PlanDTO>>;
 
 export function ListStorages():Promise<Array<wails.StorageInfo>>;
 
 export function OpenProject(arg1:string):Promise<wails.ProjectInfo>;
 
 export function OpenProjectReadWrite(arg1:string):Promise<wails.ProjectInfo>;
+
+export function SaveGroupDecision(arg1:wails.SaveDecisionRequest):Promise<wails.GroupDecisionDTO>;
 
 export function StartScan(arg1:wails.StartScanRequest):Promise<wails.StartScanResponse>;
 

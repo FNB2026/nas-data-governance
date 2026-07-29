@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/formatdiag"
 	"github.com/FNB2026/nas-data-governance/internal/governancediag"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
@@ -70,6 +71,9 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 // CancelScan, ListRecentJobs, GetJobDetail.
 //
 // V5 (diagnostics): DiagnoseFormats, DiagnoseGovernance, DiagnoseMerges.
+//
+// V6 (governance): ListAllPlans, ListReviewPlans, BuildDraftPlans,
+// GetGroupDecision, SaveGroupDecision, ListGroupDecisions, ApprovePlans.
 type API struct {
 	mu         sync.RWMutex
 	store      *store.SQLiteStore
@@ -77,6 +81,8 @@ type API struct {
 	scanRunner *app.ScanJobRunner
 	jobMgr     *jobs.JobManager
 	diagSvc    *app.DiagnosticService
+	planSvc    *app.PlanService
+	reviewSvc  *app.ReviewService
 	path       string
 	projectID  string // used as JobManager project scope; set to abs DB path
 }
@@ -126,6 +132,8 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.store = st
 	a.dupSvc = app.NewDuplicateServiceWithReader(st)
 	a.diagSvc = app.NewDiagnosticService(st)
+	a.planSvc = app.NewPlanService()
+	a.reviewSvc = app.NewReviewService(st)
 	a.path = absPath
 
 	info, err := a.projectInfoLocked(context.Background())
@@ -134,6 +142,8 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 		a.store = nil
 		a.dupSvc = nil
 		a.diagSvc = nil
+		a.planSvc = nil
+		a.reviewSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -157,6 +167,8 @@ func (a *API) CloseProject() error {
 	a.store = nil
 	a.dupSvc = nil
 	a.diagSvc = nil
+	a.planSvc = nil
+	a.reviewSvc = nil
 	a.scanRunner = nil
 	a.jobMgr = nil
 	a.path = ""
@@ -366,6 +378,8 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 	a.store = st
 	a.dupSvc = app.NewDuplicateServiceWithReader(st)
 	a.diagSvc = app.NewDiagnosticService(st)
+	a.planSvc = app.NewPlanService()
+	a.reviewSvc = app.NewReviewService(st)
 	a.jobMgr = mgr
 	a.scanRunner = app.NewScanJobRunner(app.NewScanService(st), mgr)
 	a.path = absPath
@@ -377,6 +391,8 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 		a.store = nil
 		a.dupSvc = nil
 		a.diagSvc = nil
+		a.planSvc = nil
+		a.reviewSvc = nil
 		a.scanRunner = nil
 		a.jobMgr = nil
 		a.path = ""
@@ -621,4 +637,206 @@ func (a *API) DiagnoseMerges(req DiagnoseMergesRequest) (*merge.DiagnosticReport
 		return nil, fmt.Errorf("wails: diagnose merges: %w", err)
 	}
 	return report, nil
+}
+
+// ---- V6 governance bindings ----
+
+// ListAllPlans returns all operation plans across all tasks, ordered by
+// task creation time then plan ID. Available in both read-only and
+// read-write modes.
+func (a *API) ListAllPlans() ([]PlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return nil, ErrNoProjectOpen
+	}
+	plans, err := a.store.ListAllPlans(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: list all plans: %w", err)
+	}
+	out := make([]PlanDTO, len(plans))
+	for i, p := range plans {
+		out[i] = mapPlan(p)
+	}
+	return out, nil
+}
+
+// ListReviewPlans returns plans that contain at least one REVIEW action.
+// These are the plans that need human review before they can proceed.
+// Available in both read-only and read-write modes.
+func (a *API) ListReviewPlans() ([]PlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.reviewSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	plans, err := a.reviewSvc.ListReviewPlans(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: list review plans: %w", err)
+	}
+	out := make([]PlanDTO, len(plans))
+	for i, p := range plans {
+		out[i] = mapPlan(p)
+	}
+	return out, nil
+}
+
+// BuildDraftPlans generates draft governance plans from scanned files.
+// This is a read-only operation: it loads files, groups them into duplicate
+// groups, and runs the planner. The plans are NOT persisted; they are
+// returned for review only.
+//
+// If storageID is empty, all storages are included.
+func (a *API) BuildDraftPlans(storageID string) ([]PlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.planSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	files, err := a.store.ListFiles(context.Background(), strings.TrimSpace(storageID))
+	if err != nil {
+		return nil, fmt.Errorf("wails: load files for planning: %w", err)
+	}
+	if len(files) == 0 {
+		return []PlanDTO{}, nil
+	}
+	plans := a.planSvc.BuildPlans(context.Background(), files)
+	out := make([]PlanDTO, len(plans))
+	for i, p := range plans {
+		out[i] = mapPlan(p)
+	}
+	return out, nil
+}
+
+// GetGroupDecision returns the review decision for a group, or an error
+// if no decision has been recorded.
+func (a *API) GetGroupDecision(groupID string) (GroupDecisionDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.reviewSvc == nil {
+		return GroupDecisionDTO{}, ErrNoProjectOpen
+	}
+	if strings.TrimSpace(groupID) == "" {
+		return GroupDecisionDTO{}, errors.New("wails: group_id is required")
+	}
+	d, err := a.reviewSvc.GetDecision(context.Background(), groupID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return GroupDecisionDTO{}, fmt.Errorf("wails: no decision for group")
+		}
+		return GroupDecisionDTO{}, fmt.Errorf("wails: get group decision: %w", err)
+	}
+	return mapDecision(d), nil
+}
+
+// SaveGroupDecision records a review decision for a duplicate group.
+// The decision is upserted by group_id, so there can be only one decision
+// per group. Requires read-write mode.
+func (a *API) SaveGroupDecision(req SaveDecisionRequest) (GroupDecisionDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.reviewSvc == nil {
+		return GroupDecisionDTO{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return GroupDecisionDTO{}, ErrProjectNotReadWrite
+	}
+	if strings.TrimSpace(req.GroupID) == "" {
+		return GroupDecisionDTO{}, errors.New("wails: group_id is required")
+	}
+	if strings.TrimSpace(req.DecisionType) == "" {
+		return GroupDecisionDTO{}, errors.New("wails: decision_type is required")
+	}
+
+	now := time.Now().UTC()
+	d := domain.GroupDecision{
+		ID:           req.GroupID,
+		GroupID:      req.GroupID,
+		DecisionType: domain.ReviewDecisionType(req.DecisionType),
+		Reason:       req.Reason,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	// Preserve created_at if a decision already exists.
+	if existing, err := a.reviewSvc.GetDecision(context.Background(), req.GroupID); err == nil {
+		d.CreatedAt = existing.CreatedAt
+	}
+
+	if err := a.reviewSvc.SaveDecision(context.Background(), d); err != nil {
+		return GroupDecisionDTO{}, fmt.Errorf("wails: save group decision: %w", err)
+	}
+	return mapDecision(d), nil
+}
+
+// ListGroupDecisions returns review decisions, optionally filtered by type.
+// Pass an empty string for decisionType to return all decisions.
+func (a *API) ListGroupDecisions(decisionType string) ([]GroupDecisionDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.reviewSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	decisions, err := a.reviewSvc.ListDecisions(context.Background(), domain.ReviewDecisionType(decisionType))
+	if err != nil {
+		return nil, fmt.Errorf("wails: list group decisions: %w", err)
+	}
+	out := make([]GroupDecisionDTO, len(decisions))
+	for i, d := range decisions {
+		out[i] = mapDecision(d)
+	}
+	return out, nil
+}
+
+// ApprovePlans transitions selected plans from DRAFT to APPROVED and
+// persists the state change. Requires read-write mode.
+//
+// Critical-risk plans cannot be approved here; they require an independent
+// hold-release workflow. Non-DRAFT plans are rejected.
+func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return ApprovePlansResponse{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ApprovePlansResponse{}, ErrProjectNotReadWrite
+	}
+	if len(req.PlanIDs) == 0 {
+		return ApprovePlansResponse{}, errors.New("wails: at least one plan_id is required")
+	}
+
+	// Load all plans so PlanService can validate transitions.
+	allPlans, err := a.store.ListAllPlans(context.Background())
+	if err != nil {
+		return ApprovePlansResponse{}, fmt.Errorf("wails: load plans for approval: %w", err)
+	}
+
+	result, err := a.planSvc.ApprovePlans(context.Background(), app.ApprovePlansInput{
+		Plans: allPlans,
+		IDs:   req.PlanIDs,
+	})
+	if err != nil {
+		return ApprovePlansResponse{}, fmt.Errorf("wails: approve plans: %w", err)
+	}
+
+	// Persist each state transition.
+	for _, p := range result.Approved {
+		if err := a.store.UpdatePlanState(context.Background(), p.ID, p.State); err != nil {
+			return ApprovePlansResponse{}, fmt.Errorf("wails: persist approval for plan %s: %w", p.ID, err)
+		}
+	}
+
+	approved := make([]PlanDTO, len(result.Approved))
+	for i, p := range result.Approved {
+		approved[i] = mapPlan(p)
+	}
+	return ApprovePlansResponse{Approved: approved}, nil
 }

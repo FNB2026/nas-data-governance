@@ -1233,17 +1233,167 @@ export namespace wails {
 	    version: string;
 	    commit: string;
 	    build_time: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
 	        this.commit = source["commit"];
 	        this.build_time = source["build_time"];
 	    }
+	}
+	export class PlanActionDTO {
+	    path: string;
+	    action: string;
+	    reason: string;
+	    target_path?: string;
+	    context_role?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PlanActionDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.target_path = source["target_path"];
+	        this.context_role = source["context_role"];
+	    }
+	}
+	export class PlanDTO {
+	    id: string;
+	    task_id?: string;
+	    state: string;
+	    content_sha256: string;
+	    size: number;
+	    risk: string;
+	    retain_path?: string;
+	    actions: PlanActionDTO[];
+	    evidence: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new PlanDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.task_id = source["task_id"];
+	        this.state = source["state"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.size = source["size"];
+	        this.risk = source["risk"];
+	        this.retain_path = source["retain_path"];
+	        this.actions = this.convertValues(source["actions"], PlanActionDTO);
+	        this.evidence = source["evidence"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GroupDecisionDTO {
+	    id: string;
+	    group_id: string;
+	    decision_type: string;
+	    retained_file_id?: number;
+	    reason?: string;
+	    rule_id?: string;
+	    created_at: string;
+	    updated_at: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GroupDecisionDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.group_id = source["group_id"];
+	        this.decision_type = source["decision_type"];
+	        this.retained_file_id = source["retained_file_id"];
+	        this.reason = source["reason"];
+	        this.rule_id = source["rule_id"];
+	        this.created_at = source["created_at"];
+	        this.updated_at = source["updated_at"];
+	    }
+	}
+	export class SaveDecisionRequest {
+	    group_id: string;
+	    decision_type: string;
+	    reason?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SaveDecisionRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.decision_type = source["decision_type"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class ApprovePlansRequest {
+	    plan_ids: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new ApprovePlansRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_ids = source["plan_ids"];
+	    }
+	}
+	export class ApprovePlansResponse {
+	    approved: PlanDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new ApprovePlansResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.approved = this.convertValues(source["approved"], PlanDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

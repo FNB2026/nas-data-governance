@@ -343,3 +343,97 @@ func (req ListGroupsRequest) toQuery() (query.GroupQuery, error) {
 		MinReclaimableBytes: req.MinReclaimableBytes,
 	}, nil
 }
+
+// ---- V6 Governance DTOs ----
+
+// PlanActionDTO is the DTO for a single planned action within a plan.
+type PlanActionDTO struct {
+	Path        string `json:"path"`
+	Action      string `json:"action"`
+	Reason      string `json:"reason"`
+	TargetPath  string `json:"target_path,omitempty"`
+	ContextRole string `json:"context_role,omitempty"`
+}
+
+// PlanDTO is the DTO for an operation plan, suitable for frontend display.
+// It omits RetainScore (which has nested reasons) and the full File snapshot
+// from PlannedAction; instead it exposes the flat fields the UI needs.
+type PlanDTO struct {
+	ID            string          `json:"id"`
+	TaskID        string          `json:"task_id,omitempty"`
+	State         string          `json:"state"`
+	ContentSHA256 string          `json:"content_sha256"`
+	Size          int64           `json:"size"`
+	Risk          string          `json:"risk"`
+	RetainPath    string          `json:"retain_path,omitempty"`
+	Actions       []PlanActionDTO `json:"actions"`
+	Evidence      []string        `json:"evidence"`
+}
+
+// GroupDecisionDTO is the DTO for a persisted review decision.
+type GroupDecisionDTO struct {
+	ID             string `json:"id"`
+	GroupID        string `json:"group_id"`
+	DecisionType   string `json:"decision_type"`
+	RetainedFileID *int64 `json:"retained_file_id,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	RuleID         string `json:"rule_id,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+// SaveDecisionRequest is the input DTO for SaveGroupDecision.
+type SaveDecisionRequest struct {
+	GroupID      string `json:"group_id"`
+	DecisionType string `json:"decision_type"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// ApprovePlansRequest is the input DTO for ApprovePlans.
+type ApprovePlansRequest struct {
+	PlanIDs []string `json:"plan_ids"`
+}
+
+// ApprovePlansResponse is the output DTO for ApprovePlans.
+type ApprovePlansResponse struct {
+	Approved []PlanDTO `json:"approved"`
+}
+
+// ---- V6 governance mapping helpers ----
+
+func mapPlan(p domain.OperationPlan) PlanDTO {
+	actions := make([]PlanActionDTO, len(p.Actions))
+	for i, a := range p.Actions {
+		actions[i] = PlanActionDTO{
+			Path:        a.Path,
+			Action:      string(a.Action),
+			Reason:      a.Reason,
+			TargetPath:  a.TargetPath,
+			ContextRole: string(a.Context.Role),
+		}
+	}
+	return PlanDTO{
+		ID:            p.ID,
+		TaskID:        p.TaskID,
+		State:         string(p.State),
+		ContentSHA256: p.ContentSHA256,
+		Size:          p.Size,
+		Risk:          string(p.Risk),
+		RetainPath:    p.RetainPath,
+		Actions:       actions,
+		Evidence:      p.Evidence,
+	}
+}
+
+func mapDecision(d domain.GroupDecision) GroupDecisionDTO {
+	return GroupDecisionDTO{
+		ID:             d.ID,
+		GroupID:        d.GroupID,
+		DecisionType:   string(d.DecisionType),
+		RetainedFileID: d.RetainedFileID,
+		Reason:         d.Reason,
+		RuleID:         d.RuleID,
+		CreatedAt:      d.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:      d.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
