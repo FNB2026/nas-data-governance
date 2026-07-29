@@ -317,11 +317,15 @@ func runPurgeExecute(args []string) error {
 	quarantineRoot := fs.String("quarantine", "", "managed quarantine root (absolute)")
 	out := fs.String("out", "./var/purge-audit.json", "private audit report")
 	dryRun := fs.Bool("dry-run", false, "read-only stale and boundary validation")
+	confirmation := fs.String("confirm", "", "exact permanent-purge confirmation text (required unless --dry-run)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *dbPath == "" || *planID == "" || *digest == "" || *quarantineRoot == "" {
 		return fmt.Errorf("--db, --plan-id, --digest and --quarantine are required")
+	}
+	if !*dryRun && *confirmation == "" {
+		return fmt.Errorf("--confirm is required for permanent purge execution")
 	}
 	ctx := context.Background()
 	st, err := store.Open(ctx, *dbPath)
@@ -335,6 +339,7 @@ func runPurgeExecute(args []string) error {
 		Digest:         *digest,
 		QuarantineRoot: *quarantineRoot,
 		DryRun:         *dryRun,
+		Confirmation:   *confirmation,
 	})
 	// Always write the audit file, even on failure, so the operator has
 	// a record of what the executor attempted.

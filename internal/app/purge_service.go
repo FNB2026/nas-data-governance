@@ -33,6 +33,17 @@ func NewPurgeService(st *store.SQLiteStore) *PurgeService {
 	return &PurgeService{store: st}
 }
 
+// ListPlans returns all durable purge plans.
+func (s *PurgeService) ListPlans(ctx context.Context) ([]domain.PurgePlan, error) {
+	return s.store.ListPurgePlans(ctx)
+}
+
+// PurgeConfirmationText is the exact high-risk statement required for one
+// permanent-deletion plan. The backend recomputes it at execution time.
+func PurgeConfirmationText(plan domain.PurgePlan) string {
+	return fmt.Sprintf("确认永久清理隔离区中的 1 个文件，共 %d 字节", plan.ExpectedSize)
+}
+
 // CreatePlans builds DRAFT purge plans for all purge-eligible quarantine
 // items. This is a read-only operation: no filesystem writes occur. Plans
 // are persisted to the database and returned for CLI to write to a file.
@@ -69,6 +80,7 @@ type PurgeExecuteInput struct {
 	Digest         string
 	QuarantineRoot string
 	DryRun         bool
+	Confirmation   string
 }
 
 // PurgeExecuteResult holds the outcome of a purge execution.
@@ -95,6 +107,14 @@ func (s *PurgeService) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (
 	if plan.ApprovalDigest != in.Digest {
 		return nil, fmt.Errorf("app: purge execution digest rejected")
 	}
+	if !in.DryRun {
+		if plan.DryRunVerifiedAt == nil || plan.DryRunDigest != in.Digest {
+			return nil, fmt.Errorf("app: successful dry-run is required before purge execution")
+		}
+		if in.Confirmation != PurgeConfirmationText(plan) {
+			return nil, fmt.Errorf("app: purge confirmation rejected")
+		}
+	}
 	item, err := s.store.GetQuarantineItem(ctx, plan.ItemID)
 	if err != nil {
 		return nil, fmt.Errorf("app: get quarantine item: %w", err)
@@ -111,6 +131,11 @@ func (s *PurgeService) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (
 	}
 	if result.Err != nil {
 		return &PurgeExecuteResult{Result: result}, fmt.Errorf("purge failed: %s", result.ErrorType)
+	}
+	if in.DryRun {
+		if err := s.store.MarkPurgeDryRunVerified(ctx, plan.ID, in.Digest, time.Now().UTC()); err != nil {
+			return nil, fmt.Errorf("app: persist purge dry-run: %w", err)
+		}
 	}
 	return &PurgeExecuteResult{Result: result}, nil
 }

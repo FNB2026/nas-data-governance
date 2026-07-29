@@ -37,6 +37,11 @@ func (s *QuarantineService) ListItems(ctx context.Context, status domain.Quarant
 	return s.store.ListQuarantineItems(ctx, status)
 }
 
+// ListRestorePlans returns all durable restore plans.
+func (s *QuarantineService) ListRestorePlans(ctx context.Context) ([]domain.RestorePlan, error) {
+	return s.store.ListRestorePlans(ctx)
+}
+
 // CreateRestorePlan builds a DRAFT restore plan for a single quarantine item.
 // This is a read-only operation: no filesystem writes occur. The plan is
 // persisted to the database and returned for CLI to write to a private file.

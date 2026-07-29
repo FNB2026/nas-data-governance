@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/events"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/query"
+	"github.com/FNB2026/nas-data-governance/internal/report"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -361,6 +363,7 @@ type PlanActionDTO struct {
 // from PlannedAction; instead it exposes the flat fields the UI needs.
 type PlanDTO struct {
 	ID            string          `json:"id"`
+	GroupID       string          `json:"group_id"`
 	TaskID        string          `json:"task_id,omitempty"`
 	State         string          `json:"state"`
 	ContentSHA256 string          `json:"content_sha256"`
@@ -413,8 +416,13 @@ func mapPlan(p domain.OperationPlan) PlanDTO {
 			ContextRole: string(a.Context.Role),
 		}
 	}
+	groupID := p.GroupID
+	if groupID == "" && len(p.Actions) > 0 && p.Actions[0].File.StorageID != "" {
+		groupID = report.StableGroupID(p.Actions[0].File.StorageID, p.ContentSHA256)
+	}
 	return PlanDTO{
 		ID:            p.ID,
+		GroupID:       groupID,
 		TaskID:        p.TaskID,
 		State:         string(p.State),
 		ContentSHA256: p.ContentSHA256,
@@ -475,17 +483,19 @@ type RestorePlanDTO struct {
 
 // PurgePlanDTO is the DTO for a purge plan.
 type PurgePlanDTO struct {
-	ID             string `json:"id"`
-	ItemID         string `json:"item_id"`
-	State          string `json:"state"`
-	ExpectedPath   string `json:"expected_path"`
-	ExpectedSHA256 string `json:"expected_sha256"`
-	ExpectedSize   int64  `json:"expected_size"`
-	RetainUntil    string `json:"retain_until"`
-	ApprovalDigest string `json:"approval_digest"`
-	CreatedAt      string `json:"created_at"`
-	ApprovedAt     string `json:"approved_at,omitempty"`
-	PurgedAt       string `json:"purged_at,omitempty"`
+	ID               string `json:"id"`
+	ItemID           string `json:"item_id"`
+	State            string `json:"state"`
+	ExpectedPath     string `json:"expected_path"`
+	ExpectedSHA256   string `json:"expected_sha256"`
+	ExpectedSize     int64  `json:"expected_size"`
+	RetainUntil      string `json:"retain_until"`
+	ApprovalDigest   string `json:"approval_digest"`
+	ConfirmationText string `json:"confirmation_text"`
+	CreatedAt        string `json:"created_at"`
+	ApprovedAt       string `json:"approved_at,omitempty"`
+	DryRunVerifiedAt string `json:"dry_run_verified_at,omitempty"`
+	PurgedAt         string `json:"purged_at,omitempty"`
 }
 
 // ExecuteRestoreRequest is the input DTO for ExecuteRestore.
@@ -512,6 +522,7 @@ type ExecutePurgeRequest struct {
 	Digest         string `json:"digest"`
 	QuarantineRoot string `json:"quarantine_root"`
 	DryRun         bool   `json:"dry_run"`
+	Confirmation   string `json:"confirmation,omitempty"`
 }
 
 // ExecutePurgeResponse is the output DTO for ExecutePurge.
@@ -525,8 +536,11 @@ type ExecutePurgeResponse struct {
 
 // RecoveryStatusDTO reports whether any plans are stuck in EXECUTING state.
 type RecoveryStatusDTO struct {
-	LockActive     bool `json:"lock_active"`
-	ExecutingCount int  `json:"executing_count"`
+	LockActive            bool `json:"lock_active"`
+	ExecutingCount        int  `json:"executing_count"`
+	SourceExecutingCount  int  `json:"source_executing_count"`
+	RestorePendingCount   int  `json:"restore_pending_count"`
+	PurgeRecoverableCount int  `json:"purge_recoverable_count"`
 }
 
 // RecoverRestoresRequest is the input DTO for RecoverRestores.
@@ -609,18 +623,22 @@ func mapRestorePlan(p domain.RestorePlan) RestorePlanDTO {
 
 func mapPurgePlan(p domain.PurgePlan) PurgePlanDTO {
 	dto := PurgePlanDTO{
-		ID:             p.ID,
-		ItemID:         p.ItemID,
-		State:          string(p.State),
-		ExpectedPath:   p.ExpectedPath,
-		ExpectedSHA256: p.ExpectedSHA256,
-		ExpectedSize:   p.ExpectedSize,
-		RetainUntil:    p.RetainUntil.UTC().Format(time.RFC3339),
-		ApprovalDigest: p.ApprovalDigest,
-		CreatedAt:      p.CreatedAt.UTC().Format(time.RFC3339),
+		ID:               p.ID,
+		ItemID:           p.ItemID,
+		State:            string(p.State),
+		ExpectedPath:     p.ExpectedPath,
+		ExpectedSHA256:   p.ExpectedSHA256,
+		ExpectedSize:     p.ExpectedSize,
+		RetainUntil:      p.RetainUntil.UTC().Format(time.RFC3339),
+		ApprovalDigest:   p.ApprovalDigest,
+		ConfirmationText: app.PurgeConfirmationText(p),
+		CreatedAt:        p.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if p.ApprovedAt != nil && !p.ApprovedAt.IsZero() {
 		dto.ApprovedAt = p.ApprovedAt.UTC().Format(time.RFC3339)
+	}
+	if p.DryRunVerifiedAt != nil && !p.DryRunVerifiedAt.IsZero() {
+		dto.DryRunVerifiedAt = p.DryRunVerifiedAt.UTC().Format(time.RFC3339)
 	}
 	if p.PurgedAt != nil && !p.PurgedAt.IsZero() {
 		dto.PurgedAt = p.PurgedAt.UTC().Format(time.RFC3339)

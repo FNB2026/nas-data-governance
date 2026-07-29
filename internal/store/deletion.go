@@ -248,14 +248,15 @@ func (s *SQLiteStore) SavePurgePlans(ctx context.Context, plans []domain.PurgePl
 func (s *SQLiteStore) GetPurgePlan(ctx context.Context, id string) (domain.PurgePlan, error) {
 	var plan domain.PurgePlan
 	var state, retainUntil, createdAt string
-	var approvedAt, purgedAt sql.NullString
+	var approvedAt, dryRunDigest, dryRunVerifiedAt, purgedAt sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, item_id, state, expected_path, expected_sha256, expected_size,
-		       retain_until, approval_digest, created_at, approved_at, purged_at
-		FROM purge_plans WHERE id = ?`, id).Scan(
+			SELECT id, item_id, state, expected_path, expected_sha256, expected_size,
+			       retain_until, approval_digest, created_at, approved_at,
+			       dry_run_digest, dry_run_verified_at, purged_at
+			FROM purge_plans WHERE id = ?`, id).Scan(
 		&plan.ID, &plan.ItemID, &state, &plan.ExpectedPath, &plan.ExpectedSHA256,
 		&plan.ExpectedSize, &retainUntil, &plan.ApprovalDigest, &createdAt,
-		&approvedAt, &purgedAt)
+		&approvedAt, &dryRunDigest, &dryRunVerifiedAt, &purgedAt)
 	if err == sql.ErrNoRows {
 		return plan, ErrNotFound
 	}
@@ -266,8 +267,60 @@ func (s *SQLiteStore) GetPurgePlan(ctx context.Context, id string) (domain.Purge
 	plan.RetainUntil, _ = time.Parse(time.RFC3339Nano, retainUntil)
 	plan.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	plan.ApprovedAt = parseNullableTime(approvedAt)
+	plan.DryRunDigest = dryRunDigest.String
+	plan.DryRunVerifiedAt = parseNullableTime(dryRunVerifiedAt)
 	plan.PurgedAt = parseNullableTime(purgedAt)
 	return plan, nil
+}
+
+// ListPurgePlans returns durable purge plans so approved work remains visible
+// after a desktop restart.
+func (s *SQLiteStore) ListPurgePlans(ctx context.Context) ([]domain.PurgePlan, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, item_id, state, expected_path, expected_sha256, expected_size,
+		       retain_until, approval_digest, created_at, approved_at,
+		       dry_run_digest, dry_run_verified_at, purged_at
+		FROM purge_plans ORDER BY created_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list purge plans: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.PurgePlan, 0)
+	for rows.Next() {
+		var plan domain.PurgePlan
+		var state, retainUntil, createdAt string
+		var approvedAt, dryRunDigest, dryRunVerifiedAt, purgedAt sql.NullString
+		if err := rows.Scan(&plan.ID, &plan.ItemID, &state, &plan.ExpectedPath,
+			&plan.ExpectedSHA256, &plan.ExpectedSize, &retainUntil, &plan.ApprovalDigest,
+			&createdAt, &approvedAt, &dryRunDigest, &dryRunVerifiedAt, &purgedAt); err != nil {
+			return nil, err
+		}
+		plan.State = domain.PurgePlanState(state)
+		plan.RetainUntil, _ = time.Parse(time.RFC3339Nano, retainUntil)
+		plan.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		plan.ApprovedAt = parseNullableTime(approvedAt)
+		plan.DryRunDigest = dryRunDigest.String
+		plan.DryRunVerifiedAt = parseNullableTime(dryRunVerifiedAt)
+		plan.PurgedAt = parseNullableTime(purgedAt)
+		out = append(out, plan)
+	}
+	return out, rows.Err()
+}
+
+// MarkPurgeDryRunVerified persists the successful validation gate for the
+// exact approved digest. A changed or recreated plan cannot reuse it.
+func (s *SQLiteStore) MarkPurgeDryRunVerified(ctx context.Context, id, digest string, at time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE purge_plans SET dry_run_digest = ?, dry_run_verified_at = ?
+		WHERE id = ? AND state = ? AND approval_digest = ?`,
+		digest, formatTime(at), id, string(domain.PurgeApproved), digest)
+	if err != nil {
+		return fmt.Errorf("store: mark purge dry-run: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return fmt.Errorf("store: purge dry-run gate rejected")
+	}
+	return nil
 }
 
 // ApprovePurgePlan is deliberately single-plan and digest-bound.

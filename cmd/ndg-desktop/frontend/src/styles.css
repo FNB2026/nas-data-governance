@@ -103,6 +103,30 @@ body {
   padding: 0.15rem 0.55rem;
   border-radius: 999px;
   white-space: nowrap;
+  position: relative;
+}
+
+.header-scan-indicator::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
 }
 
 .version-badge {
@@ -1458,6 +1482,30 @@ button.secondary {
   .dup-split-right {
     max-height: none;
   }
+}
+
+.exec-confirmation {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 22rem;
+  margin: 0.5rem 0;
+}
+
+.exec-confirmation label {
+  font-weight: 600;
+}
+
+.exec-confirmation code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.audit-recovery-panel {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
 }
 
 @media (max-width: 600px) {

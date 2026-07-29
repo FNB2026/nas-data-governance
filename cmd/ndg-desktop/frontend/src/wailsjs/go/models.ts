@@ -257,6 +257,7 @@ export namespace domain {
 	}
 	export class OperationPlan {
 	    id: string;
+	    group_id?: string;
 	    task_id?: string;
 	    state: string;
 	    content_sha256: string;
@@ -274,6 +275,7 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.group_id = source["group_id"];
 	        this.task_id = source["task_id"];
 	        this.state = source["state"];
 	        this.content_sha256 = source["content_sha256"];
@@ -852,6 +854,7 @@ export namespace wails {
 	}
 	export class PlanDTO {
 	    id: string;
+	    group_id: string;
 	    task_id?: string;
 	    state: string;
 	    content_sha256: string;
@@ -868,6 +871,7 @@ export namespace wails {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.group_id = source["group_id"];
 	        this.task_id = source["task_id"];
 	        this.state = source["state"];
 	        this.content_sha256 = source["content_sha256"];
@@ -971,6 +975,7 @@ export namespace wails {
 	    digest: string;
 	    quarantine_root: string;
 	    dry_run: boolean;
+	    confirmation?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExecutePurgeRequest(source);
@@ -982,6 +987,7 @@ export namespace wails {
 	        this.digest = source["digest"];
 	        this.quarantine_root = source["quarantine_root"];
 	        this.dry_run = source["dry_run"];
+	        this.confirmation = source["confirmation"];
 	    }
 	}
 	export class ExecutePurgeResponse {
@@ -1426,8 +1432,10 @@ export namespace wails {
 	    expected_size: number;
 	    retain_until: string;
 	    approval_digest: string;
+	    confirmation_text: string;
 	    created_at: string;
 	    approved_at?: string;
+	    dry_run_verified_at?: string;
 	    purged_at?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1444,8 +1452,10 @@ export namespace wails {
 	        this.expected_size = source["expected_size"];
 	        this.retain_until = source["retain_until"];
 	        this.approval_digest = source["approval_digest"];
+	        this.confirmation_text = source["confirmation_text"];
 	        this.created_at = source["created_at"];
 	        this.approved_at = source["approved_at"];
+	        this.dry_run_verified_at = source["dry_run_verified_at"];
 	        this.purged_at = source["purged_at"];
 	    }
 	}
@@ -1540,6 +1550,9 @@ export namespace wails {
 	export class RecoveryStatusDTO {
 	    lock_active: boolean;
 	    executing_count: number;
+	    source_executing_count: number;
+	    restore_pending_count: number;
+	    purge_recoverable_count: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new RecoveryStatusDTO(source);
@@ -1549,6 +1562,9 @@ export namespace wails {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.lock_active = source["lock_active"];
 	        this.executing_count = source["executing_count"];
+	        this.source_executing_count = source["source_executing_count"];
+	        this.restore_pending_count = source["restore_pending_count"];
+	        this.purge_recoverable_count = source["purge_recoverable_count"];
 	    }
 	}
 	export class RestorePlanDTO {

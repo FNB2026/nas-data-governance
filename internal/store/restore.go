@@ -48,6 +48,36 @@ func (s *SQLiteStore) GetRestorePlan(ctx context.Context, id string) (domain.Res
 	return plan, nil
 }
 
+// ListRestorePlans returns durable restore plans so desktop workflows survive
+// navigation and application restarts.
+func (s *SQLiteStore) ListRestorePlans(ctx context.Context) ([]domain.RestorePlan, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, item_id, state, quarantine_path, restore_path, expected_sha256,
+		       expected_size, approval_digest, created_at, approved_at, restored_at
+		FROM restore_plans ORDER BY created_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list restore plans: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.RestorePlan, 0)
+	for rows.Next() {
+		var plan domain.RestorePlan
+		var state, createdAt string
+		var approvedAt, restoredAt sql.NullString
+		if err := rows.Scan(&plan.ID, &plan.ItemID, &state, &plan.QuarantinePath,
+			&plan.RestorePath, &plan.ExpectedSHA256, &plan.ExpectedSize,
+			&plan.ApprovalDigest, &createdAt, &approvedAt, &restoredAt); err != nil {
+			return nil, err
+		}
+		plan.State = domain.RestorePlanState(state)
+		plan.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		plan.ApprovedAt = parseNullableTime(approvedAt)
+		plan.RestoredAt = parseNullableTime(restoredAt)
+		out = append(out, plan)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) ApproveRestorePlan(ctx context.Context, id, digest string, at time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE restore_plans SET state = ?, approved_at = ?

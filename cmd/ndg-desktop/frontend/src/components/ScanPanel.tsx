@@ -24,8 +24,12 @@ export interface ScanPanelProps {
   jobs: wails.JobSummary[];
   jobsError: string | null;
   jobDetailLoading: boolean;
+  hasMoreJobs: boolean;
   // capability
   canScan: boolean;
+  // persistent filter state (from context)
+  stateFilter: string;
+  typeFilter: string;
   // handlers
   onScanRootChange: (v: string) => void;
   onScanStorageIdChange: (v: string) => void;
@@ -34,6 +38,10 @@ export interface ScanPanelProps {
   onStartScan: () => void;
   onCancelScan: () => void;
   onSelectJob: (jobId: string) => void;
+  onStateFilterChange: (v: string) => void;
+  onTypeFilterChange: (v: string) => void;
+  onLoadMoreJobs: () => void;
+  onRetryScan: () => void;
 }
 
 const STATE_FILTER_OPTIONS = [
@@ -68,7 +76,17 @@ interface ProgressDisplay {
 
 function computeProgress(stage: string, state: string, progress: wails.ScanJobProgress): ProgressDisplay {
   if (state === "COMPLETED") return { mode: "terminal", percent: 100 };
-  if (state === "FAILED" || state === "CANCELLED") return { mode: "terminal", percent: 0 };
+
+  // For FAILED/CANCELLED, show the last known progress rather than 0%.
+  if (state === "FAILED" || state === "CANCELLED") {
+    if (progress.discovered > 0 && progress.processed > 0) {
+      return {
+        mode: "terminal",
+        percent: Math.min(100, Math.round((progress.processed / progress.discovered) * 100)),
+      };
+    }
+    return { mode: "terminal", percent: 0 };
+  }
 
   if (DETERMINATE_STAGES.has(stage) && progress.discovered > 0) {
     return {
@@ -111,7 +129,10 @@ export default function ScanPanel({
   jobs,
   jobsError,
   jobDetailLoading,
+  hasMoreJobs,
   canScan,
+  stateFilter,
+  typeFilter,
   onScanRootChange,
   onScanStorageIdChange,
   onScanFullScanChange,
@@ -119,11 +140,11 @@ export default function ScanPanel({
   onStartScan,
   onCancelScan,
   onSelectJob,
+  onStateFilterChange,
+  onTypeFilterChange,
+  onLoadMoreJobs,
+  onRetryScan,
 }: ScanPanelProps) {
-  // Job history filters (internal state — purely presentational)
-  const [stateFilter, setStateFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-
   // Tick state to refresh duration display every second
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -154,8 +175,8 @@ export default function ScanPanel({
   const hasActiveFilter = stateFilter !== "" || typeFilter !== "";
 
   const clearFilters = () => {
-    setStateFilter("");
-    setTypeFilter("");
+    onStateFilterChange("");
+    onTypeFilterChange("");
   };
 
   const progressDisplay = scanProgress
@@ -294,6 +315,17 @@ export default function ScanPanel({
               {cancelling ? "取消中…" : "取消扫描"}
             </button>
           )}
+
+          {/* Retry button for failed/cancelled scans */}
+          {!scanActive && canScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
+            <button
+              className="btn-sm"
+              disabled={scanStarting}
+              onClick={onRetryScan}
+            >
+              {scanStarting ? "启动中…" : "重试扫描"}
+            </button>
+          )}
         </div>
       )}
 
@@ -317,7 +349,7 @@ export default function ScanPanel({
               状态
               <select
                 value={stateFilter}
-                onChange={(e) => setStateFilter(e.target.value)}
+                onChange={(e) => onStateFilterChange(e.target.value)}
               >
                 {STATE_FILTER_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -328,7 +360,7 @@ export default function ScanPanel({
               类型
               <select
                 value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
+                onChange={(e) => onTypeFilterChange(e.target.value)}
               >
                 <option value="">全部类型</option>
                 {jobTypes.map((t) => (
@@ -399,6 +431,15 @@ export default function ScanPanel({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Load more jobs */}
+        {hasMoreJobs && filteredJobs.length > 0 && (
+          <div className="load-more">
+            <button className="btn-sm secondary" onClick={() => void onLoadMoreJobs()}>
+              加载更多
+            </button>
           </div>
         )}
       </div>

@@ -12,7 +12,9 @@ import {
   CreateRestorePlan,
   ExecutePurge,
   ExecuteRestore,
+  ListPurgePlans,
   ListQuarantineItems,
+  ListRestorePlans,
   RecoverPurges,
   RecoverRestores,
   RecoverSourcePlans,
@@ -82,6 +84,7 @@ export default function ExecutionCenterPage() {
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const [purgeRoot, setPurgeRoot] = useState("");
   const [purging, setPurging] = useState(false);
+  const [purgeConfirmations, setPurgeConfirmations] = useState<Record<string, string>>({});
 
   // Recovery
   const [recoveryStatus, setRecoveryStatus] = useState<wails.RecoveryStatusDTO | null>(null);
@@ -118,12 +121,24 @@ export default function ExecutionCenterPage() {
     }
   }, []);
 
+  const loadLifecyclePlans = useCallback(async () => {
+    if (!hasWailsRuntime()) return;
+    try {
+      const [restores, purges] = await Promise.all([ListRestorePlans(), ListPurgePlans()]);
+      setRestorePlans(restores || []);
+      setPurgePlans(purges || []);
+    } catch (e: unknown) {
+      setPurgeError(errorText(e));
+    }
+  }, []);
+
   useEffect(() => {
     if (capabilities.project_open) {
       void loadQuarantine();
       void loadRecoveryStatus();
+      void loadLifecyclePlans();
     }
-  }, [capabilities.project_open, dataRevision, loadQuarantine, loadRecoveryStatus]);
+  }, [capabilities.project_open, dataRevision, loadLifecyclePlans, loadQuarantine, loadRecoveryStatus]);
 
   // ---- Quarantine actions ----
 
@@ -207,7 +222,7 @@ export default function ExecutionCenterPage() {
     }
   };
 
-  const handleExecutePurge = async (planId: string, digest: string, dryRun: boolean) => {
+  const handleExecutePurge = async (planId: string, digest: string, dryRun: boolean, confirmation = "") => {
     setPurging(true);
     try {
       const result = await ExecutePurge({
@@ -215,12 +230,14 @@ export default function ExecutionCenterPage() {
         digest,
         quarantine_root: purgeRoot.trim(),
         dry_run: dryRun,
+        confirmation,
       } as wails.ExecutePurgeRequest);
       if (result.status === "ok") {
         pushToast("success", dryRun ? "校验通过" : "清理执行成功", `${planId}: ${result.final_state}`);
       } else {
         pushToast("error", dryRun ? "校验失败" : "清理执行失败", result.error || result.error_type || planId);
       }
+      void loadQuarantine();
     } catch (e: unknown) {
       pushToast("error", "执行清理失败", errorText(e));
     } finally {
@@ -537,13 +554,34 @@ export default function ExecutionCenterPage() {
                               >
                                 试运行
                               </button>
+                              <div className="exec-confirmation">
+                                <label htmlFor={`purge-confirm-${plan.id}`}>逐字输入确认语句</label>
+                                <code>{plan.confirmation_text}</code>
+                                <input
+                                  id={`purge-confirm-${plan.id}`}
+                                  type="text"
+                                  value={purgeConfirmations[plan.id] || ""}
+                                  onChange={(e) => setPurgeConfirmations((prev) => ({ ...prev, [plan.id]: e.target.value }))}
+                                  placeholder="输入上方确认语句"
+                                />
+                              </div>
                               <button
                                 className="btn-sm"
-                                onClick={() => void handleExecutePurge(plan.id, plan.approval_digest, false)}
-                                disabled={purging}
+                                onClick={() => void handleExecutePurge(
+                                  plan.id,
+                                  plan.approval_digest,
+                                  false,
+                                  purgeConfirmations[plan.id] || "",
+                                )}
+                                disabled={
+                                  purging ||
+                                  !plan.dry_run_verified_at ||
+                                  purgeConfirmations[plan.id] !== plan.confirmation_text
+                                }
                               >
                                 执行
                               </button>
+                              {!plan.dry_run_verified_at && <span className="muted">请先完成试运行</span>}
                             </>
                           )}
                         </div>

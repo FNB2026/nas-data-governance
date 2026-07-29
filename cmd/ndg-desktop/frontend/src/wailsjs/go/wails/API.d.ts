@@ -55,9 +55,13 @@ export function ListJournalEntries(arg1:string):Promise<Array<wails.JournalEntry
 
 export function ListOperationLogs(arg1:string):Promise<Array<wails.OperationLogDTO>>;
 
+export function ListPurgePlans():Promise<Array<wails.PurgePlanDTO>>;
+
 export function ListQuarantineItems(arg1:string):Promise<Array<wails.QuarantineItemDTO>>;
 
 export function ListRecentJobs(arg1:number):Promise<Array<wails.JobSummary>>;
+
+export function ListRestorePlans():Promise<Array<wails.RestorePlanDTO>>;
 
 export function ListReviewPlans():Promise<Array<wails.PlanDTO>>;
 

@@ -162,6 +162,10 @@ func TestQuarantineService_CreateRestorePlan(t *testing.T) {
 	if plan.QuarantinePath != item.QuarantinePath {
 		t.Fatalf("plan quarantine path mismatch: %s != %s", plan.QuarantinePath, item.QuarantinePath)
 	}
+	listed, err := svc.ListRestorePlans(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].ID != plan.ID {
+		t.Fatalf("durable restore plan was not reloadable: %#v, %v", listed, err)
+	}
 }
 
 func TestQuarantineService_CreateRestorePlan_EmptyItemID(t *testing.T) {
@@ -573,6 +577,14 @@ func TestPurgeService_ExecutePurge_DryRun(t *testing.T) {
 	if _, err := os.Stat(item.QuarantinePath); err != nil {
 		t.Fatalf("quarantine file should exist after dry-run: %v", err)
 	}
+	persisted, err := st.GetPurgePlan(context.Background(), plans[0].ID)
+	if err != nil || persisted.DryRunVerifiedAt == nil || persisted.DryRunDigest != plans[0].ApprovalDigest {
+		t.Fatalf("dry-run gate was not persisted: %#v, %v", persisted, err)
+	}
+	listed, err := svc.ListPlans(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].DryRunVerifiedAt == nil {
+		t.Fatalf("durable purge plan was not reloadable: %#v, %v", listed, err)
+	}
 }
 
 func TestPurgeService_ExecutePurge_RealExecution(t *testing.T) {
@@ -593,11 +605,20 @@ func TestPurgeService_ExecutePurge_RealExecution(t *testing.T) {
 	if err := svc.ApprovePlan(context.Background(), plans[0].ID, plans[0].ApprovalDigest); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.ExecutePurge(context.Background(), PurgeExecuteInput{
+		PlanID:         plans[0].ID,
+		Digest:         plans[0].ApprovalDigest,
+		QuarantineRoot: qRoot,
+		DryRun:         true,
+	}); err != nil {
+		t.Fatalf("required dry-run: %v", err)
+	}
 	result, err := svc.ExecutePurge(context.Background(), PurgeExecuteInput{
 		PlanID:         plans[0].ID,
 		Digest:         plans[0].ApprovalDigest,
 		QuarantineRoot: qRoot,
 		DryRun:         false,
+		Confirmation:   PurgeConfirmationText(plans[0]),
 	})
 	if err != nil {
 		t.Fatalf("real execute: %v", err)
@@ -608,6 +629,40 @@ func TestPurgeService_ExecutePurge_RealExecution(t *testing.T) {
 	// Quarantine file should be permanently deleted after purge.
 	if _, err := os.Stat(item.QuarantinePath); !os.IsNotExist(err) {
 		t.Fatalf("quarantine file should be deleted after purge: %v", err)
+	}
+}
+
+func TestPurgeService_ExecutePurge_RequiresDryRunAndConfirmation(t *testing.T) {
+	tmp := t.TempDir()
+	sourceRoot := filepath.Join(tmp, "source")
+	qRoot := filepath.Join(tmp, "quarantine")
+	os.MkdirAll(sourceRoot, 0o700)
+	os.MkdirAll(qRoot, 0o700)
+	st := openTestStore(t)
+	now := time.Now().UTC()
+	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
+		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	svc := NewPurgeService(st)
+	plans, err := svc.CreatePlans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := plans[0]
+	if err := svc.ApprovePlan(context.Background(), plan.ID, plan.ApprovalDigest); err != nil {
+		t.Fatal(err)
+	}
+	base := PurgeExecuteInput{PlanID: plan.ID, Digest: plan.ApprovalDigest, QuarantineRoot: qRoot}
+	if _, err := svc.ExecutePurge(context.Background(), base); err == nil {
+		t.Fatal("real purge must require a successful dry-run")
+	}
+	dry := base
+	dry.DryRun = true
+	if _, err := svc.ExecutePurge(context.Background(), dry); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	base.Confirmation = "wrong confirmation"
+	if _, err := svc.ExecutePurge(context.Background(), base); err == nil {
+		t.Fatal("real purge must reject an incorrect confirmation")
 	}
 }
 

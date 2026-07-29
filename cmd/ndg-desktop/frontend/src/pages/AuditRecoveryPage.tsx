@@ -8,6 +8,9 @@ import {
   CheckRecoveryLock,
   ListJournalEntries,
   ListOperationLogs,
+  RecoverPurges,
+  RecoverRestores,
+  RecoverSourcePlans,
 } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
 
@@ -36,7 +39,7 @@ const LOG_EVENT_LABELS: Record<string, string> = {
 // ---- Component ----
 
 export default function AuditRecoveryPage() {
-  const { capabilities, dataRevision } = useProject();
+  const { capabilities, dataRevision, isReadWrite, pushToast, refreshRecoveryLock } = useProject();
 
   // Plan filter
   const [planFilter, setPlanFilter] = useState<string>("");
@@ -53,6 +56,10 @@ export default function AuditRecoveryPage() {
 
   // Recovery status
   const [recoveryStatus, setRecoveryStatus] = useState<wails.RecoveryStatusDTO | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [quarantineRoot, setQuarantineRoot] = useState("");
+  const [sourceRoots, setSourceRoots] = useState("");
+  const [recoveryResult, setRecoveryResult] = useState("");
 
   // ---- Data loading ----
 
@@ -100,6 +107,61 @@ export default function AuditRecoveryPage() {
     await Promise.all([loadLogs(), loadJournal(), loadRecoveryStatus()]);
   }, [loadLogs, loadJournal, loadRecoveryStatus]);
 
+  const finishRecovery = useCallback(async (summary: string) => {
+    setRecoveryResult(summary);
+    const status = await refreshRecoveryLock();
+    setRecoveryStatus(status);
+    await Promise.all([loadLogs(), loadJournal()]);
+  }, [loadJournal, loadLogs, refreshRecoveryLock]);
+
+  const recoverSourcePlans = async () => {
+    setRecoveryLoading(true);
+    try {
+      const results = await RecoverSourcePlans();
+      await finishRecovery(results.length === 0
+        ? "普通执行：无需恢复"
+        : results.map((r) => `${r.plan_id}: ${r.action}`).join("\n"));
+      pushToast("success", "普通执行恢复完成", `处理 ${results.length} 个计划`);
+    } catch (e: unknown) {
+      pushToast("error", "普通执行恢复失败", errorText(e));
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const recoverRestores = async () => {
+    setRecoveryLoading(true);
+    try {
+      const results = await RecoverRestores({
+        quarantine_root: quarantineRoot.trim(),
+        source_roots: sourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
+      } as wails.RecoverRestoresRequest);
+      await finishRecovery(results.length === 0
+        ? "隔离还原：无需恢复"
+        : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
+      pushToast("success", "隔离还原恢复完成", `处理 ${results.length} 条记录`);
+    } catch (e: unknown) {
+      pushToast("error", "隔离还原恢复失败", errorText(e));
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const recoverPurges = async () => {
+    setRecoveryLoading(true);
+    try {
+      const results = await RecoverPurges(quarantineRoot.trim());
+      await finishRecovery(results.length === 0
+        ? "永久清理：无需恢复"
+        : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
+      pushToast("success", "永久清理恢复完成", `处理 ${results.length} 条记录`);
+    } catch (e: unknown) {
+      pushToast("error", "永久清理恢复失败", errorText(e));
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (capabilities.project_open) {
       void loadAll();
@@ -135,8 +197,43 @@ export default function AuditRecoveryPage() {
       {/* Recovery lock banner */}
       {recoveryStatus?.lock_active && (
         <div className="exec-lock-banner" role="alert">
-          <strong>恢复锁激活</strong> — {recoveryStatus.executing_count} 个计划卡在执行状态，请前往「执行中心」处理
+          <strong>恢复锁激活</strong> — 共 {recoveryStatus.executing_count} 条未完成写入，请在本页完成恢复
         </div>
+      )}
+
+      {recoveryStatus?.lock_active && (
+        <section className="audit-recovery-panel" aria-label="恢复操作">
+          <h3>恢复操作</h3>
+          <p className="muted">
+            共 {recoveryStatus.executing_count} 条未完成写入
+          </p>
+          {isReadWrite ? (
+            <>
+              <div className="exec-root-inputs">
+                <input
+                  type="text"
+                  placeholder="隔离根目录"
+                  value={quarantineRoot}
+                  onChange={(e) => setQuarantineRoot(e.target.value)}
+                />
+                <textarea
+                  placeholder="源根目录（每行一个）"
+                  value={sourceRoots}
+                  onChange={(e) => setSourceRoots(e.target.value)}
+                  rows={2}
+                />
+              </div>
+              <div className="exec-recovery-buttons">
+                <button className="btn-sm" onClick={() => void recoverSourcePlans()} disabled={recoveryLoading || recoveryStatus.executing_count === 0}>恢复普通执行</button>
+                <button className="btn-sm" onClick={() => void recoverRestores()} disabled={recoveryLoading || recoveryStatus.executing_count === 0 || !quarantineRoot.trim() || !sourceRoots.trim()}>恢复隔离还原</button>
+                <button className="btn-sm" onClick={() => void recoverPurges()} disabled={recoveryLoading || recoveryStatus.executing_count === 0 || !quarantineRoot.trim()}>恢复永久清理</button>
+              </div>
+              {recoveryResult && <pre className="exec-recovery-log">{recoveryResult}</pre>}
+            </>
+          ) : (
+            <p className="muted">请以读写模式重新打开项目后执行恢复。</p>
+          )}
+        </section>
       )}
 
       {/* Filter toolbar */}

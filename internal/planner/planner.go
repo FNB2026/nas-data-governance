@@ -32,7 +32,7 @@ func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan
 	for i, file := range group.Files {
 		contexts[i] = dircontext.Classify(file.Path)
 	}
-	plan := domain.OperationPlan{ID: planID(group), State: domain.PlanDraft, ContentSHA256: group.SHA256, Size: group.Size, Risk: domain.RiskHigh}
+	plan := domain.OperationPlan{ID: planID(group), GroupID: group.GroupID, State: domain.PlanDraft, ContentSHA256: group.SHA256, Size: group.Size, Risk: domain.RiskHigh}
 	if len(group.SHA256) != 64 {
 		plan.Risk = domain.RiskCritical
 		plan.Evidence = []string{"重复组缺少有效的完整 SHA-256", "无法证明字节级完全重复，禁止生成清理建议"}
@@ -89,6 +89,9 @@ func anyDependencyProtected(files []domain.FileInstance) bool {
 }
 
 func planID(group domain.DuplicateGroup) string {
+	if len(group.GroupID) >= 12 {
+		return "dup-" + group.GroupID[:12]
+	}
 	if len(group.SHA256) >= 12 {
 		return "dup-" + group.SHA256[:12]
 	}

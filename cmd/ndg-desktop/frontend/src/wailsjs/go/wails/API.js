@@ -102,12 +102,20 @@ export function ListOperationLogs(arg1) {
   return window['go']['wails']['API']['ListOperationLogs'](arg1);
 }
 
+export function ListPurgePlans() {
+  return window['go']['wails']['API']['ListPurgePlans']();
+}
+
 export function ListQuarantineItems(arg1) {
   return window['go']['wails']['API']['ListQuarantineItems'](arg1);
 }
 
 export function ListRecentJobs(arg1) {
   return window['go']['wails']['API']['ListRecentJobs'](arg1);
+}
+
+export function ListRestorePlans() {
+  return window['go']['wails']['API']['ListRestorePlans']();
 }
 
 export function ListReviewPlans() {

@@ -191,6 +191,16 @@ func TestDuplicateGroupsGroupIDIsStableAndNonEmpty(t *testing.T) {
 	}
 }
 
+func TestDuplicateGroupsDoNotCrossStorageBoundaries(t *testing.T) {
+	files := []domain.FileInstance{
+		{StorageID: "s1", Path: "/s1/a", Size: 10, ContentSHA256: "same"},
+		{StorageID: "s2", Path: "/s2/a", Size: 10, ContentSHA256: "same"},
+	}
+	if groups := DuplicateGroups(files); len(groups) != 0 {
+		t.Fatalf("cross-storage copies must not form one duplicate group: %#v", groups)
+	}
+}
+
 func TestDuplicateGroupsDeterministicSortOrder(t *testing.T) {
 	// Two groups with different reclaimable bytes.
 	// The group with more reclaimable bytes should come first.

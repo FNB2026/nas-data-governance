@@ -54,6 +54,14 @@ interface ProjectContextValue {
   // Jobs (shared)
   jobs: wails.JobSummary[];
   jobsError: string | null;
+  hasMoreJobs: boolean;
+  loadMoreJobs: () => Promise<void>;
+
+  // Scan filter persistence (survives page navigation)
+  scanFilterState: string;
+  scanFilterType: string;
+  setScanFilterState: (v: string) => void;
+  setScanFilterType: (v: string) => void;
 
   // Toast notifications
   toasts: ToastItem[];
@@ -80,6 +88,7 @@ interface ProjectContextValue {
   }) => Promise<void>;
   cancelScan: () => Promise<void>;
   loadJobs: () => Promise<void>;
+  refreshRecoveryLock: () => Promise<wails.RecoveryStatusDTO | null>;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -106,6 +115,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Jobs
   const [jobs, setJobs] = useState<wails.JobSummary[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
+  const jobsLimitRef = useRef(20);
+  const [hasMoreJobs, setHasMoreJobs] = useState(false);
+
+  // Scan filter persistence (survives page navigation)
+  const [scanFilterState, setScanFilterState] = useState("");
+  const [scanFilterType, setScanFilterType] = useState("");
 
   // Toast
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -156,8 +171,24 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const loadJobs = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const list = await ListRecentJobs(20);
+      const limit = jobsLimitRef.current;
+      const list = await ListRecentJobs(limit);
       setJobs(list || []);
+      setHasMoreJobs((list || []).length >= limit);
+      setJobsError(null);
+    } catch (e: unknown) {
+      setJobsError(errorText(e));
+    }
+  }, []);
+
+  const loadMoreJobs = useCallback(async () => {
+    if (!hasWailsRuntime()) return;
+    const nextLimit = jobsLimitRef.current + 20;
+    jobsLimitRef.current = nextLimit;
+    try {
+      const list = await ListRecentJobs(nextLimit);
+      setJobs(list || []);
+      setHasMoreJobs((list || []).length >= nextLimit);
       setJobsError(null);
     } catch (e: unknown) {
       setJobsError(errorText(e));
@@ -239,6 +270,17 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // ---- Project actions ----
 
+  const refreshRecoveryLock = useCallback(async () => {
+    if (!hasWailsRuntime()) return null;
+    try {
+      const status = await CheckRecoveryLock();
+      setRecoveryLockActive(status.lock_active);
+      return status;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const openProject = useCallback(async (readWrite: boolean) => {
     if (!projectPath.trim()) {
       setError("请先选择或输入项目数据库路径");
@@ -295,6 +337,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setCancelling(false);
       setJobs([]);
       setJobsError(null);
+      jobsLimitRef.current = 20;
+      setHasMoreJobs(false);
+      setScanFilterState("");
+      setScanFilterType("");
       setRecoveryLockActive(false);
       setError(null);
     } catch (e: unknown) {
@@ -379,6 +425,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     cancelling,
     jobs,
     jobsError,
+    hasMoreJobs,
+    loadMoreJobs,
+    scanFilterState,
+    scanFilterType,
+    setScanFilterState,
+    setScanFilterType,
     toasts,
     pushToast,
     dismissToast,
@@ -391,6 +443,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     startScan,
     cancelScan,
     loadJobs,
+    refreshRecoveryLock,
   };
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

@@ -86,17 +86,19 @@ const (
 // PurgePlan is a snapshot-bound, single-item permanent deletion proposal.
 // ApprovalDigest must be presented both at approval and execution time.
 type PurgePlan struct {
-	ID             string         `json:"id"`
-	ItemID         string         `json:"item_id"`
-	State          PurgePlanState `json:"state"`
-	ExpectedPath   string         `json:"expected_path"`
-	ExpectedSHA256 string         `json:"expected_sha256"`
-	ExpectedSize   int64          `json:"expected_size"`
-	RetainUntil    time.Time      `json:"retain_until"`
-	ApprovalDigest string         `json:"approval_digest"`
-	CreatedAt      time.Time      `json:"created_at"`
-	ApprovedAt     *time.Time     `json:"approved_at,omitempty"`
-	PurgedAt       *time.Time     `json:"purged_at,omitempty"`
+	ID               string         `json:"id"`
+	ItemID           string         `json:"item_id"`
+	State            PurgePlanState `json:"state"`
+	ExpectedPath     string         `json:"expected_path"`
+	ExpectedSHA256   string         `json:"expected_sha256"`
+	ExpectedSize     int64          `json:"expected_size"`
+	RetainUntil      time.Time      `json:"retain_until"`
+	ApprovalDigest   string         `json:"approval_digest"`
+	CreatedAt        time.Time      `json:"created_at"`
+	ApprovedAt       *time.Time     `json:"approved_at,omitempty"`
+	DryRunDigest     string         `json:"dry_run_digest,omitempty"`
+	DryRunVerifiedAt *time.Time     `json:"dry_run_verified_at,omitempty"`
+	PurgedAt         *time.Time     `json:"purged_at,omitempty"`
 }
 
 // PurgeJournalEntry records the irreversible executor's crash boundary.

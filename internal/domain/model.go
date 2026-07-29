@@ -240,6 +240,7 @@ type PlannedAction struct {
 
 type OperationPlan struct {
 	ID            string          `json:"id"`
+	GroupID       string          `json:"group_id,omitempty"`
 	TaskID        string          `json:"task_id,omitempty"`
 	State         PlanState       `json:"state"`
 	ContentSHA256 string          `json:"content_sha256"`

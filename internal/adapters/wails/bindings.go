@@ -894,6 +894,24 @@ func (a *API) ListQuarantineItems(status string) ([]QuarantineItemDTO, error) {
 	return out, nil
 }
 
+// ListRestorePlans returns durable restore plans for restart-safe desktop use.
+func (a *API) ListRestorePlans() ([]RestorePlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.quarantineSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	plans, err := a.quarantineSvc.ListRestorePlans(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: list restore plans: %w", err)
+	}
+	out := make([]RestorePlanDTO, len(plans))
+	for i, plan := range plans {
+		out[i] = mapRestorePlan(plan)
+	}
+	return out, nil
+}
+
 // CreateRestorePlan builds a DRAFT restore plan for a single quarantine item.
 // The plan is persisted to the database. Requires read-write mode.
 func (a *API) CreateRestorePlan(itemID string) (RestorePlanDTO, error) {
@@ -1005,6 +1023,24 @@ func (a *API) CreatePurgePlans() ([]PurgePlanDTO, error) {
 	return out, nil
 }
 
+// ListPurgePlans returns durable purge plans for restart-safe desktop use.
+func (a *API) ListPurgePlans() ([]PurgePlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.purgeSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+	plans, err := a.purgeSvc.ListPlans(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("wails: list purge plans: %w", err)
+	}
+	out := make([]PurgePlanDTO, len(plans))
+	for i, plan := range plans {
+		out[i] = mapPurgePlan(plan)
+	}
+	return out, nil
+}
+
 // ApprovePurgePlan transitions a purge plan from DRAFT to APPROVED using
 // the plan's digest. Requires read-write mode.
 func (a *API) ApprovePurgePlan(planID, digest string) error {
@@ -1056,6 +1092,7 @@ func (a *API) ExecutePurge(req ExecutePurgeRequest) (ExecutePurgeResponse, error
 		Digest:         req.Digest,
 		QuarantineRoot: req.QuarantineRoot,
 		DryRun:         req.DryRun,
+		Confirmation:   req.Confirmation,
 	})
 	if err != nil {
 		return ExecutePurgeResponse{}, fmt.Errorf("wails: execute purge: %w", err)
@@ -1079,13 +1116,35 @@ func (a *API) CheckRecoveryLock() (RecoveryStatusDTO, error) {
 	if a.store == nil {
 		return RecoveryStatusDTO{}, ErrNoProjectOpen
 	}
-	ids, err := a.store.ListExecutingPlans(context.Background())
+	return checkRecoveryLock(context.Background(), a.store)
+}
+
+type recoveryLockStore interface {
+	ListExecutingPlans(context.Context) ([]string, error)
+	ListPendingRestores(context.Context) ([]domain.RestoreJournalEntry, error)
+	ListRecoverablePurges(context.Context) ([]domain.PurgeJournalEntry, error)
+}
+
+func checkRecoveryLock(ctx context.Context, st recoveryLockStore) (RecoveryStatusDTO, error) {
+	ids, err := st.ListExecutingPlans(ctx)
 	if err != nil {
 		return RecoveryStatusDTO{}, fmt.Errorf("wails: check recovery lock: %w", err)
 	}
+	restores, err := st.ListPendingRestores(ctx)
+	if err != nil {
+		return RecoveryStatusDTO{}, fmt.Errorf("wails: check restore recovery lock: %w", err)
+	}
+	purges, err := st.ListRecoverablePurges(ctx)
+	if err != nil {
+		return RecoveryStatusDTO{}, fmt.Errorf("wails: check purge recovery lock: %w", err)
+	}
+	total := len(ids) + len(restores) + len(purges)
 	return RecoveryStatusDTO{
-		LockActive:     len(ids) > 0,
-		ExecutingCount: len(ids),
+		LockActive:            total > 0,
+		ExecutingCount:        total,
+		SourceExecutingCount:  len(ids),
+		RestorePendingCount:   len(restores),
+		PurgeRecoverableCount: len(purges),
 	}, nil
 }
 

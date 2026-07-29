@@ -21,25 +21,33 @@ import (
 //   - When physical identity is unreliable (e.g., SMB without stable
 //     inodes), each path is treated as a separate physical copy.
 func DuplicateGroups(files []domain.FileInstance) []domain.DuplicateGroup {
-	byHash := map[string][]domain.FileInstance{}
+	type storageHash struct {
+		storageID string
+		hash      string
+	}
+	byHash := map[storageHash][]domain.FileInstance{}
 	for _, f := range files {
 		if f.ContentSHA256 != "" {
-			byHash[f.ContentSHA256] = append(byHash[f.ContentSHA256], f)
+			key := storageHash{storageID: f.StorageID, hash: f.ContentSHA256}
+			byHash[key] = append(byHash[key], f)
 		}
 	}
 	groups := make([]domain.DuplicateGroup, 0)
-	for hash, members := range byHash {
+	for key, members := range byHash {
 		if len(members) < 2 {
 			continue
 		}
-		groups = append(groups, buildGroup(hash, members))
+		groups = append(groups, buildGroup(key.hash, members))
 	}
 	// Deterministic sort: reclaimable bytes DESC, then SHA256 ASC.
 	sort.Slice(groups, func(i, j int) bool {
 		if groups[i].PhysicalReclaimableBytes != groups[j].PhysicalReclaimableBytes {
 			return groups[i].PhysicalReclaimableBytes > groups[j].PhysicalReclaimableBytes
 		}
-		return groups[i].SHA256 < groups[j].SHA256
+		if groups[i].SHA256 != groups[j].SHA256 {
+			return groups[i].SHA256 < groups[j].SHA256
+		}
+		return groups[i].GroupID < groups[j].GroupID
 	})
 	return groups
 }

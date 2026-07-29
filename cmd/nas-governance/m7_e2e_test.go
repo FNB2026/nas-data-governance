@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
 	"github.com/FNB2026/nas-data-governance/internal/store"
@@ -166,6 +167,7 @@ func TestM7RestoreAndPermanentPurgeCLI(t *testing.T) {
 	if err := runPurgeExecute([]string{
 		"--db", dbPath, "--plan-id", purgePlan.ID, "--digest", purgePlan.ApprovalDigest,
 		"--quarantine", quarantineRoot,
+		"--confirm", app.PurgeConfirmationText(purgePlan),
 		"--out", filepath.Join(tmp, "purge-audit.json"),
 	}); err != nil {
 		t.Fatal(err)

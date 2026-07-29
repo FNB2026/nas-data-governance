@@ -180,16 +180,16 @@ export default function GovernanceReviewPage() {
     setSavingDecision(true);
     try {
       const result = await SaveGroupDecision({
-        group_id: selectedPlan.id,
+        group_id: selectedPlan.group_id,
         decision_type: decisionType,
         reason: decisionReason.trim(),
       } as wails.SaveDecisionRequest);
       setDecisionsMap((prev) => {
         const next = new Map(prev);
-        next.set(selectedPlan.id, result);
+        next.set(selectedPlan.group_id, result);
         return next;
       });
-      pushToast("success", "决策已保存", `${selectedPlan.id}: ${decisionLabel(decisionType)}`);
+      pushToast("success", "决策已保存", `${selectedPlan.group_id}: ${decisionLabel(decisionType)}`);
     } catch (e: unknown) {
       pushToast("error", "保存决策失败", errorText(e));
     } finally {
@@ -221,7 +221,8 @@ export default function GovernanceReviewPage() {
   const handleSelectPlan = async (planId: string) => {
     setSelectedPlanId(planId);
     // Pre-fill form from existing decision if available
-    const existing = decisionsMap.get(planId);
+    const plan = displayPlans.find((item) => item.id === planId);
+    const existing = plan ? decisionsMap.get(plan.group_id) : undefined;
     if (existing) {
       setDecisionType(existing.decision_type);
       setDecisionReason(existing.reason || "");
@@ -336,7 +337,7 @@ export default function GovernanceReviewPage() {
                 </div>
               )}
               {filteredPlans.map((plan) => {
-                const decision = decisionsMap.get(plan.id);
+                const decision = decisionsMap.get(plan.group_id);
                 return (
                   <div
                     key={plan.id}
@@ -444,15 +445,15 @@ export default function GovernanceReviewPage() {
               </div>
 
               {/* Existing decision */}
-              {decisionsMap.get(selectedPlan.id) && (
+              {decisionsMap.get(selectedPlan.group_id) && (
                 <div className="gov-section">
                   <h4>已有决策</h4>
                   <div className="gov-existing-decision">
                     <span className="gov-decision-tag gov-decision-tag--large">
-                      {decisionLabel(decisionsMap.get(selectedPlan.id)!.decision_type)}
+                      {decisionLabel(decisionsMap.get(selectedPlan.group_id)!.decision_type)}
                     </span>
-                    {decisionsMap.get(selectedPlan.id)!.reason && (
-                      <p className="muted">{decisionsMap.get(selectedPlan.id)!.reason}</p>
+                    {decisionsMap.get(selectedPlan.group_id)!.reason && (
+                      <p className="muted">{decisionsMap.get(selectedPlan.group_id)!.reason}</p>
                     )}
                   </div>
                 </div>

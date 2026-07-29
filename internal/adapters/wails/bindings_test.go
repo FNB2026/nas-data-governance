@@ -11,6 +11,45 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
+type recoveryLockFixture struct {
+	source   []string
+	restores []domain.RestoreJournalEntry
+	purges   []domain.PurgeJournalEntry
+}
+
+func (f recoveryLockFixture) ListExecutingPlans(context.Context) ([]string, error) {
+	return f.source, nil
+}
+func (f recoveryLockFixture) ListPendingRestores(context.Context) ([]domain.RestoreJournalEntry, error) {
+	return f.restores, nil
+}
+func (f recoveryLockFixture) ListRecoverablePurges(context.Context) ([]domain.PurgeJournalEntry, error) {
+	return f.purges, nil
+}
+
+func TestCheckRecoveryLockIncludesAllWriteJournals(t *testing.T) {
+	status, err := checkRecoveryLock(context.Background(), recoveryLockFixture{
+		source:   []string{"source-1"},
+		restores: []domain.RestoreJournalEntry{{PlanID: "restore-1"}},
+		purges:   []domain.PurgeJournalEntry{{PlanID: "purge-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.LockActive || status.ExecutingCount != 3 ||
+		status.SourceExecutingCount != 1 || status.RestorePendingCount != 1 ||
+		status.PurgeRecoverableCount != 1 {
+		t.Fatalf("unexpected recovery status: %#v", status)
+	}
+}
+
+func TestMapPlanUsesStableGroupID(t *testing.T) {
+	dto := mapPlan(domain.OperationPlan{ID: "plan-1", GroupID: "group-stable"})
+	if dto.GroupID != "group-stable" {
+		t.Fatalf("group id = %q", dto.GroupID)
+	}
+}
+
 func createProjectDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "project.db")

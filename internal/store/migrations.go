@@ -47,6 +47,14 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("store: migration 4 alter file_instances: %w", err)
 	}
+	// Migration 011: bind a successful purge dry-run to the approved plan
+	// digest. Real permanent deletion is rejected until these fields are set.
+	if err := addColumnsIfMissing(ctx, conn, "purge_plans", []columnDef{
+		{"dry_run_digest", "TEXT"},
+		{"dry_run_verified_at", "TEXT"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 11 alter purge_plans: %w", err)
+	}
 	// Migration 010: persist filesystem link_count (nlink) captured at
 	// scan time so the desktop UI can display hardlink evidence per file.
 	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{

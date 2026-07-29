@@ -1,7 +1,7 @@
 // Scan jobs page: new scan form, active progress, job history, job detail.
 // Scan form state is page-local; scan status and polling are global (context).
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import ScanPanel from "../components/ScanPanel";
 import JobDetail from "../components/JobDetail";
 import { useProject } from "../state/ProjectContext";
@@ -16,6 +16,12 @@ export default function ScanJobsPage() {
     cancelling,
     jobs,
     jobsError,
+    hasMoreJobs,
+    loadMoreJobs,
+    scanFilterState,
+    scanFilterType,
+    setScanFilterState,
+    setScanFilterType,
     startScan,
     cancelScan,
     capabilities,
@@ -28,6 +34,9 @@ export default function ScanJobsPage() {
   const [scanWorkers, setScanWorkers] = useState("");
   const [scanStarting, setScanStarting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+
+  // Last scan params for retry
+  const lastScanParamsRef = useRef<{ root: string; storageId: string; fullScan: boolean; workers?: number } | null>(null);
 
   // Job detail (page-local)
   const [selectedJob, setSelectedJob] = useState<wails.JobDetailResponse | null>(null);
@@ -45,12 +54,28 @@ export default function ScanJobsPage() {
     setScanError(null);
     try {
       const workersNum = scanWorkers.trim() ? parseInt(scanWorkers, 10) : undefined;
-      await startScan({
+      const params = {
         root: scanRoot.trim(),
         storageId: scanStorageId.trim(),
         fullScan: scanFullScan,
         workers: Number.isFinite(workersNum) && workersNum! > 0 ? workersNum : undefined,
-      });
+      };
+      lastScanParamsRef.current = params;
+      await startScan(params);
+    } catch (e: unknown) {
+      setScanError(errorText(e));
+    } finally {
+      setScanStarting(false);
+    }
+  };
+
+  const handleRetryScan = async () => {
+    const params = lastScanParamsRef.current;
+    if (!params) return;
+    setScanStarting(true);
+    setScanError(null);
+    try {
+      await startScan(params);
     } catch (e: unknown) {
       setScanError(errorText(e));
     } finally {
@@ -98,7 +123,10 @@ export default function ScanJobsPage() {
         jobs={jobs}
         jobsError={jobsError}
         jobDetailLoading={jobDetailLoading}
+        hasMoreJobs={hasMoreJobs}
         canScan={capabilities.can_scan}
+        stateFilter={scanFilterState}
+        typeFilter={scanFilterType}
         onScanRootChange={setScanRoot}
         onScanStorageIdChange={setScanStorageId}
         onScanFullScanChange={setScanFullScan}
@@ -106,6 +134,10 @@ export default function ScanJobsPage() {
         onStartScan={() => void handleStartScan()}
         onCancelScan={() => void cancelScan()}
         onSelectJob={(jobId) => void handleSelectJob(jobId)}
+        onStateFilterChange={setScanFilterState}
+        onTypeFilterChange={setScanFilterType}
+        onLoadMoreJobs={() => void loadMoreJobs()}
+        onRetryScan={() => void handleRetryScan()}
       />
 
       <JobDetail
