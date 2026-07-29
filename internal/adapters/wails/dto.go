@@ -529,6 +529,12 @@ type RecoveryStatusDTO struct {
 	ExecutingCount int  `json:"executing_count"`
 }
 
+// RecoverRestoresRequest is the input DTO for RecoverRestores.
+type RecoverRestoresRequest struct {
+	QuarantineRoot string   `json:"quarantine_root"`
+	SourceRoots    []string `json:"source_roots"`
+}
+
 // RecoveryResultDTO is the DTO for a single source-execution recovery outcome.
 type RecoveryResultDTO struct {
 	PlanID     string   `json:"plan_id"`

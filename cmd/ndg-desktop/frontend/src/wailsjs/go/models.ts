@@ -818,6 +818,114 @@ export namespace merge {
 
 export namespace wails {
 	
+	export class ApprovePlansRequest {
+	    plan_ids: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ApprovePlansRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_ids = source["plan_ids"];
+	    }
+	}
+	export class PlanActionDTO {
+	    path: string;
+	    action: string;
+	    reason: string;
+	    target_path?: string;
+	    context_role?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanActionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.target_path = source["target_path"];
+	        this.context_role = source["context_role"];
+	    }
+	}
+	export class PlanDTO {
+	    id: string;
+	    task_id?: string;
+	    state: string;
+	    content_sha256: string;
+	    size: number;
+	    risk: string;
+	    retain_path?: string;
+	    actions: PlanActionDTO[];
+	    evidence: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.task_id = source["task_id"];
+	        this.state = source["state"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.size = source["size"];
+	        this.risk = source["risk"];
+	        this.retain_path = source["retain_path"];
+	        this.actions = this.convertValues(source["actions"], PlanActionDTO);
+	        this.evidence = source["evidence"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ApprovePlansResponse {
+	    approved: PlanDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ApprovePlansResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.approved = this.convertValues(source["approved"], PlanDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DiagnoseFormatsRequest {
 	    storage_id?: string;
 	    large_unknown_minimum?: number;
@@ -858,6 +966,84 @@ export namespace wails {
 	        this.storage_id = source["storage_id"];
 	    }
 	}
+	export class ExecutePurgeRequest {
+	    plan_id: string;
+	    digest: string;
+	    quarantine_root: string;
+	    dry_run: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePurgeRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.digest = source["digest"];
+	        this.quarantine_root = source["quarantine_root"];
+	        this.dry_run = source["dry_run"];
+	    }
+	}
+	export class ExecutePurgeResponse {
+	    plan_id: string;
+	    final_state: string;
+	    status: string;
+	    error_type?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePurgeResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.final_state = source["final_state"];
+	        this.status = source["status"];
+	        this.error_type = source["error_type"];
+	        this.error = source["error"];
+	    }
+	}
+	export class ExecuteRestoreRequest {
+	    plan_id: string;
+	    digest: string;
+	    quarantine_root: string;
+	    source_roots: string[];
+	    dry_run: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecuteRestoreRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.digest = source["digest"];
+	        this.quarantine_root = source["quarantine_root"];
+	        this.source_roots = source["source_roots"];
+	        this.dry_run = source["dry_run"];
+	    }
+	}
+	export class ExecuteRestoreResponse {
+	    plan_id: string;
+	    final_state: string;
+	    status: string;
+	    error_type?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecuteRestoreResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.final_state = source["final_state"];
+	        this.status = source["status"];
+	        this.error_type = source["error_type"];
+	        this.error = source["error"];
+	    }
+	}
 	export class FileItem {
 	    storage_id: string;
 	    path: string;
@@ -894,6 +1080,32 @@ export namespace wails {
 	        this.physical_reliable = source["physical_reliable"];
 	        this.format_kind = source["format_kind"];
 	        this.format_mime = source["format_mime"];
+	    }
+	}
+	export class GroupDecisionDTO {
+	    id: string;
+	    group_id: string;
+	    decision_type: string;
+	    retained_file_id?: number;
+	    reason?: string;
+	    rule_id?: string;
+	    created_at: string;
+	    updated_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GroupDecisionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.group_id = source["group_id"];
+	        this.decision_type = source["decision_type"];
+	        this.retained_file_id = source["retained_file_id"];
+	        this.reason = source["reason"];
+	        this.rule_id = source["rule_id"];
+	        this.created_at = source["created_at"];
+	        this.updated_at = source["updated_at"];
 	    }
 	}
 	export class GroupDetailResponse {
@@ -1081,6 +1293,40 @@ export namespace wails {
 	        this.completed_at = source["completed_at"];
 	    }
 	}
+	export class JournalEntryDTO {
+	    plan_id: string;
+	    task_id: string;
+	    action_index: number;
+	    action_type: string;
+	    source_path: string;
+	    target_path?: string;
+	    content_sha256: string;
+	    file_size: number;
+	    status: string;
+	    rollback_status?: string;
+	    started_at?: string;
+	    completed_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JournalEntryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.task_id = source["task_id"];
+	        this.action_index = source["action_index"];
+	        this.action_type = source["action_type"];
+	        this.source_path = source["source_path"];
+	        this.target_path = source["target_path"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.file_size = source["file_size"];
+	        this.status = source["status"];
+	        this.rollback_status = source["rollback_status"];
+	        this.started_at = source["started_at"];
+	        this.completed_at = source["completed_at"];
+	    }
+	}
 	export class ListGroupsRequest {
 	    storage_id?: string;
 	    page_size?: number;
@@ -1133,6 +1379,28 @@ export namespace wails {
 		    return a;
 		}
 	}
+	export class OperationLogDTO {
+	    id: number;
+	    plan_id: string;
+	    event_type: string;
+	    detail?: Record<string, any>;
+	    created_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OperationLogDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.plan_id = source["plan_id"];
+	        this.event_type = source["event_type"];
+	        this.detail = source["detail"];
+	        this.created_at = source["created_at"];
+	    }
+	}
+	
+	
 	export class ProjectInfo {
 	    path: string;
 	    is_open: boolean;
@@ -1147,6 +1415,208 @@ export namespace wails {
 	        this.path = source["path"];
 	        this.is_open = source["is_open"];
 	        this.storage_count = source["storage_count"];
+	    }
+	}
+	export class PurgePlanDTO {
+	    id: string;
+	    item_id: string;
+	    state: string;
+	    expected_path: string;
+	    expected_sha256: string;
+	    expected_size: number;
+	    retain_until: string;
+	    approval_digest: string;
+	    created_at: string;
+	    approved_at?: string;
+	    purged_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurgePlanDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.item_id = source["item_id"];
+	        this.state = source["state"];
+	        this.expected_path = source["expected_path"];
+	        this.expected_sha256 = source["expected_sha256"];
+	        this.expected_size = source["expected_size"];
+	        this.retain_until = source["retain_until"];
+	        this.approval_digest = source["approval_digest"];
+	        this.created_at = source["created_at"];
+	        this.approved_at = source["approved_at"];
+	        this.purged_at = source["purged_at"];
+	    }
+	}
+	export class PurgeRecoveryResultDTO {
+	    plan_id?: string;
+	    final_state?: string;
+	    status: string;
+	    error_type?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurgeRecoveryResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.final_state = source["final_state"];
+	        this.status = source["status"];
+	        this.error_type = source["error_type"];
+	        this.error = source["error"];
+	    }
+	}
+	export class QuarantineItemDTO {
+	    id: string;
+	    plan_id: string;
+	    action_index: number;
+	    source_path: string;
+	    quarantine_path: string;
+	    content_sha256: string;
+	    file_size: number;
+	    quarantined_at: string;
+	    retain_until: string;
+	    status: string;
+	    hold_reason?: string;
+	    restored_at?: string;
+	    purged_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QuarantineItemDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.plan_id = source["plan_id"];
+	        this.action_index = source["action_index"];
+	        this.source_path = source["source_path"];
+	        this.quarantine_path = source["quarantine_path"];
+	        this.content_sha256 = source["content_sha256"];
+	        this.file_size = source["file_size"];
+	        this.quarantined_at = source["quarantined_at"];
+	        this.retain_until = source["retain_until"];
+	        this.status = source["status"];
+	        this.hold_reason = source["hold_reason"];
+	        this.restored_at = source["restored_at"];
+	        this.purged_at = source["purged_at"];
+	    }
+	}
+	export class RecoverRestoresRequest {
+	    quarantine_root: string;
+	    source_roots: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RecoverRestoresRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.quarantine_root = source["quarantine_root"];
+	        this.source_roots = source["source_roots"];
+	    }
+	}
+	export class RecoveryResultDTO {
+	    plan_id: string;
+	    action: string;
+	    rolled_back: number;
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RecoveryResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.action = source["action"];
+	        this.rolled_back = source["rolled_back"];
+	        this.errors = source["errors"];
+	    }
+	}
+	export class RecoveryStatusDTO {
+	    lock_active: boolean;
+	    executing_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RecoveryStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.lock_active = source["lock_active"];
+	        this.executing_count = source["executing_count"];
+	    }
+	}
+	export class RestorePlanDTO {
+	    id: string;
+	    item_id: string;
+	    state: string;
+	    quarantine_path: string;
+	    restore_path: string;
+	    expected_sha256: string;
+	    expected_size: number;
+	    approval_digest: string;
+	    created_at: string;
+	    approved_at?: string;
+	    restored_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RestorePlanDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.item_id = source["item_id"];
+	        this.state = source["state"];
+	        this.quarantine_path = source["quarantine_path"];
+	        this.restore_path = source["restore_path"];
+	        this.expected_sha256 = source["expected_sha256"];
+	        this.expected_size = source["expected_size"];
+	        this.approval_digest = source["approval_digest"];
+	        this.created_at = source["created_at"];
+	        this.approved_at = source["approved_at"];
+	        this.restored_at = source["restored_at"];
+	    }
+	}
+	export class RestoreRecoveryResultDTO {
+	    plan_id?: string;
+	    final_state?: string;
+	    status: string;
+	    error_type?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RestoreRecoveryResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.final_state = source["final_state"];
+	        this.status = source["status"];
+	        this.error_type = source["error_type"];
+	        this.error = source["error"];
+	    }
+	}
+	export class SaveDecisionRequest {
+	    group_id: string;
+	    decision_type: string;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveDecisionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.decision_type = source["decision_type"];
+	        this.reason = source["reason"];
 	    }
 	}
 	export class ScanJobProgress {
@@ -1233,11 +1703,11 @@ export namespace wails {
 	    version: string;
 	    commit: string;
 	    build_time: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -1245,492 +1715,6 @@ export namespace wails {
 	        this.build_time = source["build_time"];
 	    }
 	}
-	export class PlanActionDTO {
-	    path: string;
-	    action: string;
-	    reason: string;
-	    target_path?: string;
-	    context_role?: string;
-
-	    static createFrom(source: any = {}) {
-	        return new PlanActionDTO(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.action = source["action"];
-	        this.reason = source["reason"];
-	        this.target_path = source["target_path"];
-	        this.context_role = source["context_role"];
-	    }
-	}
-	export class PlanDTO {
-	    id: string;
-	    task_id?: string;
-	    state: string;
-	    content_sha256: string;
-	    size: number;
-	    risk: string;
-	    retain_path?: string;
-	    actions: PlanActionDTO[];
-	    evidence: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new PlanDTO(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.task_id = source["task_id"];
-	        this.state = source["state"];
-	        this.content_sha256 = source["content_sha256"];
-	        this.size = source["size"];
-	        this.risk = source["risk"];
-	        this.retain_path = source["retain_path"];
-	        this.actions = this.convertValues(source["actions"], PlanActionDTO);
-	        this.evidence = source["evidence"];
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class GroupDecisionDTO {
-	    id: string;
-	    group_id: string;
-	    decision_type: string;
-	    retained_file_id?: number;
-	    reason?: string;
-	    rule_id?: string;
-	    created_at: string;
-	    updated_at: string;
-
-	    static createFrom(source: any = {}) {
-	        return new GroupDecisionDTO(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.group_id = source["group_id"];
-	        this.decision_type = source["decision_type"];
-	        this.retained_file_id = source["retained_file_id"];
-	        this.reason = source["reason"];
-	        this.rule_id = source["rule_id"];
-	        this.created_at = source["created_at"];
-	        this.updated_at = source["updated_at"];
-	    }
-	}
-	export class SaveDecisionRequest {
-	    group_id: string;
-	    decision_type: string;
-	    reason?: string;
-
-	    static createFrom(source: any = {}) {
-	        return new SaveDecisionRequest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.group_id = source["group_id"];
-	        this.decision_type = source["decision_type"];
-	        this.reason = source["reason"];
-	    }
-	}
-	export class ApprovePlansRequest {
-	    plan_ids: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new ApprovePlansRequest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.plan_ids = source["plan_ids"];
-	    }
-	}
-	export class ApprovePlansResponse {
-	    approved: PlanDTO[];
-
-	    static createFrom(source: any = {}) {
-	        return new ApprovePlansResponse(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.approved = this.convertValues(source["approved"], PlanDTO);
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-	// ---- V7 Execution DTOs (manually added) ----
-
-	export class QuarantineItemDTO {
-    id: string;
-    plan_id: string;
-    action_index: number;
-    source_path: string;
-    quarantine_path: string;
-    content_sha256: string;
-    file_size: number;
-    quarantined_at: string;
-    retain_until: string;
-    status: string;
-    hold_reason?: string;
-    restored_at?: string;
-    purged_at?: string;
-
-    static createFrom(source: any = {}) {
-        return new QuarantineItemDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.id = source["id"];
-        this.plan_id = source["plan_id"];
-        this.action_index = source["action_index"];
-        this.source_path = source["source_path"];
-        this.quarantine_path = source["quarantine_path"];
-        this.content_sha256 = source["content_sha256"];
-        this.file_size = source["file_size"];
-        this.quarantined_at = source["quarantined_at"];
-        this.retain_until = source["retain_until"];
-        this.status = source["status"];
-        this.hold_reason = source["hold_reason"];
-        this.restored_at = source["restored_at"];
-        this.purged_at = source["purged_at"];
-    }
-}
-
-export class RestorePlanDTO {
-    id: string;
-    item_id: string;
-    state: string;
-    quarantine_path: string;
-    restore_path: string;
-    expected_sha256: string;
-    expected_size: number;
-    approval_digest: string;
-    created_at: string;
-    approved_at?: string;
-    restored_at?: string;
-
-    static createFrom(source: any = {}) {
-        return new RestorePlanDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.id = source["id"];
-        this.item_id = source["item_id"];
-        this.state = source["state"];
-        this.quarantine_path = source["quarantine_path"];
-        this.restore_path = source["restore_path"];
-        this.expected_sha256 = source["expected_sha256"];
-        this.expected_size = source["expected_size"];
-        this.approval_digest = source["approval_digest"];
-        this.created_at = source["created_at"];
-        this.approved_at = source["approved_at"];
-        this.restored_at = source["restored_at"];
-    }
-}
-
-export class PurgePlanDTO {
-    id: string;
-    item_id: string;
-    state: string;
-    expected_path: string;
-    expected_sha256: string;
-    expected_size: number;
-    retain_until: string;
-    approval_digest: string;
-    created_at: string;
-    approved_at?: string;
-    purged_at?: string;
-
-    static createFrom(source: any = {}) {
-        return new PurgePlanDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.id = source["id"];
-        this.item_id = source["item_id"];
-        this.state = source["state"];
-        this.expected_path = source["expected_path"];
-        this.expected_sha256 = source["expected_sha256"];
-        this.expected_size = source["expected_size"];
-        this.retain_until = source["retain_until"];
-        this.approval_digest = source["approval_digest"];
-        this.created_at = source["created_at"];
-        this.approved_at = source["approved_at"];
-        this.purged_at = source["purged_at"];
-    }
-}
-
-export class ExecuteRestoreRequest {
-    plan_id: string;
-    digest: string;
-    quarantine_root: string;
-    source_roots: string[];
-    dry_run: boolean;
-
-    static createFrom(source: any = {}) {
-        return new ExecuteRestoreRequest(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.digest = source["digest"];
-        this.quarantine_root = source["quarantine_root"];
-        this.source_roots = source["source_roots"];
-        this.dry_run = source["dry_run"];
-    }
-}
-
-export class ExecuteRestoreResponse {
-    plan_id: string;
-    final_state: string;
-    status: string;
-    error_type?: string;
-    error?: string;
-
-    static createFrom(source: any = {}) {
-        return new ExecuteRestoreResponse(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.final_state = source["final_state"];
-        this.status = source["status"];
-        this.error_type = source["error_type"];
-        this.error = source["error"];
-    }
-}
-
-export class ExecutePurgeRequest {
-    plan_id: string;
-    digest: string;
-    quarantine_root: string;
-    dry_run: boolean;
-
-    static createFrom(source: any = {}) {
-        return new ExecutePurgeRequest(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.digest = source["digest"];
-        this.quarantine_root = source["quarantine_root"];
-        this.dry_run = source["dry_run"];
-    }
-}
-
-export class ExecutePurgeResponse {
-    plan_id: string;
-    final_state: string;
-    status: string;
-    error_type?: string;
-    error?: string;
-
-    static createFrom(source: any = {}) {
-        return new ExecutePurgeResponse(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.final_state = source["final_state"];
-        this.status = source["status"];
-        this.error_type = source["error_type"];
-        this.error = source["error"];
-    }
-}
-
-export class RecoveryStatusDTO {
-    lock_active: boolean;
-    executing_count: number;
-
-    static createFrom(source: any = {}) {
-        return new RecoveryStatusDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.lock_active = source["lock_active"];
-        this.executing_count = source["executing_count"];
-    }
-}
-
-export class RecoveryResultDTO {
-    plan_id: string;
-    action: string;
-    rolled_back: number;
-    errors?: string[];
-
-    static createFrom(source: any = {}) {
-        return new RecoveryResultDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.action = source["action"];
-        this.rolled_back = source["rolled_back"];
-        this.errors = source["errors"];
-    }
-}
-
-export class RestoreRecoveryResultDTO {
-    plan_id?: string;
-    final_state?: string;
-    status: string;
-    error_type?: string;
-    error?: string;
-
-    static createFrom(source: any = {}) {
-        return new RestoreRecoveryResultDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.final_state = source["final_state"];
-        this.status = source["status"];
-        this.error_type = source["error_type"];
-        this.error = source["error"];
-    }
-}
-
-export class PurgeRecoveryResultDTO {
-    plan_id?: string;
-    final_state?: string;
-    status: string;
-    error_type?: string;
-    error?: string;
-
-    static createFrom(source: any = {}) {
-        return new PurgeRecoveryResultDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.final_state = source["final_state"];
-        this.status = source["status"];
-        this.error_type = source["error_type"];
-        this.error = source["error"];
-    }
-}
-
-export class RecoverRestoresRequest {
-    quarantine_root: string;
-    source_roots: string[];
-
-    static createFrom(source: any = {}) {
-        return new RecoverRestoresRequest(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.quarantine_root = source["quarantine_root"];
-        this.source_roots = source["source_roots"];
-    }
-}
-
-// ---- V8 Audit DTOs (manually added) ----
-
-export class OperationLogDTO {
-    id: number;
-    plan_id: string;
-    event_type: string;
-    detail?: Record<string, any>;
-    created_at: string;
-
-    static createFrom(source: any = {}) {
-        return new OperationLogDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.id = source["id"];
-        this.plan_id = source["plan_id"];
-        this.event_type = source["event_type"];
-        this.detail = source["detail"];
-        this.created_at = source["created_at"];
-    }
-}
-
-export class JournalEntryDTO {
-    plan_id: string;
-    task_id: string;
-    action_index: number;
-    action_type: string;
-    source_path: string;
-    target_path?: string;
-    content_sha256: string;
-    file_size: number;
-    status: string;
-    rollback_status?: string;
-    started_at?: string;
-    completed_at?: string;
-
-    static createFrom(source: any = {}) {
-        return new JournalEntryDTO(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.plan_id = source["plan_id"];
-        this.task_id = source["task_id"];
-        this.action_index = source["action_index"];
-        this.action_type = source["action_type"];
-        this.source_path = source["source_path"];
-        this.target_path = source["target_path"];
-        this.content_sha256 = source["content_sha256"];
-        this.file_size = source["file_size"];
-        this.status = source["status"];
-        this.rollback_status = source["rollback_status"];
-        this.started_at = source["started_at"];
-        this.completed_at = source["completed_at"];
-    }
-}
 
 }
 

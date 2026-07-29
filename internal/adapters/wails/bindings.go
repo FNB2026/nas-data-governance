@@ -1120,10 +1120,7 @@ func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
 
 // RecoverRestores coordinates crash recovery for non-terminal restore
 // operations. Requires read-write mode.
-func (a *API) RecoverRestores(req struct {
-	QuarantineRoot string   `json:"quarantine_root"`
-	SourceRoots    []string `json:"source_roots"`
-}) ([]RestoreRecoveryResultDTO, error) {
+func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResultDTO, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
