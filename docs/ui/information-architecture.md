@@ -1,8 +1,8 @@
 # NDG 桌面信息架构
 
-状态：草案
+状态：已纳入桌面端实施基线
 日期：2026-07-28
-关联：ADR-0006、《NDG 可视化开发路线手册》校正与修订指南
+关联：[桌面端前端架构与后端协同推进方案](../desktop-frontend-architecture.md)、[ADR-0006](../adr/0006-desktop-visualization-architecture.md)、《NDG 可视化开发路线手册》校正与修订指南
 
 ---
 
@@ -76,9 +76,10 @@
 
 ## 子文档索引
 
-后续按需补充：
+当前主文档与后续专题：
 
 ```
+docs/desktop-frontend-architecture.md  七域页面、前后端协同、Phase 0—7 与 DoD 主基线
 docs/ui/
 ├── information-architecture.md   本文件
 ├── visual-language.md            视觉语言（待补充）
