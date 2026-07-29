@@ -1044,3 +1044,440 @@ button.secondary {
 .job-filter-row select {
   min-width: 120px;
 }
+
+/* ---- Duplicate results: three-zone split layout ---- */
+
+.dup-page {
+  max-width: none;
+  height: 100%;
+}
+
+/* Capacity summary bar */
+.dup-summary-bar {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.75rem 1rem;
+  flex-shrink: 0;
+}
+
+.dup-summary-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: center;
+}
+
+.dup-summary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.dup-summary-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dup-summary-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dup-summary-stat--reclaimable .dup-summary-value {
+  color: #248a3d;
+}
+
+.dup-summary-stat--high {
+  margin-left: auto;
+}
+
+/* Split layout: left list + right evidence */
+.dup-split {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dup-split-left {
+  width: 380px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.dup-split-right {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* When no group is selected, show a placeholder in the right panel */
+.dup-split-right:empty::before {
+  content: "选择左侧的重复组以查看证据详情";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- Risk badges ---- */
+
+.risk-badge {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.risk-badge--low {
+  background: rgba(52, 199, 89, 0.15);
+  color: #248a3d;
+}
+
+.risk-badge--medium {
+  background: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
+}
+
+.risk-badge--high {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--error);
+}
+
+/* ---- Hardlink flags ---- */
+
+.hardlink-flag {
+  color: var(--accent);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+/* ---- Duplicate groups panel ---- */
+
+.dup-groups-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  flex: 1;
+}
+
+.dup-filter-row {
+  margin: 0 0 0.5rem;
+}
+
+.dup-list-wrap {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dup-table {
+  font-size: 0.82rem;
+}
+
+.dup-table th,
+.dup-table td {
+  padding: 0.4rem 0.5rem;
+}
+
+.dup-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.dup-row--loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.dup-count {
+  text-align: center;
+  padding: 0.4rem 0;
+  flex-shrink: 0;
+}
+
+/* ---- Evidence inspector ---- */
+
+.evidence-inspector {
+  border: 1px solid var(--accent);
+  flex: 1;
+}
+
+.evidence-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.evidence-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  font-size: 0.85rem;
+  align-items: center;
+}
+
+.evidence-summary-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Capacity bar in evidence inspector */
+.capacity-bar {
+  display: flex;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.capacity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--card-bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.capacity-item--reclaimable {
+  border-color: rgba(52, 199, 89, 0.3);
+  background: rgba(52, 199, 89, 0.05);
+}
+
+.capacity-item--hardlink {
+  border-color: rgba(0, 113, 227, 0.2);
+  background: rgba(0, 113, 227, 0.04);
+}
+
+.capacity-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.capacity-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.capacity-item--reclaimable .capacity-value {
+  color: #248a3d;
+}
+
+.capacity-item--hardlink .capacity-value {
+  color: var(--accent);
+}
+
+/* Evidence sections */
+.evidence-section {
+  margin-bottom: 1rem;
+}
+
+.evidence-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.evidence-section-count {
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.evidence-hint {
+  font-size: 0.78rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Evidence table */
+.evidence-table {
+  font-size: 0.82rem;
+}
+
+.evidence-table .path-cell {
+  max-width: 260px;
+}
+
+/* Path segmentation display */
+.path-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  align-items: center;
+}
+
+.path-seg {
+  font-size: 0.75rem;
+  padding: 0.08rem 0.35rem;
+  background: var(--bg);
+  border-radius: 4px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.path-seg:not(:last-child)::after {
+  content: " ›";
+  color: var(--border);
+}
+
+.path-seg--ellipsis {
+  background: transparent;
+  padding: 0;
+}
+
+.path-compact {
+  display: block;
+  font-size: 0.72rem;
+  margin-top: 0.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Physical identity cell */
+.phys-id {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Hardlink row highlighting */
+.evidence-table tr.row-hardlink {
+  background: rgba(0, 113, 227, 0.03);
+}
+
+.evidence-table tr.row-hardlink:hover {
+  background: rgba(0, 113, 227, 0.06);
+}
+
+/* Hardlink relationship diagram */
+.hardlink-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hardlink-group {
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.hardlink-group--linked {
+  border-color: rgba(0, 113, 227, 0.25);
+  background: rgba(0, 113, 227, 0.03);
+}
+
+.hardlink-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.hardlink-paths {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.hardlink-path {
+  font-size: 0.78rem;
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 1rem;
+  position: relative;
+}
+
+.hardlink-path::before {
+  content: "↳";
+  position: absolute;
+  left: 0;
+  color: var(--border);
+}
+
+/* ---- Responsive folding for duplicate results ---- */
+
+@media (max-width: 1100px) {
+  .dup-split-left {
+    width: 320px;
+  }
+
+  .capacity-bar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 900px) {
+  .dup-split {
+    flex-direction: column;
+  }
+
+  .dup-split-left {
+    width: 100%;
+    max-height: 400px;
+  }
+
+  .dup-split-right {
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .dup-summary-stats {
+    gap: 0.4rem 1rem;
+  }
+
+  .dup-summary-value {
+    font-size: 0.95rem;
+  }
+
+  .dup-split-left {
+    max-height: 300px;
+  }
+
+  .capacity-bar {
+    flex-direction: column;
+  }
+
+  .capacity-item {
+    width: 100%;
+  }
+
+  .evidence-summary-row {
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+}

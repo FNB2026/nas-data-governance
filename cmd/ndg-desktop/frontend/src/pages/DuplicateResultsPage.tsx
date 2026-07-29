@@ -1,13 +1,21 @@
-// Duplicate results page: group list, filters, group detail.
-// Groups state is page-local; watches dataRevision for cross-page refresh.
+// Duplicate results page: three-zone split layout.
+// Top: capacity summary bar + governance entry
+// Left: group list with filters (scrollable)
+// Right: evidence inspector (scrollable)
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import DuplicateGroups from "../components/DuplicateGroups";
 import GroupDetail from "../components/GroupDetail";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, errorText } from "../lib/utils";
+import { hasWailsRuntime, errorText, formatBytes } from "../lib/utils";
 import { ListDuplicateGroups, GetGroupDetail } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
+import {
+  computeCapacity,
+  deriveRiskLevel,
+  riskLabel,
+  riskBadgeClass,
+} from "../lib/evidence";
 
 export default function DuplicateResultsPage() {
   const { storages, dataRevision } = useProject();
@@ -60,7 +68,7 @@ export default function DuplicateResultsPage() {
     }
   }, []);
 
-  // Initial load + reload on dataRevision change (e.g. after scan completion)
+  // Initial load + reload on dataRevision change
   useEffect(() => {
     if (hasWailsRuntime()) {
       setSelectedGroup(null);
@@ -114,37 +122,106 @@ export default function DuplicateResultsPage() {
     setDetailError(null);
   };
 
+  // Aggregate capacity across all loaded groups
+  const aggregateCapacity = useMemo(() => {
+    let totalLogical = 0;
+    let totalReclaimable = 0;
+    let totalHardlinkAlias = 0;
+    let highRiskCount = 0;
+    let mediumRiskCount = 0;
+    for (const g of groups) {
+      const cap = computeCapacity(
+        g.size,
+        g.path_count,
+        g.physical_copy_count,
+        g.hardlink_alias_count,
+        g.physical_reclaimable_bytes,
+      );
+      totalLogical += cap.totalLogical;
+      totalReclaimable += cap.physicalReclaimable;
+      totalHardlinkAlias += cap.hardlinkAliasBytes;
+      const risk = deriveRiskLevel(
+        g.physical_copy_count,
+        g.hardlink_alias_count,
+        g.physical_reclaimable_bytes,
+      );
+      if (risk === "HIGH") highRiskCount++;
+      else if (risk === "MEDIUM") mediumRiskCount++;
+    }
+    return { totalLogical, totalReclaimable, totalHardlinkAlias, highRiskCount, mediumRiskCount };
+  }, [groups]);
+
   return (
-    <div className="page page--duplicate-results">
+    <div className="page page--duplicate-results dup-page">
       <div className="page-header">
         <h2>重复结果</h2>
         <p className="muted">重复文件组与目录语境</p>
       </div>
 
-      <DuplicateGroups
-        groups={groups}
-        totalCount={totalCount}
-        groupsLoading={groupsLoading}
-        groupsError={groupsError}
-        nextCursor={nextCursor}
-        storages={storages}
-        storageFilter={storageFilter}
-        minReclaimableMiB={minReclaimableMiB}
-        detailLoading={detailLoading}
-        selectedGroup={selectedGroup}
-        onStorageFilterChange={setStorageFilter}
-        onMinReclaimableMiBChange={setMinReclaimableMiB}
-        onApplyFilters={handleApplyFilters}
-        onLoadMore={handleLoadMore}
-        onSelectGroup={handleSelectGroup}
-      />
+      {/* Capacity summary bar */}
+      {groups.length > 0 && (
+        <div className="dup-summary-bar">
+          <div className="dup-summary-stats">
+            <div className="dup-summary-stat">
+              <span className="dup-summary-label">重复组</span>
+              <span className="dup-summary-value">{totalCount}</span>
+            </div>
+            <div className="dup-summary-stat">
+              <span className="dup-summary-label">逻辑总量</span>
+              <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalLogical)}</span>
+            </div>
+            <div className="dup-summary-stat dup-summary-stat--reclaimable">
+              <span className="dup-summary-label">可回收物理空间</span>
+              <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalReclaimable)}</span>
+            </div>
+            <div className="dup-summary-stat">
+              <span className="dup-summary-label">硬链接别名字节</span>
+              <span className="dup-summary-value">{formatBytes(aggregateCapacity.totalHardlinkAlias)}</span>
+            </div>
+            {aggregateCapacity.highRiskCount > 0 && (
+              <div className="dup-summary-stat dup-summary-stat--high">
+                <span className={riskBadgeClass("HIGH")}>{riskLabel("HIGH")} {aggregateCapacity.highRiskCount}</span>
+              </div>
+            )}
+            {aggregateCapacity.mediumRiskCount > 0 && (
+              <div className="dup-summary-stat">
+                <span className={riskBadgeClass("MEDIUM")}>{riskLabel("MEDIUM")} {aggregateCapacity.mediumRiskCount}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-      <GroupDetail
-        selectedGroup={selectedGroup}
-        detailLoading={detailLoading}
-        detailError={detailError}
-        onClose={handleCloseDetail}
-      />
+      {/* Three-zone split: left list + right evidence */}
+      <div className="dup-split">
+        <div className="dup-split-left">
+          <DuplicateGroups
+            groups={groups}
+            totalCount={totalCount}
+            groupsLoading={groupsLoading}
+            groupsError={groupsError}
+            nextCursor={nextCursor}
+            storages={storages}
+            storageFilter={storageFilter}
+            minReclaimableMiB={minReclaimableMiB}
+            detailLoading={detailLoading}
+            selectedGroup={selectedGroup}
+            onStorageFilterChange={setStorageFilter}
+            onMinReclaimableMiBChange={setMinReclaimableMiB}
+            onApplyFilters={handleApplyFilters}
+            onLoadMore={handleLoadMore}
+            onSelectGroup={handleSelectGroup}
+          />
+        </div>
+        <div className="dup-split-right">
+          <GroupDetail
+            selectedGroup={selectedGroup}
+            detailLoading={detailLoading}
+            detailError={detailError}
+            onClose={handleCloseDetail}
+          />
+        </div>
+      </div>
     </div>
   );
 }

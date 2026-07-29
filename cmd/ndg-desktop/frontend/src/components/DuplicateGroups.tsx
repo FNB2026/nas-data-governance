@@ -1,5 +1,12 @@
 import { wails } from "../wailsjs/go/models";
 import { formatBytes, shortHash } from "../lib/utils";
+import {
+  computeCapacity,
+  deriveRiskLevel,
+  riskLabel,
+  riskBadgeClass,
+  fileName,
+} from "../lib/evidence";
 
 export interface DuplicateGroupsProps {
   groups: wails.GroupSummary[];
@@ -37,14 +44,9 @@ export default function DuplicateGroups({
   onSelectGroup,
 }: DuplicateGroupsProps) {
   return (
-    <section className="card card--full">
-      <div className="card-header-row">
-        <h2>重复文件组</h2>
-        {totalCount > 0 && (
-          <span className="count-badge">共 {totalCount} 组</span>
-        )}
-      </div>
-      <div className="filter-row" aria-label="重复组筛选">
+    <div className="dup-groups-panel">
+      {/* Filter bar */}
+      <div className="filter-row dup-filter-row" aria-label="重复组筛选">
         <label>
           存储
           <select
@@ -76,24 +78,28 @@ export default function DuplicateGroups({
           应用筛选
         </button>
       </div>
+
+      {/* Group list */}
       {groupsError ? (
         <p className="error" role="alert">{groupsError}</p>
       ) : groups.length === 0 && !groupsLoading ? (
-        <p className="muted">未检测到重复文件，或尚未扫描</p>
+        <div className="empty-state">
+          <p className="muted">未检测到重复文件，或尚未扫描</p>
+          <p className="muted">完成扫描后，内容相同的文件将在此显示，附带目录语境与物理身份证据。</p>
+        </div>
       ) : (
         <>
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="dup-list-wrap">
+            <table className="data-table dup-table">
               <thead>
                 <tr>
-                  <th>SHA-256</th>
-                  <th>存储</th>
-                  <th className="num">文件大小</th>
-                  <th className="num">路径数</th>
+                  <th>风险</th>
+                  <th>代表文件</th>
+                  <th className="num">大小</th>
+                  <th className="num">路径</th>
                   <th className="num">物理副本</th>
-                  <th className="num">硬链接别名</th>
-                  <th className="num">可回收空间</th>
-                  <th>操作</th>
+                  <th className="num">硬链接</th>
+                  <th className="num">可回收</th>
                 </tr>
               </thead>
               <tbody>
@@ -103,26 +109,54 @@ export default function DuplicateGroups({
                     selectedGroup &&
                     selectedGroup.sha256 === g.sha256 &&
                     selectedGroup.storage_id === g.storage_id;
+                  const cap = computeCapacity(
+                    g.size,
+                    g.path_count,
+                    g.physical_copy_count,
+                    g.hardlink_alias_count,
+                    g.physical_reclaimable_bytes,
+                  );
+                  const risk = deriveRiskLevel(
+                    g.physical_copy_count,
+                    g.hardlink_alias_count,
+                    g.physical_reclaimable_bytes,
+                  );
+                  const repName = g.sample_path ? fileName(g.sample_path) : shortHash(g.sha256);
+
                   return (
                     <tr
                       key={key}
-                      className={isSelected ? "row-selected" : ""}
+                      className={`dup-row ${isSelected ? "row-selected" : ""} ${groupsLoading ? "dup-row--loading" : ""}`}
+                      onClick={() => !detailLoading && onSelectGroup(g.storage_id, g.sha256)}
+                      style={{ cursor: detailLoading ? "wait" : "pointer" }}
                     >
-                      <td className="mono" title={g.sha256}>{shortHash(g.sha256)}</td>
-                      <td className="mono">{g.storage_id}</td>
+                      <td>
+                        <span className={riskBadgeClass(risk)}>{riskLabel(risk)}</span>
+                      </td>
+                      <td className="path-cell" title={g.sample_path || g.sha256}>
+                        {repName}
+                      </td>
                       <td className="num">{formatBytes(g.size)}</td>
                       <td className="num">{g.path_count}</td>
-                      <td className="num">{g.physical_copy_count}</td>
-                      <td className="num">{g.hardlink_alias_count}</td>
-                      <td className="num">{formatBytes(g.physical_reclaimable_bytes)}</td>
-                      <td>
-                        <button
-                          className="btn-sm"
-                          disabled={detailLoading}
-                          onClick={() => onSelectGroup(g.storage_id, g.sha256)}
-                        >
-                          详情
-                        </button>
+                      <td className="num">
+                        {cap.physicalCopyCount}
+                        {cap.physicalCopyCount <= 1 && cap.hardlinkAliasCount === 0 && (
+                          <span className="muted" title="仅一个物理副本，无可回收空间"> ⚠</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {cap.hardlinkAliasCount > 0 ? (
+                          <span className="hardlink-flag" title="存在硬链接别名，共享存储块">🔗 {cap.hardlinkAliasCount}</span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {cap.physicalReclaimable > 0 ? (
+                          <strong>{formatBytes(cap.physicalReclaimable)}</strong>
+                        ) : (
+                          <span className="muted" title="硬链接组无可回收物理空间">0 B</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -140,8 +174,13 @@ export default function DuplicateGroups({
               </button>
             </div>
           )}
+          {totalCount > 0 && (
+            <div className="dup-count">
+              <span className="muted">共 {totalCount} 组</span>
+            </div>
+          )}
         </>
       )}
-    </section>
+    </div>
   );
 }
