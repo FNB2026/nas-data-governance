@@ -1140,15 +1140,30 @@ func (s *SQLiteStore) CompleteCheckpoint(ctx context.Context, checkpointID int64
 	return nil
 }
 
-// LastCheckpoint returns the most recent incomplete checkpoint for a storage.
+// LastCheckpoint returns the most recent resumable checkpoint for a storage.
+// A checkpoint is resumable when its status is 'running' (crash-interrupted)
+// or 'aborted' (cancelled by the user), AND no more recent 'completed'
+// checkpoint exists for the same storage. The NOT EXISTS clause ensures
+// that once a fresh full scan completes, stale aborted checkpoints from
+// earlier runs are no longer offered for resume.
+//
+// Recency is determined by the auto-increment primary key (id) rather than
+// the started_at text column. The id is monotonically increasing per row,
+// so c2.id > c.id is an exact "strictly later" test that is immune to the
+// variable precision of RFC3339Nano string comparison.
 func (s *SQLiteStore) LastCheckpoint(ctx context.Context, storageID string) (Checkpoint, error) {
 	var cp Checkpoint
 	var startedAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, storage_id, last_scanned_path, scanned_count, status, started_at, updated_at
-		 FROM scan_checkpoints
-		 WHERE storage_id = ? AND status = 'running'
-		 ORDER BY started_at DESC LIMIT 1`, storageID).
+		`SELECT c.id, c.storage_id, c.last_scanned_path, c.scanned_count, c.status, c.started_at, c.updated_at
+		 FROM scan_checkpoints c
+		 WHERE c.storage_id = ? AND c.status IN ('running', 'aborted')
+		 AND NOT EXISTS (
+		     SELECT 1 FROM scan_checkpoints c2
+		     WHERE c2.storage_id = ? AND c2.status = 'completed'
+		     AND c2.id > c.id
+		 )
+		 ORDER BY c.id DESC LIMIT 1`, storageID, storageID).
 		Scan(&cp.ID, &cp.StorageID, &cp.LastScannedPath, &cp.ScannedCount, &cp.Status, &startedAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return cp, ErrNotFound

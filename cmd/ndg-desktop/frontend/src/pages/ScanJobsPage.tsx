@@ -26,6 +26,7 @@ export default function ScanJobsPage() {
     setScanFilterType,
     startScan,
     retryLastScan,
+    resumeScan,
     cancelScan,
     capabilities,
     defaultFullScan,
@@ -41,6 +42,13 @@ export default function ScanJobsPage() {
   const [scanStarting, setScanStarting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
+  // Checkpoint info: checked when scanRoot changes or a scan terminates.
+  // Drives the visibility of the "继续扫描" (Continue Scan) button.
+  const [checkpointInfo, setCheckpointInfo] = useState<wails.ScanCheckpointDTO | null>(null);
+
+  // Derived: whether a scan is currently active (polled globally in context).
+  const scanActive = activeJobId !== null;
+
   // Consume a pending scan root set by the start card's "new project"
   // flow: prefill the root, then clear it so it only applies once.
   useEffect(() => {
@@ -50,12 +58,29 @@ export default function ScanJobsPage() {
     clearPendingScanRoot();
   }, [pendingScanRoot, clearPendingScanRoot]);
 
+  // Check for a resumable checkpoint whenever the scan root changes or
+  // a scan terminates (scanActive goes false). Skips the check while a
+  // scan is active — the resume button is hidden then anyway.
+  useEffect(() => {
+    if (!hasWailsRuntime() || !scanRoot.trim() || scanActive) {
+      setCheckpointInfo(null);
+      return;
+    }
+    let cancelled = false;
+    api.scan.getCheckpoint(scanRoot.trim())
+      .then((info) => {
+        if (!cancelled) setCheckpointInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckpointInfo(null);
+      });
+    return () => { cancelled = true; };
+  }, [scanRoot, scanActive]);
+
   // Job detail (page-local)
   const [selectedJob, setSelectedJob] = useState<wails.JobDetailResponse | null>(null);
   const [jobDetailLoading, setJobDetailLoading] = useState(false);
   const [jobDetailError, setJobDetailError] = useState<string | null>(null);
-
-  const scanActive = activeJobId !== null;
 
   const handleRegisteredRootSelect = (storage: wails.StorageInfo) => {
     setScanRoot(storage.root_path);
@@ -89,6 +114,26 @@ export default function ScanJobsPage() {
     setScanError(null);
     try {
       await retryLastScan();
+    } catch (e: unknown) {
+      setScanError((e as Error).message);
+    } finally {
+      setScanStarting(false);
+    }
+  };
+
+  const handleResumeScan = async () => {
+    if (!scanRoot.trim()) {
+      setScanError("请输入要扫描的根目录路径");
+      return;
+    }
+    setScanStarting(true);
+    setScanError(null);
+    try {
+      const workersNum = scanWorkers.trim() ? parseInt(scanWorkers, 10) : undefined;
+      await resumeScan(
+        scanRoot.trim(),
+        Number.isFinite(workersNum) && workersNum! > 0 ? workersNum : undefined,
+      );
     } catch (e: unknown) {
       setScanError((e as Error).message);
     } finally {
@@ -139,6 +184,8 @@ export default function ScanJobsPage() {
         hasMoreJobs={hasMoreJobs}
         canScan={capabilities.can_scan}
         canRetryScan={canRetryScan}
+        canResumeScan={checkpointInfo?.available ?? false}
+        resumeCheckpointCount={checkpointInfo?.scanned_count ?? 0}
         stateFilter={scanFilterState}
         typeFilter={scanFilterType}
         onScanRootChange={setScanRoot}
@@ -152,6 +199,7 @@ export default function ScanJobsPage() {
         onTypeFilterChange={setScanFilterType}
         onLoadMoreJobs={() => void loadMoreJobs()}
         onRetryScan={() => void handleRetryScan()}
+        onResumeScan={() => void handleResumeScan()}
       />
 
       <JobDetail

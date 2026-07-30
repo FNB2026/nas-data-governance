@@ -1918,10 +1918,31 @@ export namespace wails {
 	        this.completed_at = source["completed_at"];
 	    }
 	}
+	export class ScanCheckpointDTO {
+	    available: boolean;
+	    last_scanned_path?: string;
+	    scanned_count: number;
+	    status: string;
+	    started_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScanCheckpointDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.last_scanned_path = source["last_scanned_path"];
+	        this.scanned_count = source["scanned_count"];
+	        this.status = source["status"];
+	        this.started_at = source["started_at"];
+	    }
+	}
 	export class StartScanRequest {
 	    root: string;
 	    storage_id: string;
 	    full_scan?: boolean;
+	    resume?: boolean;
 	    workers?: number;
 	
 	    static createFrom(source: any = {}) {
@@ -1933,6 +1954,7 @@ export namespace wails {
 	        this.root = source["root"];
 	        this.storage_id = source["storage_id"];
 	        this.full_scan = source["full_scan"];
+	        this.resume = source["resume"];
 	        this.workers = source["workers"];
 	    }
 	}

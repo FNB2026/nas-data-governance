@@ -31,6 +31,7 @@ import {
   GetJobDetail,
   GetProjectInfo,
   GetProjectReadiness,
+  GetScanCheckpoint,
   GetScanProgress,
   GetVersion,
   ListAllPlans,
@@ -106,6 +107,9 @@ export const api = {
     /** No retry — polling callers manage their own retry. */
     getProgress: (jobId: string): Promise<wails.ScanJobProgress> =>
       callOnce(() => GetScanProgress(jobId)),
+    /** Check if a resumable checkpoint exists for the given root. */
+    getCheckpoint: (root: string): Promise<wails.ScanCheckpointDTO> =>
+      callRead(() => GetScanCheckpoint(root)),
     listJobs: (limit: number): Promise<wails.JobSummary[]> =>
       callRead(() => ListRecentJobs(limit)),
     getJobDetail: (jobId: string): Promise<wails.JobDetailResponse> =>

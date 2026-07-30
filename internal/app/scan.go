@@ -255,14 +255,18 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 
 	// Checkpoint: resume from the last incomplete scan if --resume.
+	// Only 'running' (crash-interrupted) or 'aborted' (user-cancelled)
+	// checkpoints are resumable. A 'completed' checkpoint means the
+	// previous scan finished — resuming from it would skip already-
+	// fully-scanned files, so we start a fresh checkpoint instead.
 	if s.store != nil {
 		if in.Resume && !in.FullScan {
 			cp, err := s.store.LastCheckpoint(ctx, in.StorageID)
-			if err == nil {
+			if err == nil && (cp.Status == "running" || cp.Status == "aborted") {
 				result.ResumedFrom = cp.LastScannedPath
 				result.CheckpointID = cp.ID
 				result.ResumedCount = cp.ScannedCount
-			} else if !errors.Is(err, store.ErrNotFound) {
+			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 				return nil, fmt.Errorf("app: load checkpoint: %w", err)
 			}
 		}
@@ -302,8 +306,19 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 	stats, err := scanner.Scan(ctx, scanOpts, func(file domain.FileInstance) error {
 		count := s.discovered.Add(1)
+		// Record the actual last-scanned file path every 1000 files so
+		// that a resumed scan can skip already-traversed paths. The path
+		// is the absolute filesystem path of the most recently discovered
+		// file at this 1000-file boundary.
+		//
+		// The scanned_count written to the checkpoint MUST include the
+		// files already counted by the resumed checkpoint (ResumedCount).
+		// Without this, every resume cycle resets the running count to
+		// near-zero, and the stored count regresses instead of growing
+		// monotonically across multiple interrupt→resume cycles.
 		if s.store != nil && result.CheckpointID != 0 && count%1000 == 0 {
-			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, "", int(count)); err != nil {
+			totalScanned := result.ResumedCount + int(count)
+			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, file.Path, totalScanned); err != nil {
 				return errors.New("update aggregate scan checkpoint failed")
 			}
 		}

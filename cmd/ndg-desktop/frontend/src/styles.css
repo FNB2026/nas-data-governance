@@ -775,6 +775,20 @@ button.secondary {
   white-space: nowrap;
 }
 
+/* Continue-scan button: visually distinct (success green) to signal
+   that it resumes from a checkpoint rather than starting fresh. */
+.scan-resume-btn {
+  background: var(--success) !important;
+  color: #fff !important;
+  border-color: var(--success) !important;
+}
+.scan-resume-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.scan-resume-btn:disabled {
+  opacity: 0.5;
+}
+
 .scan-advanced {
   display: flex;
   flex-wrap: wrap;

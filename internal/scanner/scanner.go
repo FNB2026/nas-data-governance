@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -19,10 +20,16 @@ type Options struct {
 	StorageID     string
 	CrossMounts   bool
 	ExcludedNames map[string]bool
-	// ResumePath, if non-empty, skips files whose path sorts strictly
-	// before this value. Directories are still entered so that files
-	// at the same prefix level are discovered. Used by incremental scan
-	// to resume from a checkpoint.
+	// ResumePath, if non-empty, skips files whose path sorts at or before
+	// this value (path <= ResumePath). Directories are still entered so that
+	// files beyond the boundary are discovered. Used by incremental scan to
+	// resume from a checkpoint.
+	//
+	// Correctness depends on Scan visiting files in ascending global
+	// dictionary order of their full paths: that way every file with
+	// path <= ResumePath has already been scanned, so skipping them on
+	// resume never misses a file. Scan enforces this ordering via a
+	// deterministic pre-order DFS (see dirSortKey).
 	ResumePath string
 }
 
@@ -57,8 +64,14 @@ type scanPathKey struct {
 //   - Symlinks: skipped (AGENTS rule 4).
 //   - Cross-mount: when CrossMounts is false, subdirectories on a
 //     different device are skipped (AGENTS rule 4).
-//   - Resume: when ResumePath is set, files whose path sorts before
-//     ResumePath are skipped (for checkpoint recovery).
+//   - Traversal order: deterministic pre-order depth-first. Entries within
+//     each directory are sorted by dirSortKey so that files are visited in
+//     ascending global dictionary order of their full paths. This ordering
+//     invariant is what makes checkpoint resume (path <= ResumePath)
+//     correct: BFS or any non-dictionary order would skip files that were
+//     never actually scanned.
+//   - Resume: when ResumePath is set, files with path <= ResumePath are
+//     skipped (for checkpoint recovery).
 //   - Path idempotency: a (storage_id, path) pair is visited at most once.
 //     This defensively contains duplicate enumeration without assigning the
 //     cause to a filesystem or protocol. Hard links — same inode at a different
@@ -80,33 +93,41 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	// seen guards (storage_id, path) idempotency across the whole scan.
 	// Sized for typical directory volumes; grows as needed.
 	seen := make(map[scanPathKey]struct{}, 4096)
-	type dirEntry struct {
-		path string
-		dev  uint64
-	}
-	queue := []dirEntry{{path: root, dev: rootDev}}
 
-	for len(queue) > 0 {
+	// walkDir performs a pre-order depth-first traversal of dirPath. Entries
+	// are sorted with dirSortKey so that the visit order matches a global
+	// ascending dictionary order of file paths. Recursing into a subdirectory
+	// before its next sibling guarantees that directory's entire subtree is
+	// processed first, which is exactly what keeps ResumePath (path <=
+	// boundary) consistent with the actual visit order.
+	var walkDir func(dirPath string, dirDev uint64) error
+	walkDir = func(dirPath string, dirDev uint64) error {
 		if err := ctx.Err(); err != nil {
-			return stats, err
+			return err
 		}
-
-		dir := queue[0]
-		queue = queue[1:]
 		stats.DirsVisited++
 
-		entries, err := os.ReadDir(dir.path)
+		entries, err := os.ReadDir(dirPath)
 		if err != nil {
-			stats.Errors = append(stats.Errors, ErrorEntry{Path: dir.path, Error: err})
-			continue // single dir failure does not abort the scan
+			stats.Errors = append(stats.Errors, ErrorEntry{Path: dirPath, Error: err})
+			return nil // single dir failure does not abort the scan
 		}
+
+		// os.ReadDir already returns entries sorted by name, but plain name
+		// ordering does NOT equal global path ordering when a directory name
+		// is a prefix of a sibling file name (e.g. dir "a" vs file "a.txt":
+		// globally "root/a.txt" < "root/a/..."). Re-sort with dirSortKey so
+		// DFS visits files in true ascending dictionary order.
+		sort.Slice(entries, func(i, j int) bool {
+			return dirSortKey(entries[i]) < dirSortKey(entries[j])
+		})
 
 		for _, entry := range entries {
 			if err := ctx.Err(); err != nil {
-				return stats, err
+				return err
 			}
 
-			path := filepath.Join(dir.path, entry.Name())
+			path := filepath.Join(dirPath, entry.Name())
 
 			// Exclusion check (root itself is never excluded).
 			if path != root && opts.ExcludedNames[entry.Name()] {
@@ -127,17 +148,24 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			dev, ino := deviceAndInode(info)
 
 			// Cross-mount protection.
-			if !opts.CrossMounts && dev != 0 && dir.dev != 0 && dev != dir.dev {
+			if !opts.CrossMounts && dev != 0 && dirDev != 0 && dev != dirDev {
 				continue
 			}
 
 			if entry.IsDir() {
-				queue = append(queue, dirEntry{path: path, dev: dev})
+				// Recurse depth-first so this directory's entire subtree is
+				// processed before the next sibling, preserving global
+				// dictionary order.
+				if err := walkDir(path, dev); err != nil {
+					return err
+				}
 				continue
 			}
 
-			// Resume checkpoint: skip files before the resume path.
-			if opts.ResumePath != "" && path < opts.ResumePath {
+			// Resume checkpoint: skip files at or before the resume path.
+			// The checkpoint's last_scanned_path is the most recently
+			// scanned file; resume continues strictly after it.
+			if opts.ResumePath != "" && path <= opts.ResumePath {
 				continue
 			}
 
@@ -155,12 +183,32 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 				Physical:     physical,
 				DiscoveredAt: time.Now().UTC(),
 			}); err != nil {
-				return stats, err
+				return err
 			}
 		}
+		return nil
 	}
 
+	if err := walkDir(root, rootDev); err != nil {
+		return stats, err
+	}
 	return stats, nil
+}
+
+// dirSortKey returns a sort key for a directory entry that makes a pre-order
+// DFS visit files in ascending global dictionary order of their full paths.
+//
+// Directory names are suffixed with "/" so that a directory sorts relative to
+// its siblings exactly as its descendants (whose paths begin with "name/")
+// do in global path order. For example, dir "a" (key "a/") sorts AFTER file
+// "a.txt" (key "a.txt") because '.' (0x2E) < '/' (0x2F), matching the global
+// order "root/a.txt" < "root/a/...". A plain name sort would place dir "a"
+// before file "a.txt" and break the resume-skip invariant.
+func dirSortKey(e os.DirEntry) string {
+	if e.IsDir() {
+		return e.Name() + "/"
+	}
+	return e.Name()
 }
 
 func physicalIdentity(info fs.FileInfo, filesystemReliable bool) domain.PhysicalIdentity {

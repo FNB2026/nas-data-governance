@@ -74,7 +74,7 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 // ListDuplicateGroups, GetGroupDetail.
 //
 // V4 (scan & jobs): OpenProjectReadWrite, StartScan, GetScanProgress,
-// CancelScan, ListRecentJobs, GetJobDetail.
+// GetScanCheckpoint, CancelScan, ListRecentJobs, GetJobDetail.
 //
 // V5 (diagnostics): DiagnoseFormats, DiagnoseGovernance, DiagnoseMerges.
 //
@@ -509,6 +509,7 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		Root:           req.Root,
 		StorageID:      storageID,
 		FullScan:       req.FullScan,
+		Resume:         req.Resume,
 		Workers:        workers,
 		HashAttempts:   3,
 		HashRetryDelay: 1 * time.Second,
@@ -545,6 +546,45 @@ func (a *API) GetScanProgress(jobID string) (ScanJobProgress, error) {
 		return ScanJobProgress{}, fmt.Errorf("wails: get scan progress: %w", err)
 	}
 	return mapScanJobProgress(j), nil
+}
+
+// GetScanCheckpoint checks whether a resumable scan checkpoint exists for
+// the given scan root. The frontend uses this to show or hide the "继续扫描"
+// (Continue Scan) button.
+//
+// A checkpoint is resumable when its status is 'running' (crash-interrupted)
+// or 'aborted' (user-cancelled) and not superseded by a later completed scan.
+// Returns Available=false (not an error) when no checkpoint exists.
+func (a *API) GetScanCheckpoint(root string) (ScanCheckpointDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return ScanCheckpointDTO{}, ErrNoProjectOpen
+	}
+	if strings.TrimSpace(root) == "" {
+		return ScanCheckpointDTO{}, errors.New("wails: root is required")
+	}
+
+	storageID := projectsvc.GenerateStorageID(root)
+	cp, err := a.store.LastCheckpoint(context.Background(), storageID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ScanCheckpointDTO{Available: false}, nil
+		}
+		return ScanCheckpointDTO{}, fmt.Errorf("wails: get scan checkpoint: %w", err)
+	}
+	// A checkpoint is only resumable when its status is 'running'
+	// (crash-interrupted) or 'aborted' (user-cancelled). A 'completed'
+	// checkpoint means the scan finished successfully — no resume needed.
+	resumable := cp.Status == "running" || cp.Status == "aborted"
+	return ScanCheckpointDTO{
+		Available:       resumable,
+		LastScannedPath: cp.LastScannedPath,
+		ScannedCount:    cp.ScannedCount,
+		Status:          cp.Status,
+		StartedAt:       formatTime(&cp.StartedAt),
+	}, nil
 }
 
 // CancelScan requests cancellation of a running scan job. The job's

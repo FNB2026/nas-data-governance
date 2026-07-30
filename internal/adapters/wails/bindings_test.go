@@ -782,4 +782,114 @@ func TestV4MethodsNoProjectOpen(t *testing.T) {
 	if _, err := api.GetJobDetail("job-1"); err != ErrNoProjectOpen {
 		t.Errorf("GetJobDetail: expected ErrNoProjectOpen, got %v", err)
 	}
+	if _, err := api.GetScanCheckpoint("/tmp"); err != ErrNoProjectOpen {
+		t.Errorf("GetScanCheckpoint: expected ErrNoProjectOpen, got %v", err)
+	}
+}
+
+// TestGetScanCheckpointAfterCompletedScan verifies that after a scan
+// completes successfully, GetScanCheckpoint returns Available=false —
+// the "继续扫描" button should NOT appear.
+func TestGetScanCheckpointAfterCompletedScan(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	prog := waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+	if prog.State != "COMPLETED" {
+		t.Fatalf("expected COMPLETED, got %s", prog.State)
+	}
+
+	// After a completed scan, no resumable checkpoint should exist.
+	cp, err := api.GetScanCheckpoint(scanDir)
+	if err != nil {
+		t.Fatalf("GetScanCheckpoint: %v", err)
+	}
+	if cp.Available {
+		t.Errorf("Available = true, want false (scan completed successfully)")
+	}
+}
+
+// TestGetScanCheckpointWithAbortedCheckpoint verifies that when an
+// aborted checkpoint exists, GetScanCheckpoint returns Available=true
+// with the checkpoint's scanned count — the "继续扫描" button should appear.
+func TestGetScanCheckpointWithAbortedCheckpoint(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	// Manually create an aborted checkpoint to simulate a crashed/cancelled scan.
+	storageID := generateStorageID(scanDir)
+	ctx := context.Background()
+	if err := api.store.RegisterStorage(ctx, domain.Storage{
+		ID: storageID, RootPath: scanDir, Kind: "filesystem", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RegisterStorage: %v", err)
+	}
+	cpID, err := api.store.StartCheckpoint(ctx, storageID)
+	if err != nil {
+		t.Fatalf("StartCheckpoint: %v", err)
+	}
+	if err := api.store.UpdateCheckpoint(ctx, cpID, filepath.Join(scanDir, "file2.txt"), 1); err != nil {
+		t.Fatalf("UpdateCheckpoint: %v", err)
+	}
+	if err := api.store.CompleteCheckpoint(ctx, cpID, "aborted"); err != nil {
+		t.Fatalf("CompleteCheckpoint: %v", err)
+	}
+
+	// GetScanCheckpoint should report the aborted checkpoint as available.
+	cp, err := api.GetScanCheckpoint(scanDir)
+	if err != nil {
+		t.Fatalf("GetScanCheckpoint: %v", err)
+	}
+	if !cp.Available {
+		t.Fatal("Available = false, want true (aborted checkpoint exists)")
+	}
+	if cp.Status != "aborted" {
+		t.Errorf("Status = %q, want 'aborted'", cp.Status)
+	}
+	if cp.ScannedCount != 1 {
+		t.Errorf("ScannedCount = %d, want 1", cp.ScannedCount)
+	}
+}
+
+// TestStartScanWithResumeOption verifies that the StartScan binding
+// correctly passes Resume=true to the backend when requested.
+func TestStartScanWithResumeOption(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	// Start a scan with Resume=true. Since no prior checkpoint exists,
+	// this should still succeed (starts a fresh checkpoint).
+	resp, err := api.StartScan(StartScanRequest{
+		Root:   scanDir,
+		Resume: true,
+	})
+	if err != nil {
+		t.Fatalf("StartScan with Resume: %v", err)
+	}
+	prog := waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+	if prog.State != "COMPLETED" {
+		t.Fatalf("expected COMPLETED, got %s", prog.State)
+	}
 }

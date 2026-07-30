@@ -25,6 +25,8 @@ interface ScanStartParams {
   root: string;
   fullScan: boolean;
   workers?: number;
+  /** When true, resume from the last checkpoint (skip already-traversed paths). */
+  resume?: boolean;
 }
 
 interface ProjectContextValue {
@@ -102,6 +104,7 @@ interface ProjectContextValue {
   refreshProject: () => Promise<void>;
   startScan: (params: ScanStartParams) => Promise<void>;
   retryLastScan: () => Promise<void>;
+  resumeScan: (root: string, workers?: number) => Promise<void>;
   cancelScan: () => Promise<void>;
   loadJobs: () => Promise<void>;
   refreshRecoveryLock: () => Promise<wails.RecoveryStatusDTO | null>;
@@ -592,7 +595,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       };
       const resp = await api.scan.start({
         root: normalizedParams.root,
-        full_scan: normalizedParams.fullScan,
+        full_scan: normalizedParams.resume ? false : normalizedParams.fullScan,
+        resume: normalizedParams.resume,
         workers: normalizedParams.workers,
       } as wails.StartScanRequest);
       setLastScanParams(normalizedParams);
@@ -611,6 +615,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
     await startScan(lastScanParams);
   }, [lastScanParams, pushToast, startScan]);
+
+  // Resume scan from the last checkpoint. The root comes from the scan
+  // form (not lastScanParams) so it works even after app restart when
+  // lastScanParams is null but a checkpoint exists in the database.
+  // Resume and full scan are mutually exclusive — resume always forces
+  // full_scan=false so the backend reuses the checkpoint.
+  const resumeScan = useCallback(async (root: string, workers?: number) => {
+    if (!root.trim()) return;
+    await startScan({ root: root.trim(), fullScan: false, resume: true, workers });
+  }, [startScan]);
 
   const cancelScan = useCallback(async () => {
     if (!activeJobId) return;
@@ -677,6 +691,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     refreshProject,
     startScan,
     retryLastScan,
+    resumeScan,
     cancelScan,
     loadJobs,
     refreshRecoveryLock,

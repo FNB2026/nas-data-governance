@@ -49,6 +49,8 @@ export function GetProjectInfo():Promise<wails.ProjectInfo>;
 
 export function GetProjectReadiness():Promise<wails.ProjectReadinessDTO>;
 
+export function GetScanCheckpoint(arg1:string):Promise<wails.ScanCheckpointDTO>;
+
 export function GetScanProgress(arg1:string):Promise<wails.ScanJobProgress>;
 
 export function GetVersion():Promise<wails.VersionInfo>;

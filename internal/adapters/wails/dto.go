@@ -89,7 +89,10 @@ type StartScanRequest struct {
 	Root      string `json:"root"`
 	StorageID string `json:"storage_id"`
 	FullScan  bool   `json:"full_scan,omitempty"`
-	Workers   int    `json:"workers,omitempty"`
+	// Resume continues from the last checkpoint, skipping already-traversed
+	// paths. Ignored when FullScan is true.
+	Resume  bool `json:"resume,omitempty"`
+	Workers int  `json:"workers,omitempty"`
 }
 
 // StartScanResponse is the output DTO for StartScan.
@@ -141,6 +144,17 @@ type JobEvent struct {
 type JobDetailResponse struct {
 	ScanJobProgress
 	Events []JobEvent `json:"events"`
+}
+
+// ScanCheckpointDTO reports whether a resumable scan checkpoint exists
+// for a given scan root. The frontend uses this to show or hide the
+// "继续扫描" (Continue Scan) button.
+type ScanCheckpointDTO struct {
+	Available       bool   `json:"available"`
+	LastScannedPath string `json:"last_scanned_path,omitempty"`
+	ScannedCount    int    `json:"scanned_count"`
+	Status          string `json:"status"`
+	StartedAt       string `json:"started_at,omitempty"`
 }
 
 // ---- V5 Diagnostic DTOs ----

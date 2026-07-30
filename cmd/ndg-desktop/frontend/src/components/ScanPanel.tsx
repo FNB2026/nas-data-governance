@@ -30,6 +30,9 @@ export interface ScanPanelProps {
   // capability
   canScan: boolean;
   canRetryScan: boolean;
+  // resume capability
+  canResumeScan: boolean;
+  resumeCheckpointCount: number;
   // persistent filter state (from context)
   stateFilter: string;
   typeFilter: string;
@@ -45,6 +48,7 @@ export interface ScanPanelProps {
   onTypeFilterChange: (v: string) => void;
   onLoadMoreJobs: () => void;
   onRetryScan: () => void;
+  onResumeScan: () => void;
 }
 
 const STATE_FILTER_OPTIONS = [
@@ -139,6 +143,8 @@ export default function ScanPanel({
   storages,
   canScan,
   canRetryScan,
+  canResumeScan,
+  resumeCheckpointCount,
   stateFilter,
   typeFilter,
   onScanRootChange,
@@ -152,6 +158,7 @@ export default function ScanPanel({
   onTypeFilterChange,
   onLoadMoreJobs,
   onRetryScan,
+  onResumeScan,
 }: ScanPanelProps) {
   const { pathPrivacyMode } = useProject();
   // Tick state to refresh duration display every second
@@ -278,6 +285,17 @@ export default function ScanPanel({
           >
             {scanStarting ? "启动中…" : "开始扫描"}
           </button>
+          {canResumeScan && !scanActive && scanRoot.trim() && (
+            <button
+              type="button"
+              className="btn-sm scan-resume-btn"
+              disabled={scanStarting}
+              onClick={onResumeScan}
+              title={`检测到未完成的扫描检查点（已扫描 ${resumeCheckpointCount.toLocaleString()} 项），继续扫描将跳过已遍历的路径`}
+            >
+              {scanStarting ? "启动中…" : "继续扫描"}
+            </button>
+          )}
           <button
             type="button"
             className="btn-sm secondary scan-advanced-toggle"
@@ -387,13 +405,25 @@ export default function ScanPanel({
 
           {/* Retry button for failed/cancelled scans */}
           {!scanActive && canScan && canRetryScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
-            <button
-              className="btn-sm"
-              disabled={scanStarting}
-              onClick={onRetryScan}
-            >
-              {scanStarting ? "启动中…" : "重试扫描"}
-            </button>
+            <>
+              <button
+                className="btn-sm"
+                disabled={scanStarting}
+                onClick={onRetryScan}
+              >
+                {scanStarting ? "启动中…" : "重试扫描"}
+              </button>
+              {canResumeScan && (
+                <button
+                  className="btn-sm scan-resume-btn"
+                  disabled={scanStarting}
+                  onClick={onResumeScan}
+                  title={`检测到检查点（已扫描 ${resumeCheckpointCount.toLocaleString()} 项），继续扫描将跳过已遍历的路径`}
+                >
+                  {scanStarting ? "启动中…" : "继续扫描"}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
