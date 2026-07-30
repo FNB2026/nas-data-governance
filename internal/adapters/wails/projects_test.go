@@ -378,13 +378,13 @@ func TestValidateScanSourceRejectsDirectoryWithoutPermissions(t *testing.T) {
 }
 
 func TestCreateProjectFromSourceRollsBackAfterDatabaseCreationFailure(t *testing.T) {
-	api := NewAPI()
 	src := makeScanSource(t)
 	original := writeProjectMetaFn
 	writeProjectMetaFn = func(string, ProjectMeta) error {
 		return errors.New("injected project metadata failure")
 	}
 	t.Cleanup(func() { writeProjectMetaFn = original })
+	api := NewAPI()
 
 	_, err := api.CreateProjectFromSource(CreateProjectInput{
 		Name:       "Rollback Probe",

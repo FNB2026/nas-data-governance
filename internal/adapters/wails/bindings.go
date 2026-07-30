@@ -26,6 +26,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/governancediag"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/merge"
+	projectsvc "github.com/FNB2026/nas-data-governance/internal/project"
 	"github.com/FNB2026/nas-data-governance/internal/query"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"github.com/FNB2026/nas-data-governance/internal/version"
@@ -104,15 +105,51 @@ type API struct {
 	recoverySvc   *app.RecoveryService
 	executionSvc  *app.ExecutionService
 	path          string
-	projectID     string          // logical ID exposed through ProjectInfo; never a database path
-	jobScope      string          // legacy JobManager compatibility scope; may be the historical abs path
+	projectID     string // logical ID exposed through ProjectInfo; never a database path
+	jobScope      string // legacy JobManager compatibility scope; may be the historical abs path
+	projectSvc    *projectsvc.Service
 	dirPicker     DirectoryPicker // injected by main.go; nil outside Wails runtime
 }
 
 // NewAPI creates a new Wails API instance. The store starts nil;
 // OpenProject initializes it.
 func NewAPI() *API {
-	return &API{}
+	return &API{projectSvc: newProjectService()}
+}
+
+// initReadWriteServicesLocked is composition-root wiring, not project
+// lifecycle logic. The caller must hold a.mu.
+func (a *API) initReadWriteServicesLocked(st *store.SQLiteStore) {
+	mgr := jobs.New(st)
+	_, _ = mgr.Recover(context.Background())
+	a.store = st
+	a.dupSvc = app.NewDuplicateServiceWithReader(st)
+	a.diagSvc = app.NewDiagnosticService(st)
+	a.planSvc = app.NewPlanService()
+	a.reviewSvc = app.NewReviewService(st)
+	a.quarantineSvc = app.NewQuarantineService(st)
+	a.purgeSvc = app.NewPurgeService(st)
+	a.recoverySvc = app.NewRecoveryService(st)
+	a.executionSvc = app.NewExecutionService(st)
+	a.jobMgr = mgr
+	a.scanRunner = app.NewScanJobRunner(app.NewScanService(st), mgr)
+}
+
+func (a *API) resetProjectStateLocked() {
+	a.store = nil
+	a.dupSvc = nil
+	a.diagSvc = nil
+	a.planSvc = nil
+	a.reviewSvc = nil
+	a.quarantineSvc = nil
+	a.purgeSvc = nil
+	a.recoverySvc = nil
+	a.executionSvc = nil
+	a.scanRunner = nil
+	a.jobMgr = nil
+	a.path = ""
+	a.projectID = ""
+	a.jobScope = ""
 }
 
 // GetVersion returns the build version information.
@@ -161,8 +198,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.recoverySvc = app.NewRecoveryService(st)
 	a.executionSvc = app.NewExecutionService(st)
 	a.path = absPath
-	a.projectID, _ = projectIdentity(absPath)
-	a.jobScope = projectJobScope(absPath, a.projectID)
+	a.projectID, _, a.jobScope = a.resolveProjectIdentity(absPath)
 
 	info, err := a.projectInfoLocked(context.Background())
 	if err != nil {
@@ -183,7 +219,7 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 		a.jobScope = ""
 		return ProjectInfo{}, err
 	}
-	_ = a.recordRecentLocked(projectDisplayName(absPath), absPath)
+	_ = a.recordRecentLocked(a.projectDisplayName(absPath), absPath)
 	return info, nil
 }
 
@@ -274,7 +310,7 @@ func (a *API) projectInfoLocked(ctx context.Context) (ProjectInfo, error) {
 	}
 	return ProjectInfo{
 		ProjectID:    a.projectID,
-		Name:         projectDisplayName(a.path),
+		Name:         a.projectDisplayName(a.path),
 		Path:         a.path,
 		IsOpen:       true,
 		StorageCount: len(storages),
@@ -415,8 +451,7 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 	// the scan runner / job manager required for V4 scan operations.
 	a.initReadWriteServicesLocked(st)
 	a.path = absPath
-	a.projectID, _ = projectIdentity(absPath)
-	a.jobScope = projectJobScope(absPath, a.projectID)
+	a.projectID, _, a.jobScope = a.resolveProjectIdentity(absPath)
 
 	info, err := a.projectInfoLocked(context.Background())
 	if err != nil {
@@ -424,7 +459,7 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 		a.resetProjectStateLocked()
 		return ProjectInfo{}, err
 	}
-	_ = a.recordRecentLocked(projectDisplayName(absPath), absPath)
+	_ = a.recordRecentLocked(a.projectDisplayName(absPath), absPath)
 	return info, nil
 }
 
@@ -447,7 +482,7 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	if strings.TrimSpace(req.Root) == "" {
 		return StartScanResponse{}, errors.New("wails: root is required")
 	}
-	if err := rejectScanRootContainingProjectFiles(req.Root, a.path); err != nil {
+	if err := a.rejectScanRootContainingProjectFiles(req.Root, a.path); err != nil {
 		return StartScanResponse{}, err
 	}
 
@@ -457,7 +492,7 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		// RegisterScanSource / CreateProjectFromSource. This avoids a
 		// "default" vs "src_<hash>" mismatch when the user types a root
 		// manually instead of picking a registered storage.
-		storageID = generateStorageID(req.Root)
+		storageID = projectsvc.GenerateStorageID(req.Root)
 	}
 
 	workers := req.Workers
