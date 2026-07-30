@@ -27,6 +27,7 @@ export interface ScanPanelProps {
   jobsError: string | null;
   jobDetailLoading: boolean;
   hasMoreJobs: boolean;
+  storages: wails.StorageInfo[];
   // capability
   canScan: boolean;
   canRetryScan: boolean;
@@ -35,6 +36,7 @@ export interface ScanPanelProps {
   typeFilter: string;
   // handlers
   onScanRootChange: (v: string) => void;
+  onRegisteredRootSelect: (storage: wails.StorageInfo) => void;
   onScanStorageIdChange: (v: string) => void;
   onScanFullScanChange: (v: boolean) => void;
   onScanWorkersChange: (v: string) => void;
@@ -59,11 +61,12 @@ const STATE_FILTER_OPTIONS = [
 
 // Stages where processed/discovered is a valid progress ratio.
 // DISCOVERING is excluded — the denominator is still changing.
-const DETERMINATE_STAGES = new Set(["QUICK_HASHING", "FULL_HASHING"]);
+const DETERMINATE_STAGES = new Set(["QUICK_HASHING"]);
 
 // Stages where we show an indeterminate bar (activity without percentage).
 const INDETERMINATE_STAGES = new Set([
   "DISCOVERING",
+  "FULL_HASHING",
   "METADATA_INDEXING",
   "CONTEXT_CLASSIFYING",
   "FORMAT_ANALYZING",
@@ -136,11 +139,13 @@ export default function ScanPanel({
   jobsError,
   jobDetailLoading,
   hasMoreJobs,
+  storages,
   canScan,
   canRetryScan,
   stateFilter,
   typeFilter,
   onScanRootChange,
+  onRegisteredRootSelect,
   onScanStorageIdChange,
   onScanFullScanChange,
   onScanWorkersChange,
@@ -236,21 +241,39 @@ export default function ScanPanel({
       {/* Scan form — hidden in read-only mode */}
       {canScan ? (
         <div className="scan-form" aria-label="扫描参数">
-          <label>
+          <label className="scan-root-field">
             根目录
-            <input
-              type={pathPrivacyMode ? "password" : "text"}
-              value={scanRoot}
-              onChange={(e) => onScanRootChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !scanActive && !scanStarting && scanRoot.trim()) {
-                  onStartScan();
-                }
-              }}
-              placeholder="/path/to/scan"
-              disabled={scanActive}
-              autoFocus
-            />
+            <div className="scan-root-controls">
+              <input
+                type={pathPrivacyMode ? "password" : "text"}
+                value={scanRoot}
+                onChange={(e) => onScanRootChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !scanActive && !scanStarting && scanRoot.trim()) {
+                    onStartScan();
+                  }
+                }}
+                placeholder="/path/to/scan"
+                disabled={scanActive}
+                autoFocus
+              />
+              <select
+                aria-label="选择已登记目录"
+                value={storages.some((storage) => storage.root_path === scanRoot) ? scanRoot : ""}
+                onChange={(e) => {
+                  const storage = storages.find((item) => item.root_path === e.target.value);
+                  if (storage) onRegisteredRootSelect(storage);
+                }}
+                disabled={scanActive || storages.length === 0}
+              >
+                <option value="">{storages.length === 0 ? "暂无历史目录" : "历史目录…"}</option>
+                {storages.map((storage) => (
+                  <option key={storage.id} value={storage.root_path}>
+                    {storage.id} · {pathPrivacyMode ? "已隐藏路径" : storage.root_path}
+                  </option>
+                ))}
+              </select>
+            </div>
           </label>
           <button
             className="btn-sm"
@@ -345,7 +368,9 @@ export default function ScanPanel({
 
             {/* Non-DISCOVERING indeterminate: show processed count */}
             {progressDisplay.mode === "indeterminate" && scanProgress.stage !== "DISCOVERING" && (
-              <span><strong>已处理：</strong>{scanProgress.processed.toLocaleString()}</span>
+              scanProgress.stage === "FULL_HASHING"
+                ? <span><strong>状态：</strong>正在校验重复候选的完整内容</span>
+                : <span><strong>已处理：</strong>{scanProgress.processed.toLocaleString()}</span>
             )}
 
             <span><strong>已发现：</strong>{scanProgress.discovered.toLocaleString()}</span>

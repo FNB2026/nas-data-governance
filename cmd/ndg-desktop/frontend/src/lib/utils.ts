@@ -11,7 +11,7 @@ export const STAGE_LABELS: Record<string, string> = {
   FORMAT_ANALYZING: "格式分析",
   GROUPING: "分组",
   PLANNING: "规划",
-  FINALIZING: "收尾",
+  FINALIZING: "保存索引与收尾",
 };
 
 export const STATE_LABELS: Record<string, string> = {

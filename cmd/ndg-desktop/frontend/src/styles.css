@@ -725,9 +725,29 @@ button.secondary {
   font-size: 0.78rem;
 }
 
+.scan-root-field {
+  flex: 1 1 420px;
+}
+
+.scan-root-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(170px, 0.55fr);
+  gap: 0.5rem;
+}
+
 .scan-form input[type="text"],
 .scan-form input[type="number"] {
   min-width: 140px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.scan-root-controls select {
+  min-width: 170px;
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -969,6 +989,10 @@ button.secondary {
 
   .scan-form label {
     flex: 1 1 100%;
+  }
+
+  .scan-root-controls {
+    grid-template-columns: 1fr;
   }
 
   .scan-form .checkbox-label {

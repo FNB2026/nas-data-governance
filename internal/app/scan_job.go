@@ -33,6 +33,7 @@ func NewScanJobRunner(scan *ScanService, mgr *jobs.JobManager) *ScanJobRunner {
 var scanStageMap = map[string]jobs.JobStage{
 	"traversal":  jobs.StageDiscovering,
 	"quick_hash": jobs.StageQuickHashing,
+	"full_hash":  jobs.StageFullHashing,
 	"persisting": jobs.StageFinalizing,
 	"completed":  jobs.StageFinalizing,
 }
@@ -84,8 +85,17 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 	var scanErr error
 
 	err := r.jobs.Run(ctx, jobID, func(jobCtx context.Context, reporter *jobs.Reporter) error {
+		// ScanService reports stage changes synchronously. This guarantees
+		// short stages such as persistence/finalization are recorded instead
+		// of disappearing between one-second progress polls.
+		in.onStageChanged = func(stage string) {
+			if jobStage, ok := scanStageMap[stage]; ok {
+				_ = reporter.SetStage(jobCtx, jobStage)
+			}
+		}
+
 		// Start a progress poller goroutine that reads ScanService.Progress()
-		// and reports to the JobManager at intervals.
+		// and reports aggregate counters to the JobManager at intervals.
 		progressDone := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -124,11 +134,12 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 }
 
 // pollScanProgress reads ScanService.Progress() at regular intervals and
-// reports stage transitions and progress snapshots to the JobManager.
-// It exits when progressDone is closed or jobCtx is cancelled.
+// reports progress snapshots to the JobManager. Stage transitions are
+// delivered synchronously by ScanInput.onStageChanged so brief stages are
+// never lost between polling ticks. It exits when progressDone is closed or
+// jobCtx is cancelled.
 func (r *ScanJobRunner) pollScanProgress(ctx context.Context, reporter *jobs.Reporter, progressDone <-chan struct{}) {
 	const progressInterval = 1 * time.Second
-	lastStage := ""
 
 	ticker := time.NewTicker(progressInterval)
 	defer ticker.Stop()
@@ -141,14 +152,6 @@ func (r *ScanJobRunner) pollScanProgress(ctx context.Context, reporter *jobs.Rep
 			return
 		case <-ticker.C:
 			p := r.scan.Progress()
-
-			// Detect and report stage transitions.
-			if p.Stage != lastStage {
-				if jobStage, ok := scanStageMap[p.Stage]; ok {
-					_ = reporter.SetStage(ctx, jobStage)
-				}
-				lastStage = p.Stage
-			}
 
 			// Report progress snapshot (privacy-safe: counters only).
 			_ = reporter.SetProgress(ctx, jobs.ProgressPayload{

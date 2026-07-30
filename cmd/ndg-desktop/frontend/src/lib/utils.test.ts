@@ -104,6 +104,7 @@ describe("stageLabel", () => {
   it("returns Chinese label for known stage", () => {
     expect(stageLabel("DISCOVERING")).toBe("发现文件");
     expect(stageLabel("FULL_HASHING")).toBe("完整哈希");
+    expect(stageLabel("FINALIZING")).toBe("保存索引与收尾");
   });
 
   it("returns raw value for unknown stage", () => {

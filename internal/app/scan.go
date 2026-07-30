@@ -91,6 +91,10 @@ type ScanInput struct {
 	HashAttempts int
 	// HashRetryDelay is the delay between hash attempts.
 	HashRetryDelay time.Duration
+	// onStageChanged is set by ScanJobRunner so persistent jobs receive
+	// stage transitions immediately instead of relying on a polling window.
+	// It is intentionally private: callers cannot forge job state.
+	onStageChanged func(string)
 }
 
 // ScanProgress is a point-in-time snapshot of scan progress. Safe to
@@ -187,6 +191,13 @@ func (s *ScanService) Progress() ScanProgress {
 	}
 }
 
+func (s *ScanService) setStage(in ScanInput, stage string) {
+	s.stage.Store(stage)
+	if in.onStageChanged != nil {
+		in.onStageChanged(stage)
+	}
+}
+
 // Scan runs the full scan pipeline:
 //
 //  1. Load incremental cache from DB (if store && !fullScan)
@@ -213,7 +224,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	s.discovered.Store(0)
 	s.processed.Store(0)
 	s.failed.Store(0)
-	s.stage.Store("traversal")
+	s.setStage(in, "traversal")
 
 	rootPath, err := filepath.Abs(in.Root)
 	if err != nil {
@@ -322,7 +333,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		})
 	})
 
-	s.stage.Store("quick_hash")
+	s.setStage(in, "quick_hash")
 	hashErrs := hashRunner.Wait()
 	_ = hashErrs // already recorded as hashFailures
 
@@ -338,6 +349,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 
 	// Second-stage hashing: only for files that share size+quick_hash
 	// with another file AND don't already have content_sha256 cached.
+	s.setStage(in, "full_hash")
 	bySizeQuick := map[string][]int{}
 	for i, f := range files {
 		if f.ContentSHA256 == "" && f.QuickHash != "" {
@@ -366,7 +378,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		}
 	}
 	_ = fullRunner.Wait()
-	s.stage.Store("persisting")
+	s.setStage(in, "persisting")
 
 	result.Files = files
 	result.HashFailures = hashFailures
@@ -403,7 +415,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		}
 	}
 
-	s.stage.Store("completed")
+	s.setStage(in, "completed")
 	return result, nil
 }
 

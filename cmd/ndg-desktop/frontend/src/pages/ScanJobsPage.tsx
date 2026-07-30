@@ -16,6 +16,7 @@ export default function ScanJobsPage() {
     cancelling,
     canRetryScan,
     jobs,
+    storages,
     jobsError,
     hasMoreJobs,
     loadMoreJobs,
@@ -45,6 +46,12 @@ export default function ScanJobsPage() {
   const [jobDetailError, setJobDetailError] = useState<string | null>(null);
 
   const scanActive = activeJobId !== null;
+
+  const handleRegisteredRootSelect = (storage: wails.StorageInfo) => {
+    setScanRoot(storage.root_path);
+    setScanStorageId(storage.id);
+    setScanError(null);
+  };
 
   const handleStartScan = async () => {
     if (!scanRoot.trim()) {
@@ -119,6 +126,7 @@ export default function ScanJobsPage() {
         scanProgress={scanProgress}
         cancelling={cancelling}
         jobs={jobs}
+        storages={storages}
         jobsError={jobsError}
         jobDetailLoading={jobDetailLoading}
         hasMoreJobs={hasMoreJobs}
@@ -127,6 +135,7 @@ export default function ScanJobsPage() {
         stateFilter={scanFilterState}
         typeFilter={scanFilterType}
         onScanRootChange={setScanRoot}
+        onRegisteredRootSelect={handleRegisteredRootSelect}
         onScanStorageIdChange={setScanStorageId}
         onScanFullScanChange={setScanFullScan}
         onScanWorkersChange={setScanWorkers}
