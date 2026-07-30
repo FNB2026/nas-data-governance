@@ -9,6 +9,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/events"
+	"github.com/FNB2026/nas-data-governance/internal/executor"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/query"
 	"github.com/FNB2026/nas-data-governance/internal/report"
@@ -712,4 +713,64 @@ func mapJournalEntry(e store.JournalEntry) JournalEntryDTO {
 		dto.CompletedAt = e.CompletedAt.UTC().Format(time.RFC3339)
 	}
 	return dto
+}
+
+// ---- V7.1 Plan Execution DTOs ----
+
+// ExecutePlansRequest is the input DTO for ExecutePlans. The backend
+// re-loads plans from the database by plan_ids — it does not trust
+// frontend-supplied plan data.
+type ExecutePlansRequest struct {
+	PlanIDs        []string `json:"plan_ids"`
+	QuarantineRoot string   `json:"quarantine_root"`
+	SourceRoots    []string `json:"source_roots"`
+	DryRun         bool     `json:"dry_run"`
+	RetentionHours int      `json:"retention_hours"` // default 720 (30d), min 24
+}
+
+// ExecutionStepDTO is the DTO for a single execution pipeline step
+// (stale check, scope validation, action execution, etc.).
+type ExecutionStepDTO struct {
+	Name   string         `json:"name"`
+	Status string         `json:"status"` // passed, skipped, failed
+	Detail map[string]any `json:"detail,omitempty"`
+}
+
+// ExecutePlanResultDTO is the DTO for a single plan's execution outcome.
+type ExecutePlanResultDTO struct {
+	PlanID     string             `json:"plan_id"`
+	FinalState string             `json:"final_state"`
+	Steps      []ExecutionStepDTO `json:"steps"`
+	ErrorType  string             `json:"error_type,omitempty"`
+}
+
+// ExecutePlansResponse is the aggregated output DTO for ExecutePlans.
+type ExecutePlansResponse struct {
+	Results  []ExecutePlanResultDTO `json:"results"`
+	Executed int                    `json:"executed"`
+	Skipped  int                    `json:"skipped"`
+	Failed   int                    `json:"failed"`
+}
+
+// ---- V7.1 plan execution mapping helpers ----
+
+func mapExecutionStep(s executor.AuditStep) ExecutionStepDTO {
+	return ExecutionStepDTO{
+		Name:   s.Name,
+		Status: string(s.Status),
+		Detail: s.Detail,
+	}
+}
+
+func mapExecutionResult(r app.ExecutionResult) ExecutePlanResultDTO {
+	steps := make([]ExecutionStepDTO, len(r.Steps))
+	for i, s := range r.Steps {
+		steps[i] = mapExecutionStep(s)
+	}
+	return ExecutePlanResultDTO{
+		PlanID:     r.PlanID,
+		FinalState: string(r.FinalState),
+		Steps:      steps,
+		ErrorType:  r.ErrorType,
+	}
 }

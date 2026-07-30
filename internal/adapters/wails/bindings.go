@@ -1287,3 +1287,162 @@ func (a *API) ListJournalEntries(planID string) ([]JournalEntryDTO, error) {
 	}
 	return out, nil
 }
+
+// ---- V7.1 Plan execution bindings ----
+
+// SaveDraftPlans generates draft governance plans from scanned files and
+// persists them to the database as DRAFT state. Unlike BuildDraftPlans
+// (which is read-only), this method creates a task record and saves plans
+// so they can be subsequently approved and executed.
+//
+// Requires read-write mode. If a planning task already exists for the
+// same storage, its plans are replaced (SavePlans deletes by task_id).
+//
+// If storageID is empty, all storages are included.
+func (a *API) SaveDraftPlans(storageID string) ([]PlanDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return nil, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return nil, ErrProjectNotReadWrite
+	}
+	if a.planSvc == nil {
+		return nil, ErrNoProjectOpen
+	}
+
+	files, err := a.store.ListFiles(context.Background(), strings.TrimSpace(storageID))
+	if err != nil {
+		return nil, fmt.Errorf("wails: load files for planning: %w", err)
+	}
+	if len(files) == 0 {
+		return []PlanDTO{}, nil
+	}
+
+	plans := a.planSvc.BuildPlans(context.Background(), files)
+	if len(plans) == 0 {
+		return []PlanDTO{}, nil
+	}
+
+	// Create a task record so FK constraints on operation_plans are
+	// satisfied. The task ID is deterministic-ish but unique per call.
+	taskID := fmt.Sprintf("plan-%d", time.Now().UnixNano())
+	if err := a.store.CreateTask(context.Background(), domain.OperationTask{
+		ID:        taskID,
+		RootPath:  files[0].StorageID, // best-effort; used for grouping
+		State:     "planning",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		return nil, fmt.Errorf("wails: create planning task: %w", err)
+	}
+
+	for i := range plans {
+		plans[i].TaskID = taskID
+	}
+
+	if err := a.store.SavePlans(context.Background(), taskID, plans); err != nil {
+		return nil, fmt.Errorf("wails: save draft plans: %w", err)
+	}
+
+	out := make([]PlanDTO, len(plans))
+	for i, p := range plans {
+		out[i] = mapPlan(p)
+	}
+	return out, nil
+}
+
+// ExecutePlans runs approved plans through the safe-operation pipeline.
+// In dry-run mode, plans are validated (stale check, protection rules,
+// scope validation) without filesystem writes. In real mode, files are
+// moved to quarantine, journal is written, and quarantine items are
+// registered for lifecycle management.
+//
+// Requires read-write mode. Plans must be in APPROVED state. The backend
+// re-loads plans from the database by plan_ids — it does not trust
+// frontend-supplied plan data.
+func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return ExecutePlansResponse{}, ErrNoProjectOpen
+	}
+	if a.scanRunner == nil {
+		return ExecutePlansResponse{}, ErrProjectNotReadWrite
+	}
+	if a.executionSvc == nil {
+		return ExecutePlansResponse{}, ErrNoProjectOpen
+	}
+	if len(req.PlanIDs) == 0 {
+		return ExecutePlansResponse{}, errors.New("wails: at least one plan_id is required")
+	}
+	if strings.TrimSpace(req.QuarantineRoot) == "" {
+		return ExecutePlansResponse{}, errors.New("wails: quarantine_root is required")
+	}
+	if len(req.SourceRoots) == 0 {
+		return ExecutePlansResponse{}, errors.New("wails: at least one source root is required")
+	}
+
+	// Retention: default 720h (30d), minimum 24h.
+	retentionHours := req.RetentionHours
+	if retentionHours <= 0 {
+		retentionHours = 720
+	}
+	if retentionHours < 24 {
+		return ExecutePlansResponse{}, errors.New("wails: retention must be at least 24 hours")
+	}
+	retention := time.Duration(retentionHours) * time.Hour
+
+	// Re-load all plans from DB and filter by requested plan_ids.
+	// Only APPROVED plans are eligible for execution.
+	allPlans, err := a.store.ListAllPlans(context.Background())
+	if err != nil {
+		return ExecutePlansResponse{}, fmt.Errorf("wails: load plans for execution: %w", err)
+	}
+
+	idSet := make(map[string]bool, len(req.PlanIDs))
+	for _, id := range req.PlanIDs {
+		idSet[id] = true
+	}
+
+	var eligible []domain.OperationPlan
+	for _, p := range allPlans {
+		if idSet[p.ID] && p.State == domain.PlanApproved {
+			eligible = append(eligible, p)
+		}
+	}
+
+	if len(eligible) == 0 {
+		return ExecutePlansResponse{
+			Results:  []ExecutePlanResultDTO{},
+			Executed: 0,
+			Skipped:  0,
+			Failed:   0,
+		}, nil
+	}
+
+	summary, err := a.executionSvc.Execute(context.Background(), app.ExecutionInput{
+		Plans:          eligible,
+		QuarantineRoot: req.QuarantineRoot,
+		SourceRoots:    req.SourceRoots,
+		DryRun:         req.DryRun,
+		Retention:      retention,
+	})
+	if err != nil {
+		return ExecutePlansResponse{}, fmt.Errorf("wails: execute plans: %w", err)
+	}
+
+	results := make([]ExecutePlanResultDTO, len(summary.Results))
+	for i, r := range summary.Results {
+		results[i] = mapExecutionResult(r)
+	}
+
+	return ExecutePlansResponse{
+		Results:  results,
+		Executed: summary.Executed,
+		Skipped:  summary.Skipped,
+		Failed:   summary.Failed,
+	}, nil
+}

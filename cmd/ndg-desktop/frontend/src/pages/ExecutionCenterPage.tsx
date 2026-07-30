@@ -11,8 +11,10 @@ import {
   CheckRecoveryLock,
   CreatePurgePlans,
   CreateRestorePlan,
+  ExecutePlans,
   ExecutePurge,
   ExecuteRestore,
+  ListAllPlans,
   ListPurgePlans,
   ListQuarantineItems,
   ListRestorePlans,
@@ -49,7 +51,16 @@ const PURGE_STATE_LABELS: Record<string, string> = {
   FAILED: "失败",
 };
 
-type ExecTab = "quarantine" | "purge" | "recovery";
+const PLAN_STATE_LABELS: Record<string, string> = {
+  DRAFT: "草案",
+  APPROVED: "已批准",
+  STALE_CHECKED: "已校验",
+  EXECUTING: "执行中",
+  VERIFIED: "已验证",
+  ROLLED_BACK: "已回滚",
+};
+
+type ExecTab = "plans" | "quarantine" | "purge" | "recovery";
 
 // ---- Helpers ----
 
@@ -66,7 +77,18 @@ function planStateBadgeClass(state: string, prefix: string): string {
 export default function ExecutionCenterPage() {
   const { capabilities, isReadWrite, dataRevision, pushToast } = useProject();
 
-  const [activeTab, setActiveTab] = useState<ExecTab>("quarantine");
+  const [activeTab, setActiveTab] = useState<ExecTab>("plans");
+
+  // Plan execution data
+  const [allPlans, setAllPlans] = useState<wails.PlanDTO[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(new Set());
+  const [execRootInput, setExecRootInput] = useState("");
+  const [execSourceRootsInput, setExecSourceRootsInput] = useState("");
+  const [executingPlans, setExecutingPlans] = useState(false);
+  const [execResults, setExecResults] = useState<wails.ExecutePlansResponse | null>(null);
+  const [dryRunCompleted, setDryRunCompleted] = useState(false);
 
   // Quarantine data
   const [quarantineItems, setQuarantineItems] = useState<wails.QuarantineItemDTO[]>([]);
@@ -133,13 +155,105 @@ export default function ExecutionCenterPage() {
     }
   }, []);
 
+  const loadAllPlans = useCallback(async () => {
+    if (!hasWailsRuntime()) return;
+    setPlansLoading(true);
+    setPlansError(null);
+    try {
+      const list = await ListAllPlans();
+      setAllPlans(list || []);
+    } catch (e: unknown) {
+      setPlansError(friendlyError(e));
+      setAllPlans([]);
+    } finally {
+      setPlansLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (capabilities.project_open) {
+      void loadAllPlans();
       void loadQuarantine();
       void loadRecoveryStatus();
       void loadLifecyclePlans();
     }
-  }, [capabilities.project_open, dataRevision, loadLifecyclePlans, loadQuarantine, loadRecoveryStatus]);
+  }, [capabilities.project_open, dataRevision, loadAllPlans, loadLifecyclePlans, loadQuarantine, loadRecoveryStatus]);
+
+  // ---- Plan execution actions ----
+
+  const approvedPlans = allPlans.filter((p) => p.state === "APPROVED");
+
+  const handleTogglePlan = (planId: string) => {
+    setSelectedPlanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) {
+        next.delete(planId);
+      } else {
+        next.add(planId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllApproved = () => {
+    if (selectedPlanIds.size === approvedPlans.length) {
+      setSelectedPlanIds(new Set());
+    } else {
+      setSelectedPlanIds(new Set(approvedPlans.map((p) => p.id)));
+    }
+  };
+
+  const handleExecutePlans = async (dryRun: boolean) => {
+    if (selectedPlanIds.size === 0) {
+      pushToast("error", "未选择计划", "请先选择至少一个已批准的计划");
+      return;
+    }
+    if (!execRootInput.trim()) {
+      pushToast("error", "缺少隔离根目录", "请填写隔离根目录");
+      return;
+    }
+    const roots = execSourceRootsInput.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (roots.length === 0) {
+      pushToast("error", "缺少源根目录", "请填写至少一个源根目录");
+      return;
+    }
+
+    setExecutingPlans(true);
+    try {
+      const resp = await ExecutePlans({
+        plan_ids: Array.from(selectedPlanIds),
+        quarantine_root: execRootInput.trim(),
+        source_roots: roots,
+        dry_run: dryRun,
+        retention_hours: 720,
+      } as wails.ExecutePlansRequest);
+
+      setExecResults(resp);
+
+      if (dryRun) {
+        const allPassed = resp.failed === 0;
+        setDryRunCompleted(allPassed);
+        pushToast(
+          allPassed ? "success" : "error",
+          allPassed ? "试运行通过" : "试运行发现问题",
+          `执行 ${resp.executed}，跳过 ${resp.skipped}，失败 ${resp.failed}`,
+        );
+      } else {
+        pushToast(
+          resp.failed === 0 ? "success" : "error",
+          resp.failed === 0 ? "执行完成" : "执行部分失败",
+          `执行 ${resp.executed}，跳过 ${resp.skipped}，失败 ${resp.failed}`,
+        );
+        setDryRunCompleted(false);
+        setSelectedPlanIds(new Set());
+        await Promise.all([loadAllPlans(), loadQuarantine()]);
+      }
+    } catch (e: unknown) {
+      pushToast("error", "执行计划失败", friendlyError(e));
+    } finally {
+      setExecutingPlans(false);
+    }
+  };
 
   // ---- Quarantine actions ----
 
@@ -340,6 +454,12 @@ export default function ExecutionCenterPage() {
       {/* Tab navigation */}
       <div className="exec-tabs">
         <button
+          className={`exec-tab ${activeTab === "plans" ? "exec-tab--active" : ""}`}
+          onClick={() => setActiveTab("plans")}
+        >
+          计划执行 ({approvedPlans.length})
+        </button>
+        <button
           className={`exec-tab ${activeTab === "quarantine" ? "exec-tab--active" : ""}`}
           onClick={() => setActiveTab("quarantine")}
         >
@@ -358,6 +478,171 @@ export default function ExecutionCenterPage() {
           恢复 {recoveryStatus?.lock_active ? "⚠" : ""}
         </button>
       </div>
+
+      {/* ---- Plans execution tab ---- */}
+      {activeTab === "plans" && (
+        <div className="exec-tab-content">
+          <div className="exec-toolbar">
+            <button className="btn-sm secondary" onClick={() => void loadAllPlans()} disabled={plansLoading}>
+              {plansLoading ? "加载中…" : "刷新"}
+            </button>
+            {approvedPlans.length > 0 && isReadWrite && (
+              <button className="btn-sm secondary" onClick={handleSelectAllApproved}>
+                {selectedPlanIds.size === approvedPlans.length ? "取消全选" : "全选已批准"}
+              </button>
+            )}
+            {isReadWrite && (
+              <div className="exec-root-inputs">
+                <input
+                  type="text"
+                  placeholder="隔离根目录"
+                  value={execRootInput}
+                  onChange={(e) => setExecRootInput(e.target.value)}
+                  className="exec-root-input"
+                />
+                <textarea
+                  placeholder="源根目录（每行一个）"
+                  value={execSourceRootsInput}
+                  onChange={(e) => setExecSourceRootsInput(e.target.value)}
+                  className="exec-root-input"
+                  rows={2}
+                />
+              </div>
+            )}
+          </div>
+
+          {plansError && <p className="error" role="alert">{plansError}</p>}
+
+          {approvedPlans.length === 0 ? (
+            <div className="empty-state">
+              <p className="muted">
+                {plansLoading ? "加载中…" : "暂无可执行的已批准计划。请在「治理复核」页面生成并批准计划。"}
+              </p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {isReadWrite && <th></th>}
+                    <th>计划 ID</th>
+                    <th>状态</th>
+                    <th>风险</th>
+                    <th>大小</th>
+                    <th>SHA-256</th>
+                    <th>动作数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvedPlans.map((plan) => (
+                    <tr key={plan.id}>
+                      {isReadWrite && (
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedPlanIds.has(plan.id)}
+                            onChange={() => handleTogglePlan(plan.id)}
+                          />
+                        </td>
+                      )}
+                      <td className="mono">
+                        {plan.id}
+                        <CopyButton text={plan.id} label="复制计划 ID" />
+                      </td>
+                      <td>
+                        <span className={planStateBadgeClass(plan.state, "plan")}>
+                          {PLAN_STATE_LABELS[plan.state] || plan.state}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`risk-badge risk-badge--${plan.risk || "unassessed"}`}>
+                          {plan.risk || "未评估"}
+                        </span>
+                      </td>
+                      <td className="num">{formatBytes(plan.size)}</td>
+                      <td className="mono">
+                        {shortHash(plan.content_sha256)}
+                        <CopyButton text={plan.content_sha256} label="复制计划 SHA-256" />
+                      </td>
+                      <td className="num">{plan.actions.length}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Execution actions */}
+          {isReadWrite && approvedPlans.length > 0 && (
+            <div className="exec-plan-actions">
+              <button
+                className="btn-sm secondary"
+                onClick={() => void handleExecutePlans(true)}
+                disabled={executingPlans || selectedPlanIds.size === 0}
+              >
+                {executingPlans ? "执行中…" : "试运行"}
+              </button>
+              <button
+                className="btn-sm"
+                onClick={() => void handleExecutePlans(false)}
+                disabled={executingPlans || selectedPlanIds.size === 0 || !dryRunCompleted}
+              >
+                {executingPlans ? "执行中…" : "执行选中计划"}
+              </button>
+              {!dryRunCompleted && selectedPlanIds.size > 0 && (
+                <span className="muted">请先完成试运行</span>
+              )}
+              {dryRunCompleted && selectedPlanIds.size > 0 && (
+                <span className="state-badge state-badge--completed">试运行已通过</span>
+              )}
+            </div>
+          )}
+
+          {/* Execution results */}
+          {execResults && (
+            <div className="exec-results-panel">
+              <h3>执行结果</h3>
+              <div className="exec-results-summary">
+                <span className="state-badge state-badge--completed">执行 {execResults.executed}</span>
+                <span className="state-badge state-badge--skipped">跳过 {execResults.skipped}</span>
+                <span className="state-badge state-badge--failed">失败 {execResults.failed}</span>
+              </div>
+              {execResults.results.map((r) => (
+                <div key={r.plan_id} className="exec-result-item">
+                  <div className="exec-result-header">
+                    <span className="mono">{r.plan_id}</span>
+                    <span className={`state-badge state-badge--${r.final_state.toLowerCase()}`}>
+                      {PLAN_STATE_LABELS[r.final_state] || r.final_state}
+                    </span>
+                    {r.error_type && (
+                      <span className="state-badge state-badge--failed">{r.error_type}</span>
+                    )}
+                  </div>
+                  {r.steps.length > 0 && (
+                    <div className="exec-result-steps">
+                      {r.steps.map((step, i) => (
+                        <div key={i} className="exec-step-item">
+                          <span className={`exec-step-status exec-step-status--${step.status}`}>
+                            {step.status === "passed" ? "✓" : step.status === "failed" ? "✗" : "–"}
+                          </span>
+                          <span className="exec-step-name">{step.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Read-only notice */}
+          {!isReadWrite && (
+            <div className="exec-readonly-notice">
+              只读模式 — 计划执行需要读写模式
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ---- Quarantine tab ---- */}
       {activeTab === "quarantine" && (

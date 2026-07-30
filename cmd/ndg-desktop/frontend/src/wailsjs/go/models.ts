@@ -970,6 +970,114 @@ export namespace wails {
 	        this.storage_id = source["storage_id"];
 	    }
 	}
+	export class ExecutePlansRequest {
+	    plan_ids: string[];
+	    quarantine_root: string;
+	    source_roots: string[];
+	    dry_run: boolean;
+	    retention_hours: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePlansRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_ids = source["plan_ids"];
+	        this.quarantine_root = source["quarantine_root"];
+	        this.source_roots = source["source_roots"];
+	        this.dry_run = source["dry_run"];
+	        this.retention_hours = source["retention_hours"];
+	    }
+	}
+	export class ExecutionStepDTO {
+	    name: string;
+	    status: string;
+	    detail?: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutionStepDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.status = source["status"];
+	        this.detail = source["detail"];
+	    }
+	}
+	export class ExecutePlanResultDTO {
+	    plan_id: string;
+	    final_state: string;
+	    steps: ExecutionStepDTO[];
+	    error_type?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePlanResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_id = source["plan_id"];
+	        this.final_state = source["final_state"];
+	        this.steps = this.convertValues(source["steps"], ExecutionStepDTO);
+	        this.error_type = source["error_type"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExecutePlansResponse {
+	    results: ExecutePlanResultDTO[];
+	    executed: number;
+	    skipped: number;
+	    failed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePlansResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.results = this.convertValues(source["results"], ExecutePlanResultDTO);
+	        this.executed = source["executed"];
+	        this.skipped = source["skipped"];
+	        this.failed = source["failed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ExecutePurgeRequest {
 	    plan_id: string;
 	    digest: string;

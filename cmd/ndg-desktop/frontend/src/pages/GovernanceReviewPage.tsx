@@ -10,6 +10,7 @@ import {
   BuildDraftPlans,
   ListAllPlans,
   ListGroupDecisions,
+  SaveDraftPlans,
   SaveGroupDecision,
 } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
@@ -112,6 +113,7 @@ export default function GovernanceReviewPage() {
   // Draft plans (in-memory preview)
   const [draftPlans, setDraftPlans] = useState<wails.PlanDTO[] | null>(null);
   const [buildingDrafts, setBuildingDrafts] = useState(false);
+  const [savingDrafts, setSavingDrafts] = useState(false);
 
   // Approval
   const [approving, setApproving] = useState(false);
@@ -173,6 +175,20 @@ export default function GovernanceReviewPage() {
       pushToast("error", "生成草案失败", friendlyError(e));
     } finally {
       setBuildingDrafts(false);
+    }
+  };
+
+  const handleSaveDrafts = async () => {
+    setSavingDrafts(true);
+    try {
+      const saved = await SaveDraftPlans("");
+      setDraftPlans(null);
+      setPlans(saved || []);
+      pushToast("success", "草案已落库", `共保存 ${saved?.length || 0} 条计划`);
+    } catch (e: unknown) {
+      pushToast("error", "保存草案失败", friendlyError(e));
+    } finally {
+      setSavingDrafts(false);
     }
   };
 
@@ -287,12 +303,21 @@ export default function GovernanceReviewPage() {
             </button>
           )}
           {draftPlans && (
-            <button
-              className="btn-sm secondary"
-              onClick={() => setDraftPlans(null)}
-            >
-              返回已保存计划
-            </button>
+            <>
+              <button
+                className="btn-sm"
+                onClick={() => void handleSaveDrafts()}
+                disabled={savingDrafts || draftPlans.length === 0}
+              >
+                {savingDrafts ? "保存中…" : "保存到数据库"}
+              </button>
+              <button
+                className="btn-sm secondary"
+                onClick={() => setDraftPlans(null)}
+              >
+                返回已保存计划
+              </button>
+            </>
           )}
         </div>
         <div className="gov-toolbar-right">
@@ -334,7 +359,7 @@ export default function GovernanceReviewPage() {
             <>
               {draftPlans && (
                 <div className="gov-draft-notice">
-                  草案预览（未持久化）— 共 {draftPlans.length} 条
+                  草案预览 — 共 {draftPlans.length} 条（点击「保存到数据库」持久化）
                 </div>
               )}
               {filteredPlans.map((plan) => {

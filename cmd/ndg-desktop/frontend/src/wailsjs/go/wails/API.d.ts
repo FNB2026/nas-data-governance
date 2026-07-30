@@ -29,6 +29,8 @@ export function DiagnoseGovernance(arg1:wails.DiagnoseGovernanceRequest):Promise
 
 export function DiagnoseMerges(arg1:wails.DiagnoseMergesRequest):Promise<merge.DiagnosticReport>;
 
+export function ExecutePlans(arg1:wails.ExecutePlansRequest):Promise<wails.ExecutePlansResponse>;
+
 export function ExecutePurge(arg1:wails.ExecutePurgeRequest):Promise<wails.ExecutePurgeResponse>;
 
 export function ExecuteRestore(arg1:wails.ExecuteRestoreRequest):Promise<wails.ExecuteRestoreResponse>;
@@ -76,6 +78,8 @@ export function RecoverPurges(arg1:string):Promise<Array<wails.PurgeRecoveryResu
 export function RecoverRestores(arg1:wails.RecoverRestoresRequest):Promise<Array<wails.RestoreRecoveryResultDTO>>;
 
 export function RecoverSourcePlans():Promise<Array<wails.RecoveryResultDTO>>;
+
+export function SaveDraftPlans(arg1:string):Promise<Array<wails.PlanDTO>>;
 
 export function SaveGroupDecision(arg1:wails.SaveDecisionRequest):Promise<wails.GroupDecisionDTO>;
 

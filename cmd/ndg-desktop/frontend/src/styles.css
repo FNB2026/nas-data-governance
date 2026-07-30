@@ -1659,6 +1659,94 @@ button.secondary {
   background: rgba(52, 199, 89, 0.05);
 }
 
+.exec-results-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+}
+
+.exec-results-summary {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.exec-result-item {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.exec-result-item:last-child {
+  border-bottom: none;
+}
+
+.exec-result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.exec-result-steps {
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.exec-step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+}
+
+.exec-step-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.exec-step-status--passed {
+  background: rgba(52, 199, 89, 0.15);
+  color: #248a3d;
+}
+
+.exec-step-status--failed {
+  background: rgba(255, 59, 48, 0.15);
+  color: #c00;
+}
+
+.exec-step-status--skipped {
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
+.exec-step-name {
+  color: var(--text-muted);
+}
+
+.exec-readonly-notice {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.state-badge--skipped {
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
 .audit-recovery-panel {
   margin-bottom: 1rem;
   padding: 1rem;

@@ -50,6 +50,10 @@ export function DiagnoseMerges(arg1) {
   return window['go']['wails']['API']['DiagnoseMerges'](arg1);
 }
 
+export function ExecutePlans(arg1) {
+  return window['go']['wails']['API']['ExecutePlans'](arg1);
+}
+
 export function ExecutePurge(arg1) {
   return window['go']['wails']['API']['ExecutePurge'](arg1);
 }
@@ -144,6 +148,10 @@ export function RecoverRestores(arg1) {
 
 export function RecoverSourcePlans() {
   return window['go']['wails']['API']['RecoverSourcePlans']();
+}
+
+export function SaveDraftPlans(arg1) {
+  return window['go']['wails']['API']['SaveDraftPlans'](arg1);
 }
 
 export function SaveGroupDecision(arg1) {
