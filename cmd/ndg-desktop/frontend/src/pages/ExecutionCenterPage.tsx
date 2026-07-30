@@ -188,6 +188,10 @@ export default function ExecutionCenterPage() {
   };
 
   const handleExecutePlans = async (dryRun: boolean) => {
+    if (!capabilities.can_execute_quarantine) {
+      pushToast("error", "执行已阻止", "恢复锁激活或项目当前不具备隔离执行条件");
+      return;
+    }
     if (selectedPlanIds.size === 0) {
       pushToast("error", "未选择计划", "请先选择至少一个已批准的计划");
       return;
@@ -470,7 +474,7 @@ export default function ExecutionCenterPage() {
             <button className="btn-sm secondary" onClick={() => void loadAllPlans()} disabled={plansLoading}>
               {plansLoading ? "加载中…" : "刷新"}
             </button>
-            {approvedPlans.length > 0 && isReadWrite && (
+            {approvedPlans.length > 0 && isReadWrite && capabilities.can_execute_quarantine && (
               <button className="btn-sm secondary" onClick={handleSelectAllApproved}>
                 {selectedPlanIds.size === approvedPlans.length ? "取消全选" : "全选已批准"}
               </button>
@@ -526,6 +530,7 @@ export default function ExecutionCenterPage() {
                             type="checkbox"
                             checked={selectedPlanIds.has(plan.id)}
                             onChange={() => handleTogglePlan(plan.id)}
+                            disabled={!capabilities.can_execute_quarantine}
                           />
                         </td>
                       )}
@@ -562,14 +567,14 @@ export default function ExecutionCenterPage() {
               <button
                 className="btn-sm secondary"
                 onClick={() => void handleExecutePlans(true)}
-                disabled={executingPlans || selectedPlanIds.size === 0}
+                disabled={executingPlans || selectedPlanIds.size === 0 || !capabilities.can_execute_quarantine}
               >
                 {executingPlans ? "执行中…" : "试运行"}
               </button>
               <button
                 className="btn-sm"
                 onClick={() => void handleExecutePlans(false)}
-                disabled={executingPlans || selectedPlanIds.size === 0 || !dryRunCompleted}
+                disabled={executingPlans || selectedPlanIds.size === 0 || !dryRunCompleted || !capabilities.can_execute_quarantine}
               >
                 {executingPlans ? "执行中…" : "执行选中计划"}
               </button>

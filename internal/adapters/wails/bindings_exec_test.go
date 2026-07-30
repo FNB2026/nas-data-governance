@@ -1,8 +1,10 @@
 package wails
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -274,5 +276,115 @@ func TestSaveDraftPlansPersistsGeneratedPlans(t *testing.T) {
 		if p.State != string(domain.PlanDraft) {
 			t.Errorf("plan %s state=%q, want DRAFT", p.ID, p.State)
 		}
+	}
+}
+
+// TestSmokeGovernanceExecutionLifecycle exercises the complete desktop write
+// path through Wails bindings: scan -> persist drafts -> approve -> dry-run ->
+// quarantine execution -> audit/journal registration.
+func TestSmokeGovernanceExecutionLifecycle(t *testing.T) {
+	tmp := t.TempDir()
+	sourceRoot := filepath.Join(tmp, "dataset")
+	cacheDir := filepath.Join(sourceRoot, "cache")
+	quarantineRoot := filepath.Join(tmp, "quarantine")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(quarantineRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("desktop governance execution lifecycle")
+	sources := []string{
+		filepath.Join(cacheDir, "copy-a.txt"),
+		filepath.Join(cacheDir, "copy-b.txt"),
+	}
+	for _, path := range sources {
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", path, err)
+		}
+	}
+
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+	if _, err := api.OpenProjectReadWrite(filepath.Join(tmp, "project.db")); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	scan, err := api.StartScan(StartScanRequest{
+		Root: sourceRoot, StorageID: "execution-smoke", FullScan: true, Workers: 1,
+	})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	progress := waitForJobTerminal(t, api, scan.JobID, 30*time.Second)
+	if progress.State != "COMPLETED" {
+		t.Fatalf("scan state=%s error=%s", progress.State, progress.ErrorCode)
+	}
+
+	drafts, err := api.SaveDraftPlans("execution-smoke")
+	if err != nil {
+		t.Fatalf("SaveDraftPlans: %v", err)
+	}
+	if len(drafts) == 0 {
+		t.Fatal("expected at least one persisted governance plan")
+	}
+	planIDs := make([]string, len(drafts))
+	for i, plan := range drafts {
+		planIDs[i] = plan.ID
+	}
+	approved, err := api.ApprovePlans(ApprovePlansRequest{PlanIDs: planIDs})
+	if err != nil {
+		t.Fatalf("ApprovePlans: %v", err)
+	}
+	if len(approved.Approved) == 0 {
+		t.Fatal("expected at least one approved plan")
+	}
+
+	dryRun, err := api.ExecutePlans(ExecutePlansRequest{
+		PlanIDs: planIDs, QuarantineRoot: quarantineRoot,
+		SourceRoots: []string{sourceRoot}, DryRun: true, RetentionHours: 720,
+	})
+	if err != nil {
+		t.Fatalf("ExecutePlans dry-run: %v", err)
+	}
+	if dryRun.Failed != 0 || dryRun.Skipped == 0 || len(dryRun.Results) == 0 {
+		t.Fatalf("unexpected dry-run result: %#v", dryRun)
+	}
+	for _, path := range sources {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("dry-run changed source %s: %v", path, err)
+		}
+	}
+	if entries, err := os.ReadDir(quarantineRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("dry-run wrote quarantine entries=%d err=%v", len(entries), err)
+	}
+
+	realRun, err := api.ExecutePlans(ExecutePlansRequest{
+		PlanIDs: planIDs, QuarantineRoot: quarantineRoot,
+		SourceRoots: []string{sourceRoot}, DryRun: false, RetentionHours: 720,
+	})
+	if err != nil {
+		t.Fatalf("ExecutePlans real: %v", err)
+	}
+	if realRun.Failed != 0 || realRun.Executed == 0 {
+		t.Fatalf("unexpected real execution result: %#v", realRun)
+	}
+	items, err := api.ListQuarantineItems("")
+	if err != nil {
+		t.Fatalf("ListQuarantineItems: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("expected quarantine lifecycle items after real execution")
+	}
+	logs, err := api.ListOperationLogs(planIDs[0])
+	if err != nil {
+		t.Fatalf("ListOperationLogs: %v", err)
+	}
+	journal, err := api.ListJournalEntries(planIDs[0])
+	if err != nil {
+		t.Fatalf("ListJournalEntries: %v", err)
+	}
+	if len(logs) == 0 || len(journal) == 0 {
+		t.Fatalf("expected audit and journal records, logs=%d journal=%d", len(logs), len(journal))
 	}
 }

@@ -100,20 +100,36 @@ func (s *ExecutionService) Execute(ctx context.Context, in ExecutionInput) (*Exe
 		return nil, err
 	}
 
-	// For real execution, create a task and save plans so FK constraints
-	// on operation_logs and execution_journal are satisfied.
+	// For real execution, persist only plans that do not already exist.
+	// Desktop governance plans are saved and approved before this method is
+	// called; re-inserting those globally unique plan IDs under a new task
+	// would fail and would also discard their original approval lineage.
 	if !in.DryRun && s.store != nil {
-		taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
-		if err := s.store.CreateTask(ctx, domain.OperationTask{
-			ID: taskID, RootPath: in.SourceRoots[0], State: "executing", CreatedAt: time.Now(),
-		}); err != nil {
-			return nil, fmt.Errorf("app: create task: %w", err)
+		missing := make([]domain.OperationPlan, 0, len(in.Plans))
+		missingIndexes := make([]int, 0, len(in.Plans))
+		for i, plan := range in.Plans {
+			if _, err := s.store.GetPlan(ctx, plan.ID); err != nil {
+				if err != store.ErrNotFound {
+					return nil, fmt.Errorf("app: load plan %s: %w", plan.ID, err)
+				}
+				missing = append(missing, plan)
+				missingIndexes = append(missingIndexes, i)
+			}
 		}
-		for i := range in.Plans {
-			in.Plans[i].TaskID = taskID
-		}
-		if err := s.store.SavePlans(ctx, taskID, in.Plans); err != nil {
-			return nil, fmt.Errorf("app: save plans: %w", err)
+		if len(missing) > 0 {
+			taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
+			if err := s.store.CreateTask(ctx, domain.OperationTask{
+				ID: taskID, RootPath: in.SourceRoots[0], State: "executing", CreatedAt: time.Now(),
+			}); err != nil {
+				return nil, fmt.Errorf("app: create task: %w", err)
+			}
+			for i := range missing {
+				missing[i].TaskID = taskID
+				in.Plans[missingIndexes[i]].TaskID = taskID
+			}
+			if err := s.store.SavePlans(ctx, taskID, missing); err != nil {
+				return nil, fmt.Errorf("app: save plans: %w", err)
+			}
 		}
 	}
 

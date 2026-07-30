@@ -656,21 +656,22 @@ func (s *SQLiteStore) SavePlans(ctx context.Context, taskID string, plans []doma
 
 func (s *SQLiteStore) ListPlans(ctx context.Context, taskID string) ([]domain.OperationPlan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT evidence_json FROM operation_plans WHERE task_id = ? ORDER BY id`, taskID)
+		`SELECT evidence_json, state FROM operation_plans WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list plans: %w", err)
 	}
 	defer rows.Close()
 	out := make([]domain.OperationPlan, 0)
 	for rows.Next() {
-		var blob string
-		if err := rows.Scan(&blob); err != nil {
+		var blob, state string
+		if err := rows.Scan(&blob, &state); err != nil {
 			return nil, err
 		}
 		var env planEnvelope
 		if err := json.Unmarshal([]byte(blob), &env); err != nil {
 			return nil, fmt.Errorf("store: unmarshal plan: %w", err)
 		}
+		env.Plan.State = domain.PlanState(state)
 		out = append(out, env.Plan)
 	}
 	return out, rows.Err()
@@ -680,7 +681,7 @@ func (s *SQLiteStore) ListPlans(ctx context.Context, taskID string) ([]domain.Op
 // time then plan id. Used by feedback learning (L4).
 func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT p.evidence_json
+		`SELECT p.evidence_json, p.state
 		 FROM operation_plans p
 		 JOIN operation_tasks t ON t.id = p.task_id
 		 ORDER BY t.created_at, p.id`)
@@ -690,14 +691,15 @@ func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan,
 	defer rows.Close()
 	out := make([]domain.OperationPlan, 0)
 	for rows.Next() {
-		var blob string
-		if err := rows.Scan(&blob); err != nil {
+		var blob, state string
+		if err := rows.Scan(&blob, &state); err != nil {
 			return nil, err
 		}
 		var env planEnvelope
 		if err := json.Unmarshal([]byte(blob), &env); err != nil {
 			return nil, fmt.Errorf("store: unmarshal plan: %w", err)
 		}
+		env.Plan.State = domain.PlanState(state)
 		out = append(out, env.Plan)
 	}
 	return out, rows.Err()

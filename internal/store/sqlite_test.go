@@ -304,6 +304,20 @@ func TestSaveAndReplacePlans(t *testing.T) {
 		t.Fatalf("retain score mismatch: %#v", p.RetainScore)
 	}
 
+	// The normalized state column is authoritative after transitions; list
+	// methods must not return the stale state embedded in evidence_json.
+	if err := s.UpdatePlanState(ctx, plans[0].ID, domain.PlanApproved); err != nil {
+		t.Fatalf("update plan state: %v", err)
+	}
+	got, err = s.ListPlans(ctx, taskID)
+	if err != nil || len(got) != 1 || got[0].State != domain.PlanApproved {
+		t.Fatalf("ListPlans did not expose authoritative state: %#v, %v", got, err)
+	}
+	all, err := s.ListAllPlans(ctx)
+	if err != nil || len(all) != 1 || all[0].State != domain.PlanApproved {
+		t.Fatalf("ListAllPlans did not expose authoritative state: %#v, %v", all, err)
+	}
+
 	// Replace with a smaller plan set; the old plan must disappear.
 	replacement := []domain.OperationPlan{
 		{ID: "dup-bbbbbbbbbbbb", State: domain.PlanDraft, Risk: domain.RiskHigh, Actions: []domain.PlannedAction{{Path: "/x", Action: domain.OperationReview}}, Evidence: []string{"new"}},
