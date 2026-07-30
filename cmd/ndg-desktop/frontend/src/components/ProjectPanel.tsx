@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { wails } from "../wailsjs/go/models";
-import { ValidateProjectPath } from "../wailsjs/go/wails/API";
-import { hasWailsRuntime, friendlyError } from "../lib/utils";
+import { hasWailsRuntime } from "../lib/utils";
 import { useProject } from "../state/ProjectContext";
+import { api } from "../api/client";
 
 export interface ProjectPanelProps {
   project: wails.ProjectInfo | null;
@@ -86,12 +86,12 @@ export default function ProjectPanel({
 
       // Read-only mode: the database file must already exist.
       try {
-        await ValidateProjectPath(trimmed);
+        await api.project.validatePath(trimmed);
         setPathStatus("valid");
         setPathHint("");
       } catch (e: unknown) {
         setPathStatus("invalid");
-        setPathHint(friendlyError(e));
+        setPathHint((e as Error).message);
       }
     }, 300);
 

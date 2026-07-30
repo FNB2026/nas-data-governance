@@ -34,8 +34,22 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
       - name: Download modules
         run: go mod download
+
+      - name: Install frontend dependencies
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Test and build frontend
+        run: make frontend-check
 
       - name: Verify formatting of changed Go files
         shell: bash

@@ -1927,4 +1927,3 @@ export namespace wails {
 	}
 
 }
-

@@ -1,6 +1,6 @@
 // Centralized API client: wraps all Wails backend bindings with
-// unified retry logic (network drive tolerance) and friendly error
-// messages. Pages import from here instead of raw Wails bindings.
+// explicit read retry policy and friendly error messages. Pages import
+// from here instead of raw Wails bindings.
 //
 // Usage:
 //   import { api } from "../api/client";
@@ -54,61 +54,9 @@ import {
   ValidateProjectPath,
 } from "../wailsjs/go/wails/API";
 import { wails, formatdiag, governancediag, merge } from "../wailsjs/go/models";
-import { friendlyError } from "../lib/utils";
-import { retryWithBackoff } from "../lib/retry";
+import { callOnce, callRead } from "./transport";
 
-// ---- ApiError ----
-
-/**
- * Error thrown by the API client. The `message` is already a user-friendly
- * string (via friendlyError), so catch blocks can use it directly without
- * calling friendlyError again.
- */
-export class ApiError extends Error {
-  readonly raw: unknown;
-
-  constructor(raw: unknown) {
-    super(friendlyError(raw));
-    this.name = "ApiError";
-    this.raw = raw;
-  }
-}
-
-// ---- Internal helpers ----
-
-interface CallOptions {
-  /** Max retry attempts for network errors. Set to 0 to disable retry. */
-  retries?: number;
-}
-
-/**
- * Wraps a Wails API call with retry and friendly error conversion.
- * Default: 3 retries with exponential backoff (network errors only).
- */
-async function call<T>(fn: () => Promise<T>, opts: CallOptions = {}): Promise<T> {
-  const retries = opts.retries ?? 3;
-  try {
-    if (retries > 0) {
-      return await retryWithBackoff(fn, { maxRetries: retries });
-    }
-    return await fn();
-  } catch (e) {
-    throw new ApiError(e);
-  }
-}
-
-/**
- * Wraps a Wails API call WITHOUT retry. Use for frequently-polled
- * operations (e.g., GetScanProgress, CheckRecoveryLock) where the
- * caller manages its own retry/timing logic.
- */
-async function callOnce<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    throw new ApiError(e);
-  }
-}
+export { ApiError } from "./transport";
 
 // ---- API client ----
 
@@ -116,90 +64,90 @@ export const api = {
   // ---- Project lifecycle ----
   project: {
     open: (path: string): Promise<wails.ProjectInfo> =>
-      call(() => OpenProject(path)),
+      callOnce(() => OpenProject(path)),
     openReadWrite: (path: string): Promise<wails.ProjectInfo> =>
-      call(() => OpenProjectReadWrite(path)),
+      callOnce(() => OpenProjectReadWrite(path)),
     close: (): Promise<void> =>
-      call(() => CloseProject()),
+      callOnce(() => CloseProject()),
     info: (): Promise<wails.ProjectInfo> =>
-      call(() => GetProjectInfo()),
+      callRead(() => GetProjectInfo()),
     validatePath: (path: string): Promise<void> =>
-      call(() => ValidateProjectPath(path)),
+      callRead(() => ValidateProjectPath(path)),
     version: (): Promise<wails.VersionInfo> =>
-      call(() => GetVersion()),
+      callRead(() => GetVersion()),
   },
 
   // ---- Scan operations ----
   scan: {
     start: (req: wails.StartScanRequest): Promise<wails.StartScanResponse> =>
-      call(() => StartScan(req)),
+      callOnce(() => StartScan(req)),
     cancel: (jobId: string): Promise<void> =>
-      call(() => CancelScan(jobId)),
+      callOnce(() => CancelScan(jobId)),
     /** No retry — polling callers manage their own retry. */
     getProgress: (jobId: string): Promise<wails.ScanJobProgress> =>
       callOnce(() => GetScanProgress(jobId)),
     listJobs: (limit: number): Promise<wails.JobSummary[]> =>
-      call(() => ListRecentJobs(limit), { retries: 3 }),
+      callRead(() => ListRecentJobs(limit)),
     getJobDetail: (jobId: string): Promise<wails.JobDetailResponse> =>
-      call(() => GetJobDetail(jobId)),
+      callRead(() => GetJobDetail(jobId)),
   },
 
   // ---- Storage ----
   storages: {
     list: (): Promise<wails.StorageInfo[]> =>
-      call(() => ListStorages(), { retries: 3 }),
+      callRead(() => ListStorages()),
   },
 
   // ---- Duplicate results ----
   duplicates: {
     listGroups: (req: wails.ListGroupsRequest): Promise<wails.ListGroupsResponse> =>
-      call(() => ListDuplicateGroups(req)),
+      callRead(() => ListDuplicateGroups(req)),
     getDetail: (storageId: string, sha256: string): Promise<wails.GroupDetailResponse> =>
-      call(() => GetGroupDetail(storageId, sha256)),
+      callRead(() => GetGroupDetail(storageId, sha256)),
   },
 
   // ---- Governance review ----
   governance: {
     buildDrafts: (storageId: string): Promise<wails.PlanDTO[]> =>
-      call(() => BuildDraftPlans(storageId)),
+      callRead(() => BuildDraftPlans(storageId)),
     saveDrafts: (storageId: string): Promise<wails.PlanDTO[]> =>
-      call(() => SaveDraftPlans(storageId)),
+      callOnce(() => SaveDraftPlans(storageId)),
     listAll: (): Promise<wails.PlanDTO[]> =>
-      call(() => ListAllPlans()),
+      callRead(() => ListAllPlans()),
     listReview: (): Promise<wails.PlanDTO[]> =>
-      call(() => ListReviewPlans()),
+      callRead(() => ListReviewPlans()),
     approve: (req: wails.ApprovePlansRequest): Promise<wails.ApprovePlansResponse> =>
-      call(() => ApprovePlans(req)),
+      callOnce(() => ApprovePlans(req)),
     listDecisions: (groupId: string): Promise<wails.GroupDecisionDTO[]> =>
-      call(() => ListGroupDecisions(groupId)),
+      callRead(() => ListGroupDecisions(groupId)),
     getDecision: (groupId: string): Promise<wails.GroupDecisionDTO> =>
-      call(() => GetGroupDecision(groupId)),
+      callRead(() => GetGroupDecision(groupId)),
     saveDecision: (req: wails.SaveDecisionRequest): Promise<wails.GroupDecisionDTO> =>
-      call(() => SaveGroupDecision(req)),
+      callOnce(() => SaveGroupDecision(req)),
   },
 
   // ---- Execution center ----
   execution: {
     executePlans: (req: wails.ExecutePlansRequest): Promise<wails.ExecutePlansResponse> =>
-      call(() => ExecutePlans(req)),
+      callOnce(() => ExecutePlans(req)),
     listQuarantine: (statusFilter: string): Promise<wails.QuarantineItemDTO[]> =>
-      call(() => ListQuarantineItems(statusFilter)),
+      callRead(() => ListQuarantineItems(statusFilter)),
     createRestorePlan: (itemId: string): Promise<wails.RestorePlanDTO> =>
-      call(() => CreateRestorePlan(itemId)),
+      callOnce(() => CreateRestorePlan(itemId)),
     approveRestore: (planId: string, digest: string): Promise<void> =>
-      call(() => ApproveRestorePlan(planId, digest)),
+      callOnce(() => ApproveRestorePlan(planId, digest)),
     executeRestore: (req: wails.ExecuteRestoreRequest): Promise<wails.ExecuteRestoreResponse> =>
-      call(() => ExecuteRestore(req)),
+      callOnce(() => ExecuteRestore(req)),
     listRestores: (): Promise<wails.RestorePlanDTO[]> =>
-      call(() => ListRestorePlans()),
+      callRead(() => ListRestorePlans()),
     createPurgePlans: (): Promise<wails.PurgePlanDTO[]> =>
-      call(() => CreatePurgePlans()),
+      callOnce(() => CreatePurgePlans()),
     approvePurge: (planId: string, digest: string): Promise<void> =>
-      call(() => ApprovePurgePlan(planId, digest)),
+      callOnce(() => ApprovePurgePlan(planId, digest)),
     executePurge: (req: wails.ExecutePurgeRequest): Promise<wails.ExecutePurgeResponse> =>
-      call(() => ExecutePurge(req)),
+      callOnce(() => ExecutePurge(req)),
     listPurges: (): Promise<wails.PurgePlanDTO[]> =>
-      call(() => ListPurgePlans()),
+      callRead(() => ListPurgePlans()),
   },
 
   // ---- Recovery ----
@@ -208,37 +156,37 @@ export const api = {
     checkLock: (): Promise<wails.RecoveryStatusDTO> =>
       callOnce(() => CheckRecoveryLock()),
     recoverSource: (): Promise<wails.RecoveryResultDTO[]> =>
-      call(() => RecoverSourcePlans()),
+      callOnce(() => RecoverSourcePlans()),
     recoverRestores: (req: wails.RecoverRestoresRequest): Promise<wails.RestoreRecoveryResultDTO[]> =>
-      call(() => RecoverRestores(req)),
+      callOnce(() => RecoverRestores(req)),
     recoverPurges: (quarantineRoot: string): Promise<wails.PurgeRecoveryResultDTO[]> =>
-      call(() => RecoverPurges(quarantineRoot)),
+      callOnce(() => RecoverPurges(quarantineRoot)),
   },
 
   // ---- Audit ----
   audit: {
     listLogs: (planFilter: string): Promise<wails.OperationLogDTO[]> =>
-      call(() => ListOperationLogs(planFilter)),
+      callRead(() => ListOperationLogs(planFilter)),
     listJournal: (planFilter: string): Promise<wails.JournalEntryDTO[]> =>
-      call(() => ListJournalEntries(planFilter)),
+      callRead(() => ListJournalEntries(planFilter)),
   },
 
   // ---- Diagnostics ----
   diagnostics: {
     formats: (req: wails.DiagnoseFormatsRequest): Promise<formatdiag.Report> =>
-      call(() => DiagnoseFormats(req)),
+      callRead(() => DiagnoseFormats(req)),
     governance: (req: wails.DiagnoseGovernanceRequest): Promise<governancediag.Report> =>
-      call(() => DiagnoseGovernance(req)),
+      callRead(() => DiagnoseGovernance(req)),
     merges: (req: wails.DiagnoseMergesRequest): Promise<merge.DiagnosticReport> =>
-      call(() => DiagnoseMerges(req)),
+      callRead(() => DiagnoseMerges(req)),
   },
 
   // ---- Capabilities & readiness ----
   capabilities: {
     get: (): Promise<wails.AppCapabilitiesDTO> =>
-      call(() => GetAppCapabilities()),
+      callRead(() => GetAppCapabilities()),
     readiness: (): Promise<wails.ProjectReadinessDTO> =>
-      call(() => GetProjectReadiness()),
+      callRead(() => GetProjectReadiness()),
   },
 } as const;
 

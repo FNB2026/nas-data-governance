@@ -11,7 +11,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { GetScanProgress } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
 import { TERMINAL_STATES, hasWailsRuntime } from "../lib/utils";
 import type { ToastItem, ToastType } from "../components/Toast";
@@ -286,7 +285,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       pollInFlightRef.current = true;
 
       try {
-        const p = await GetScanProgress(activeJobId);
+        const p = await api.scan.getProgress(activeJobId);
 
         if (projectRevRef.current !== pollRev) return;
 
