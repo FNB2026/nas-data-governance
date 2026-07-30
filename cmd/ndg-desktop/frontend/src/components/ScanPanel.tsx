@@ -377,7 +377,7 @@ export default function ScanPanel({
 
           {scanActive && (
             <button
-              className="btn-sm secondary"
+              className="scan-cancel-btn"
               disabled={cancelling}
               onClick={onCancelScan}
             >
@@ -388,7 +388,7 @@ export default function ScanPanel({
           {/* Retry button for failed/cancelled scans */}
           {!scanActive && canScan && canRetryScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
             <button
-              className="btn-sm"
+              className="scan-retry-btn"
               disabled={scanStarting}
               onClick={onRetryScan}
             >
