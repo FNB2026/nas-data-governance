@@ -1307,8 +1307,15 @@ button.secondary {
   display: flex;
   gap: 1rem;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.dup-page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
 }
 
 .dup-split-left {
@@ -1505,6 +1512,7 @@ button.secondary {
 /* Evidence sections */
 .evidence-section {
   margin-bottom: 1rem;
+  min-width: 0;
 }
 
 .evidence-section-title {
@@ -1566,9 +1574,9 @@ button.secondary {
   display: block;
   font-size: 0.72rem;
   margin-top: 0.1rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* Physical identity cell */
@@ -1626,11 +1634,12 @@ button.secondary {
   font-size: 0.78rem;
   font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
   padding-left: 1rem;
   position: relative;
+  user-select: text;
 }
 
 .hardlink-path::before {
@@ -1652,18 +1661,20 @@ button.secondary {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1500px) {
   .dup-split {
     flex-direction: column;
+    overflow: visible;
   }
 
   .dup-split-left {
     width: 100%;
-    max-height: 400px;
+    max-height: 320px;
   }
 
   .dup-split-right {
     max-height: none;
+    overflow-y: visible;
   }
 }
 

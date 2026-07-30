@@ -54,6 +54,7 @@ export default function GroupDetail({
   const physGroups = selectedGroup?.files
     ? groupByPhysicalIdentity(selectedGroup.files)
     : [];
+  const hasUnreliableIdentity = selectedGroup?.files.some((file) => !file.physical_reliable) ?? false;
 
   return (
     <section className="card card--full group-detail evidence-inspector">
@@ -77,7 +78,10 @@ export default function GroupDetail({
             <div className="evidence-summary-row">
               <span><strong>文件大小：</strong>{formatBytes(selectedGroup.size)}</span>
               <span><strong>路径数：</strong>{selectedGroup.path_count}</span>
-              <span><strong>物理副本：</strong>{cap.physicalCopyCount}</span>
+              <span>
+                <strong>物理副本{hasUnreliableIdentity ? "（估算）" : ""}：</strong>
+                {cap.physicalCopyCount}
+              </span>
               <span><strong>硬链接别名：</strong>{cap.hardlinkAliasCount}</span>
             </div>
             <div className="capacity-bar">
@@ -86,7 +90,9 @@ export default function GroupDetail({
                 <span className="capacity-value">{formatBytes(cap.totalLogical)}</span>
               </div>
               <div className="capacity-item capacity-item--reclaimable">
-                <span className="capacity-label">可回收物理空间</span>
+                <span className="capacity-label">
+                  可回收物理空间{hasUnreliableIdentity ? "（估算）" : ""}
+                </span>
                 <span className="capacity-value">{formatBytes(cap.physicalReclaimable)}</span>
               </div>
               <div className="capacity-item capacity-item--hardlink">
@@ -166,26 +172,33 @@ export default function GroupDetail({
           {physGroups.length > 0 && (
             <div className="evidence-section">
               <h3 className="evidence-section-title">
-                硬链接关系图
+                物理副本与硬链接关系
                 <span className="muted evidence-section-count">{physGroups.length} 组</span>
               </h3>
+              <p className="evidence-hint muted">
+                独立物理副本各自占用空间；硬链接组只是多个路径指向同一份数据，不会重复占用空间。
+                “物理身份待确认”表示当前网络存储未提供可靠的设备与 Inode 证据。
+              </p>
               <div className="hardlink-groups">
                 {physGroups.map((pg, idx) => {
                   const isHardlinkGroup = pg.length > 1;
+                  const identityReliable = pg[0].physical_reliable && !!pg[0].physical_inode;
                   return (
                     <div key={idx} className={`hardlink-group ${isHardlinkGroup ? "hardlink-group--linked" : ""}`}>
                       <div className="hardlink-group-header">
                         {isHardlinkGroup ? (
                           <span className="hardlink-flag">🔗 硬链接组 ({pg.length} 路径)</span>
-                        ) : (
+                        ) : identityReliable ? (
                           <span className="muted">独立物理副本</span>
+                        ) : (
+                          <span className="muted">物理身份待确认</span>
                         )}
-                        {pg[0].physical_reliable && pg[0].physical_inode ? (
+                        {identityReliable ? (
                           <span className="mono muted phys-id">
                             {pg[0].physical_device}:{pg[0].physical_inode}
                           </span>
                         ) : (
-                          <span className="muted">物理身份不可靠</span>
+                          <span className="muted">按独立副本保守估算</span>
                         )}
                       </div>
                       <ul className="hardlink-paths">
