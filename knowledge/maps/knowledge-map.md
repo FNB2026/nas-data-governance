@@ -16,6 +16,12 @@ flowchart LR
   OP --> RV[人工审阅]
   RV --> EX[安全执行]
   EX --> AU[校验、审计、恢复]
+  DC --> UI[桌面治理闭环]
+  DM --> UI
+  PP --> UI
+  UI --> RV
+  UI --> EX
+  AU --> UI
 ```
 
-知识卡按“对象—判断—约束—流程—工程”组织。入口为 [核心原则](../cards/00-core-principles.md)。
+知识卡按“对象—判断—约束—流程—工程”组织。入口为 [核心原则](../cards/00-core-principles.md)；桌面端接线约束见 [桌面治理闭环](../cards/11-desktop-governance-workflow.md)。

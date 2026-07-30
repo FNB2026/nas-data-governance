@@ -42,7 +42,8 @@ type Store interface {
 	// Init applies any pending schema migrations. Idempotent.
 	Init(ctx context.Context) error
 
-	// RegisterStorage inserts or replaces a storage by ID.
+	// RegisterStorage inserts a new storage. If the ID already exists, the
+	// root_path must match — an ID is never rebound to a different root.
 	RegisterStorage(ctx context.Context, s domain.Storage) error
 	ListStorages(ctx context.Context) ([]domain.Storage, error)
 
@@ -66,6 +67,9 @@ type Store interface {
 	// that were not seen during the current scan. Called after a scan
 	// completes to flag deleted files. Returns the count updated.
 	MarkFilesMissing(ctx context.Context, storageID string, paths []string) (int64, error)
+	// MarkFilesUnavailable preserves unseen rows from an incomplete traversal
+	// for audit while excluding them from the current active snapshot.
+	MarkFilesUnavailable(ctx context.Context, storageID string, paths []string) (int64, error)
 
 	// MarkFileActive sets file_status='active' for a single path. Called
 	// when an incremental scan encounters a previously-missing file that
@@ -191,6 +195,23 @@ type Store interface {
 	// ListExecutingPlans 列出 state=EXECUTING 的 plan（崩溃恢复入口）。
 	// 返回 plan_id 列表。
 	ListExecutingPlans(ctx context.Context) ([]string, error)
+
+	// ---------------- group decisions (V1 ReviewDecision) ----------------
+
+	// SaveGroupDecision inserts or updates a review decision for a duplicate
+	// group. The decision is independent of PlanState: it records the user's
+	// review intent (KEEP_ALL, DRAFT_ACTION, etc.) without creating or
+	// modifying an operation plan. Upsert is keyed on group_id; the latest
+	// decision wins.
+	SaveGroupDecision(ctx context.Context, d domain.GroupDecision) error
+
+	// GetGroupDecision returns the latest decision for a group, or
+	// ErrNotFound when no decision has been recorded.
+	GetGroupDecision(ctx context.Context, groupID string) (domain.GroupDecision, error)
+
+	// ListGroupDecisions returns decisions filtered by type. An empty
+	// decisionType means no filter (all decisions).
+	ListGroupDecisions(ctx context.Context, decisionType domain.ReviewDecisionType) ([]domain.GroupDecision, error)
 }
 
 // JournalEntry 是 execution_journal 表的一行。

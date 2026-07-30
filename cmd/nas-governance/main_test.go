@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -24,6 +27,15 @@ func TestScanErrorSummariesOmitSensitivePaths(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("paths omitted")) {
 		t.Fatalf("expected explicit omission notice: %s", out.String())
+	}
+}
+
+func TestMissingStateUpdateFailsClosedOnTraversalError(t *testing.T) {
+	if !canMarkMissing(scanner.Stats{}) {
+		t.Fatal("complete traversal should allow missing-state reconciliation")
+	}
+	if canMarkMissing(scanner.Stats{Errors: []scanner.ErrorEntry{{Error: os.ErrPermission}}}) {
+		t.Fatal("partial traversal must suppress missing-state reconciliation")
 	}
 }
 
@@ -207,16 +219,16 @@ func TestAnalyzeResumeRequiresDatabase(t *testing.T) {
 }
 
 func TestNeedsMetadataRefreshOnlyRetriesSupportedGaps(t *testing.T) {
-	if !needsMetadataRefresh(domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}) {
+	if !app.NeedsMetadataRefresh(domain.FormatInfo{Format: "wav", Category: domain.CategoryAudio}) {
 		t.Fatal("wav duration gap should refresh")
 	}
-	if !needsMetadataRefresh(domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, Duration: 2}) {
+	if !app.NeedsMetadataRefresh(domain.FormatInfo{Format: "mp4", Category: domain.CategoryVideo, Duration: 2}) {
 		t.Fatal("mp4 dimension gap should refresh")
 	}
-	if needsMetadataRefresh(domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, Width: 1920, Height: 1080}) {
+	if app.NeedsMetadataRefresh(domain.FormatInfo{Format: "mpeg", Category: domain.CategoryVideo, Width: 1920, Height: 1080}) {
 		t.Fatal("mpeg with supported dimensions filled must not retry for unsupported duration")
 	}
-	if needsMetadataRefresh(domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo}) {
+	if app.NeedsMetadataRefresh(domain.FormatInfo{Format: "flv", Category: domain.CategoryVideo}) {
 		t.Fatal("unsupported flv metadata must not retry forever")
 	}
 }
@@ -281,6 +293,21 @@ func TestApproveRejectsNonDraftPlan(t *testing.T) {
 	err := runApprove([]string{"-plan", planPath, "-out", filepath.Join(tmp, "out.json"), "-all"})
 	if err == nil {
 		t.Fatal("expected error approving non-draft plan")
+	}
+}
+
+func TestApproveFreezesCriticalPlanEvenWithAll(t *testing.T) {
+	tmp := t.TempDir()
+	planPath := filepath.Join(tmp, "critical.json")
+	writeJSON(t, planPath, []domain.OperationPlan{{
+		ID: "critical-1", State: domain.PlanDraft, Risk: domain.RiskCritical,
+	}})
+	err := runApprove([]string{"-plan", planPath, "-out", filepath.Join(tmp, "approved.json"), "-all"})
+	if err == nil || !strings.Contains(err.Error(), "remains HOLD") {
+		t.Fatalf("critical plan must remain frozen, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "approved.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("critical approval must not create output: %v", statErr)
 	}
 }
 

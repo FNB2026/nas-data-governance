@@ -1,10 +1,11 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 DIST_DIR ?= dist
-LDFLAGS = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
+VERSION_PKG = github.com/FNB2026/nas-data-governance/internal/version
+LDFLAGS = -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
 build:
 	mkdir -p bin
@@ -54,3 +55,28 @@ release: release-check clean-dist
 
 clean-dist:
 	rm -rf $(DIST_DIR)
+
+# ---- Frontend verification targets ----
+
+FRONTEND_DIR = cmd/ndg-desktop/frontend
+
+frontend-test:
+	cd $(FRONTEND_DIR) && npm test
+
+frontend-build:
+	cd $(FRONTEND_DIR) && npm run build
+
+frontend-check: frontend-test frontend-build
+
+# ---- Desktop (Wails) targets ----
+# Requires wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+DESKTOP_DIR = cmd/ndg-desktop
+
+desktop-dev:
+	cd $(DESKTOP_DIR) && wails dev
+
+desktop-build:
+	cd $(DESKTOP_DIR) && wails build
+
+desktop: desktop-build

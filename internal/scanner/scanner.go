@@ -74,6 +74,7 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 		return Stats{}, err
 	}
 	rootDev, _ := deviceAndInode(rootInfo)
+	identityReliable := physicalIdentityReliable(root)
 
 	stats := Stats{}
 	// seen guards (storage_id, path) idempotency across the whole scan.
@@ -147,9 +148,11 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			}
 
 			stats.FilesScanned++
+			physical := physicalIdentity(info, identityReliable)
 			if err := visit(domain.FileInstance{
 				StorageID: opts.StorageID, Path: path, Name: entry.Name(), Size: info.Size(),
 				Mode: uint32(info.Mode()), ModifiedAt: info.ModTime(), Device: dev, Inode: ino,
+				Physical:     physical,
 				DiscoveredAt: time.Now().UTC(),
 			}); err != nil {
 				return stats, err
@@ -158,6 +161,20 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	}
 
 	return stats, nil
+}
+
+func physicalIdentity(info fs.FileInfo, filesystemReliable bool) domain.PhysicalIdentity {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return domain.PhysicalIdentity{}
+	}
+	device, inode := uint64(stat.Dev), uint64(stat.Ino)
+	return domain.PhysicalIdentity{
+		Device:    device,
+		Inode:     inode,
+		LinkCount: uint64(stat.Nlink),
+		Reliable:  filesystemReliable && device != 0 && inode != 0,
+	}
 }
 
 func deviceAndInode(info fs.FileInfo) (uint64, uint64) {

@@ -1,0 +1,4 @@
+-- 010: link_count column is added idempotently by store.Init via
+-- addColumnsIfMissing. This stores the filesystem nlink value captured
+-- at scan time so the desktop UI can display hardlink evidence without
+-- re-deriving it from physical identity grouping alone.

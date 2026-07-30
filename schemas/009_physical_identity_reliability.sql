@@ -1,0 +1,3 @@
+-- 009: physical identity reliability is added idempotently by store.Init.
+-- A separate flag prevents SMB/FUSE inode values from being treated as
+-- trustworthy hardlink identities merely because they are non-zero.

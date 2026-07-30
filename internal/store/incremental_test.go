@@ -88,6 +88,73 @@ func TestMarkFilesMissingIdempotent(t *testing.T) {
 	}
 }
 
+func TestListFilesAndFormatsExcludeMissingButPreserveAuditRow(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, filepath.Join(t.TempDir(), "active-snapshot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.RegisterStorage(ctx, domain.Storage{ID: "s1", RootPath: "/vol", Kind: "filesystem", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	files := []domain.FileInstance{
+		{StorageID: "s1", Path: "/vol/active.txt", Name: "active.txt", Size: 1, ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+		{StorageID: "s1", Path: "/vol/missing.txt", Name: "missing.txt", Size: 1, ModifiedAt: time.Now(), DiscoveredAt: time.Now()},
+	}
+	ids, err := st.UpsertFiles(ctx, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if err := st.SaveFormat(ctx, id, domain.FormatInfo{Format: "text", Category: domain.CategoryDocument}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.MarkFilesMissing(ctx, "s1", []string{"/vol/active.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	active, err := st.ListFiles(ctx, "s1")
+	if err != nil || len(active) != 1 || active[0].Path != "/vol/active.txt" {
+		t.Fatalf("active files = %#v err=%v", active, err)
+	}
+	formats, err := st.ListFormats(ctx, "s1")
+	if err != nil || len(formats) != 1 || formats[0].Path != "/vol/active.txt" {
+		t.Fatalf("active formats = %#v err=%v", formats, err)
+	}
+	var auditRows int
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM file_instances WHERE file_status='missing'").Scan(&auditRows); err != nil || auditRows != 1 {
+		t.Fatalf("missing audit rows = %d err=%v", auditRows, err)
+	}
+}
+
+func TestMarkFilesUnavailableUsesSeenTableAndCanRecoverActive(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, filepath.Join(t.TempDir(), "partial.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	seedStorage(t, st, "partial")
+	seedFile(t, st, "partial", "/vol/seen.txt", 1, "")
+	seedFile(t, st, "partial", "/vol/unseen.txt", 1, "")
+	count, err := st.MarkFilesUnavailable(ctx, "partial", []string{"/vol/seen.txt"})
+	if err != nil || count != 1 {
+		t.Fatalf("unavailable count=%d err=%v", count, err)
+	}
+	active, err := st.ListFiles(ctx, "partial")
+	if err != nil || len(active) != 1 || active[0].Path != "/vol/seen.txt" {
+		t.Fatalf("active snapshot=%#v err=%v", active, err)
+	}
+	if err := st.MarkFileActive(ctx, "partial", "/vol/unseen.txt"); err != nil {
+		t.Fatal(err)
+	}
+	active, err = st.ListFiles(ctx, "partial")
+	if err != nil || len(active) != 2 {
+		t.Fatalf("reactivated snapshot=%#v err=%v", active, err)
+	}
+}
+
 // TestMarkFileActive restores a previously-missing file.
 func TestMarkFileActive(t *testing.T) {
 	st := newTestStore(t)

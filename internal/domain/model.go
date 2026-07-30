@@ -63,6 +63,52 @@ type RetentionScore struct {
 	Reasons   []string `json:"reasons"`
 }
 
+// PhysicalIdentity captures the physical storage identity of a file instance.
+// Multiple file paths that share the same Device+Inode are hardlinks to a
+// single physical data object; deleting one path does not free the data
+// block. The duplicate report must distinguish path instances from physical
+// objects to avoid overstating reclaimable capacity.
+//
+// Per ADR-0006 / V1 correctness: when Device and Inode are both non-zero and
+// the filesystem provides stable inode numbers, PhysicalKey is
+// "storage_id:device:inode". When either is zero or the filesystem cannot
+// guarantee stable inodes (e.g., some SMB/FUSE mounts), PhysicalKey is empty
+// and each path is treated as a separate physical copy (conservative).
+type PhysicalIdentity struct {
+	Device    uint64 `json:"device"`
+	Inode     uint64 `json:"inode"`
+	LinkCount uint64 `json:"link_count,omitempty"`
+	// Reliable indicates whether Device+Inode can be trusted as a stable
+	// physical identity. False on filesystems that do not guarantee stable
+	// inode numbers.
+	Reliable bool `json:"reliable"`
+}
+
+// PhysicalKey returns a stable identifier for the physical data object.
+// Returns "" when the identity is not reliable, forcing conservative
+// treatment (each path = one physical copy).
+func (p PhysicalIdentity) PhysicalKey(storageID string) string {
+	if !p.Reliable || p.Device == 0 || p.Inode == 0 {
+		return ""
+	}
+	return storageID + ":" + uint64ToString(p.Device) + ":" + uint64ToString(p.Inode)
+}
+
+// uint64ToString avoids fmt.Sprintf allocation in the hot path.
+func uint64ToString(n uint64) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
 type FileInstance struct {
 	StorageID     string    `json:"storage_id"`
 	Path          string    `json:"path"`
@@ -76,6 +122,11 @@ type FileInstance struct {
 	QuickHash     string    `json:"quick_hash,omitempty"`
 	ContentSHA256 string    `json:"content_sha256,omitempty"`
 	DiscoveredAt  time.Time `json:"discovered_at"`
+	// Physical captures the hardlink-level identity of this file instance.
+	// Populated by the scanner when Device and Inode are available; used by
+	// the duplicate report to avoid counting hardlinks as independent
+	// reclaimable copies. Zero value means "not assessed; treat conservatively".
+	Physical PhysicalIdentity `json:"physical,omitempty"`
 	// Format carries detected format metadata when format analysis has run.
 	// Empty until analyze is called; not populated by the scanner.
 	Format FormatInfo `json:"format,omitempty"`
@@ -141,6 +192,26 @@ type DuplicateGroup struct {
 	SHA256 string         `json:"sha256"`
 	Size   int64          `json:"size"`
 	Files  []FileInstance `json:"files"`
+	// GroupID is a stable identifier for this duplicate group, independent
+	// of array order or pagination. Format: SHA256 of
+	// governance_domain_id + storage_id + content_sha256.
+	// Empty when not computed (legacy callers).
+	GroupID string `json:"group_id,omitempty"`
+	// PathCount is len(Files).
+	PathCount int `json:"path_count"`
+	// PhysicalCopyCount is the number of distinct physical data objects.
+	// Hardlinks sharing one inode count as one physical copy. When physical
+	// identity is unreliable, PhysicalCopyCount equals PathCount.
+	PhysicalCopyCount int `json:"physical_copy_count"`
+	// HardlinkAliasCount is the number of paths that share a physical
+	// object with at least one other path (i.e., paths - physical copies).
+	HardlinkAliasCount int `json:"hardlink_alias_count"`
+	// PhysicalReclaimableBytes is the maximum bytes that could be freed by
+	// removing duplicate paths while keeping at least one physical object.
+	// For hardlinks, only the last path deletion frees data; so reclaimable
+	// = (physical_copies - 1) * size. When identity is unreliable,
+	// reclaimable = (path_count - 1) * size.
+	PhysicalReclaimableBytes int64 `json:"physical_reclaimable_bytes"`
 }
 
 type PlanState string
@@ -169,6 +240,7 @@ type PlannedAction struct {
 
 type OperationPlan struct {
 	ID            string          `json:"id"`
+	GroupID       string          `json:"group_id,omitempty"`
 	TaskID        string          `json:"task_id,omitempty"`
 	State         PlanState       `json:"state"`
 	ContentSHA256 string          `json:"content_sha256"`
@@ -315,4 +387,58 @@ type Rule struct {
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	Definition string     `json:"definition_yaml"`
+}
+
+// ReviewDecisionType classifies the human review decision for a duplicate
+// group. This is intentionally separate from PlanState: a review decision
+// records the user's intent ("keep all", "draft an action"), while PlanState
+// tracks the execution lifecycle of an operation plan (DRAFT → APPROVED →
+// EXECUTING → VERIFIED/ROLLED_BACK).
+//
+// Per ADR-0006 / V1 item 6: ReviewDecision and PlanState are separated so
+// that a user can mark a group "KEEP_ALL" without creating a plan, and a
+// plan can be approved/rejected independently of the review decision.
+type ReviewDecisionType string
+
+const (
+	// DecisionUnreviewed is the zero value; no decision has been recorded.
+	DecisionUnreviewed ReviewDecisionType = ""
+	// DecisionKeepAll means the user reviewed and decided to keep all
+	// copies. The group is closed for further automated suggestions.
+	DecisionKeepAll ReviewDecisionType = "KEEP_ALL"
+	// DecisionDraftAction means the user wants a governance plan drafted
+	// (e.g., quarantine redundant copies). The plan still goes through the
+	// normal DRAFT → APPROVED → EXECUTING lifecycle.
+	DecisionDraftAction ReviewDecisionType = "DRAFT_ACTION"
+	// DecisionDeferred means the user is not ready to decide yet. The
+	// group remains in the review queue.
+	DecisionDeferred ReviewDecisionType = "DEFERRED"
+	// DecisionRejectedSuggestion means the user disagrees with the system's
+	// duplicate assessment. The group is excluded from future automated
+	// suggestions unless re-opened.
+	DecisionRejectedSuggestion ReviewDecisionType = "REJECTED_SUGGESTION"
+	// DecisionCrossArchive marks the group as cross-archive duplicates.
+	// These are "related copies" only, not candidates for automated
+	// dedup (per V1 item 5: governance domain boundary).
+	DecisionCrossArchive ReviewDecisionType = "CROSS_ARCHIVE"
+	// DecisionBackupRelation marks the group as a backup relationship.
+	// Backup copies are retained; the group is excluded from dedup.
+	DecisionBackupRelation ReviewDecisionType = "BACKUP_RELATION"
+	// DecisionPrimaryRetention records which specific file copy the user
+	// chose as the primary retention. RetainedFileID points to the
+	// file_instances row.
+	DecisionPrimaryRetention ReviewDecisionType = "PRIMARY_RETENTION"
+)
+
+// GroupDecision is the persisted review decision for one duplicate group.
+// It maps to the group_decisions table (migration 008).
+type GroupDecision struct {
+	ID             string             `json:"id"`
+	GroupID        string             `json:"group_id"`
+	DecisionType   ReviewDecisionType `json:"decision_type"`
+	RetainedFileID *int64             `json:"retained_file_id,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
+	RuleID         string             `json:"rule_id,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }

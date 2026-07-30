@@ -3,39 +3,27 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/assets"
-	"github.com/FNB2026/nas-data-governance/internal/dircontext"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
-	"github.com/FNB2026/nas-data-governance/internal/format"
 	idx "github.com/FNB2026/nas-data-governance/internal/index"
 	"github.com/FNB2026/nas-data-governance/internal/learning"
 	"github.com/FNB2026/nas-data-governance/internal/merge"
-	"github.com/FNB2026/nas-data-governance/internal/planner"
 	"github.com/FNB2026/nas-data-governance/internal/privatefs"
 	"github.com/FNB2026/nas-data-governance/internal/relations"
-	"github.com/FNB2026/nas-data-governance/internal/report"
-	"github.com/FNB2026/nas-data-governance/internal/runner"
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
-)
-
-var (
-	version   = "dev"
-	commit    = "unknown"
-	buildTime = "unknown"
+	"github.com/FNB2026/nas-data-governance/internal/version"
 )
 
 func main() {
@@ -59,6 +47,10 @@ func main() {
 		err = runApprove(os.Args[2:])
 	case "execute":
 		err = runExecute(os.Args[2:])
+	case "quarantine":
+		err = runQuarantine(os.Args[2:])
+	case "purge":
+		err = runPurge(os.Args[2:])
 	case "analyze":
 		err = runAnalyze(os.Args[2:])
 	case "diagnose-formats":
@@ -83,6 +75,8 @@ func main() {
 		err = runRecover(os.Args[2:])
 	case "review":
 		err = runReview(os.Args[2:])
+	case "next-steps":
+		err = runNextSteps(os.Args[2:])
 	case "version":
 		err = runVersion(os.Args[2:])
 	default:
@@ -107,17 +101,13 @@ func runScan(args []string) error {
 	hashAttempts := fs.Int("hash-attempts", 3, "maximum read attempts per hash")
 	hashRetryDelay := fs.Duration("hash-retry-delay", 250*time.Millisecond, "delay between hash attempts")
 	hashFailuresOut := fs.String("hash-failures-out", "", "private hash failure manifest (default: <out>.hash-failures.jsonl)")
+	progressOut := fs.String("progress-out", "", "owner-only aggregate progress snapshot (optional)")
+	progressInterval := fs.Duration("progress-interval", 15*time.Second, "progress snapshot interval")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *root == "" {
 		return fmt.Errorf("--root is required")
-	}
-	if *hashAttempts < 1 || *hashAttempts > 10 {
-		return fmt.Errorf("--hash-attempts must be between 1 and 10")
-	}
-	if *hashRetryDelay < 0 || *hashRetryDelay > 30*time.Second {
-		return fmt.Errorf("--hash-retry-delay must be between 0 and 30s")
 	}
 	if *hashFailuresOut == "" {
 		*hashFailuresOut = *out + ".hash-failures.jsonl"
@@ -126,197 +116,95 @@ func runScan(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	rootPath, err := filepath.Abs(*root)
-	if err != nil {
-		return err
-	}
-
 	// Open store early if --db is provided so we can use incremental mode.
 	var st *store.SQLiteStore
 	if *dbPath != "" {
+		var err error
 		st, err = store.Open(ctx, *dbPath)
 		if err != nil {
 			return err
 		}
 		defer st.Close()
-		if err := st.RegisterStorage(ctx, domain.Storage{
-			ID: *storage, RootPath: rootPath, Kind: "filesystem", CreatedAt: time.Now().UTC(),
-		}); err != nil {
-			return err
-		}
 	}
 
-	// Load existing file metadata for incremental hash reuse.
-	// Key: path → cached metadata. If size+mtime+inode match, skip hashing.
-	cache := map[string]store.FileMeta{}
-	if st != nil && !*fullScan {
-		existing, err := st.ListFileMetadata(ctx, *storage)
-		if err != nil {
-			return fmt.Errorf("load file metadata: %w", err)
-		}
-		for _, m := range existing {
-			cache[m.Path] = m
-		}
-	}
-
-	// Checkpoint: resume from the last incomplete scan if --resume.
-	var checkpointID int64
-	resumePath := ""
+	// Create scan service. The service encapsulates traversal, incremental
+	// hash reuse, two-stage progressive fingerprinting, and DB persistence.
+	// When --db is omitted, pass a nil interface (not a nil *SQLiteStore)
+	// so the service correctly detects JSONL-only mode.
+	// We inject the global quickHash/fullHash variables so tests can
+	// override them without reaching into the service internals.
+	var scanStore app.ScanStore
 	if st != nil {
-		if *resume && !*fullScan {
-			cp, err := st.LastCheckpoint(ctx, *storage)
-			if err == nil {
-				resumePath = cp.LastScannedPath
-				checkpointID = cp.ID
-				fmt.Printf("resuming from checkpoint %d (%d files scanned; path omitted)\n",
-					cp.ID, cp.ScannedCount)
-			} else if !errors.Is(err, store.ErrNotFound) {
-				return fmt.Errorf("load checkpoint: %w", err)
-			}
-		}
-		if checkpointID == 0 {
-			checkpointID, err = st.StartCheckpoint(ctx, *storage)
-			if err != nil {
-				return err
-			}
-		}
+		scanStore = st
 	}
+	svc := app.NewScanServiceWithHashFunc(scanStore, app.HashFunc(quickHash), app.HashFunc(fullHash))
 
-	// Scan with incremental hash reuse. When --workers > 1, hash computation
-	// is offloaded to a worker pool; the scanner callback submits tasks
-	// and we wait for all to complete after Scan returns.
-	var files []domain.FileInstance
-	var filesMu sync.Mutex
-	var hashFailures []hashFailure
-	var failuresMu sync.Mutex
-	addFile := func(f domain.FileInstance) {
-		filesMu.Lock()
-		files = append(files, f)
-		filesMu.Unlock()
-	}
-	addFailure := func(f hashFailure) {
-		failuresMu.Lock()
-		hashFailures = append(hashFailures, f)
-		failuresMu.Unlock()
-	}
-	hashRunner := runner.New(*workers)
-	scanOpts := scanner.Options{
-		Root:          *root,
-		StorageID:     *storage,
-		ExcludedNames: scanner.DefaultExclusions(),
-		ResumePath:    resumePath,
-	}
-	stats, err := scanner.Scan(ctx, scanOpts, func(file domain.FileInstance) error {
-		// Incremental check: if size + mtime + inode are unchanged,
-		// reuse cached hashes instead of recomputing.
-		if cached, ok := cache[file.Path]; ok {
-			if cached.Size == file.Size &&
-				cached.ModifiedAt.Equal(file.ModifiedAt) &&
-				cached.Inode == file.Inode && cached.QuickHash != "" {
-				file.QuickHash = cached.QuickHash
-				file.ContentSHA256 = cached.ContentSHA256
-				addFile(file)
-				return nil
-			}
+	// Start progress reporter that polls the service's Progress() method.
+	reporter, err := startProgressReporter(*progressOut, *progressInterval, func() progressSnapshot {
+		p := svc.Progress()
+		return progressSnapshot{
+			Command: "scan", Stage: p.Stage, Status: progressStatus(p.Stage),
+			Processed: p.Processed,
+			Details:   map[string]int{"discovered": int(p.Discovered), "hash_failures": int(p.Failed)},
 		}
-		// File is new or changed: compute quick hash (possibly concurrent).
-		return hashRunner.Submit(ctx, func() error {
-			q, used, qerr := hashWithRetry(ctx, file.Path, file.Size, *hashAttempts, *hashRetryDelay, quickHash)
-			if qerr != nil {
-				addFile(file)
-				addFailure(newHashFailure(file, "quick", used, "hash_failed"))
-				return errors.New("quick fingerprint failed; path omitted")
-			}
-			file.QuickHash = q
-			addFile(file)
-			return nil
-		})
 	})
-	// Wait for all hash computations to finish before proceeding.
-	hashErrs := hashRunner.Wait()
 	if err != nil {
-		if checkpointID != 0 {
-			_ = st.CompleteCheckpoint(ctx, checkpointID, "aborted")
-		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
-		}
-		return errors.New("scan traversal failed; source paths omitted")
+		return err
 	}
-	reportHashErrors(os.Stderr, hashErrs)
+	if reporter != nil {
+		defer reporter.Stop()
+	}
 
-	// Second-stage hashing: only for files that share size+quick_hash
-	// with another file AND don't already have content_sha256 cached.
-	// Also concurrent when --workers > 1.
-	bySizeQuick := map[string][]int{}
-	for i, f := range files {
-		if f.ContentSHA256 == "" && f.QuickHash != "" {
-			key := fmt.Sprintf("%d:%s", f.Size, f.QuickHash)
-			bySizeQuick[key] = append(bySizeQuick[key], i)
-		}
+	// Run the scan through the service.
+	result, err := svc.Scan(ctx, app.ScanInput{
+		Root:           *root,
+		StorageID:      *storage,
+		FullScan:       *fullScan,
+		Resume:         *resume,
+		Workers:        *workers,
+		HashAttempts:   *hashAttempts,
+		HashRetryDelay: *hashRetryDelay,
+	})
+	if err != nil {
+		return err
 	}
-	fullRunner := runner.New(*workers)
-	for _, indexes := range bySizeQuick {
-		if len(indexes) < 2 {
-			continue
-		}
-		for _, i := range indexes {
-			idx := i // capture for closure
-			fullRunner.Submit(ctx, func() error {
-				h, used, ferr := hashWithRetry(ctx, files[idx].Path, files[idx].Size, *hashAttempts, *hashRetryDelay, fullHash)
-				if ferr != nil {
-					addFailure(newHashFailure(files[idx], "full", used, "hash_failed"))
-					return errors.New("full fingerprint failed; path omitted")
-				}
-				filesMu.Lock()
-				files[idx].ContentSHA256 = h
-				filesMu.Unlock()
-				return nil
-			})
-		}
-	}
-	fullErrs := fullRunner.Wait()
-	reportHashErrors(os.Stderr, fullErrs)
 
-	if err := writeHashFailures(*hashFailuresOut, hashFailures); err != nil {
+	if result.ResumedFrom != "" {
+		fmt.Printf("resuming from checkpoint %d (%d files scanned; path omitted)\n",
+			result.CheckpointID, result.ResumedCount)
+	}
+
+	// Write hash failure manifest (convert app.HashFailure to hashFailure).
+	cliFailures := make([]hashFailure, len(result.HashFailures))
+	for i, f := range result.HashFailures {
+		cliFailures[i] = hashFailure(f)
+	}
+	if err := writeHashFailures(*hashFailuresOut, cliFailures); err != nil {
 		return fmt.Errorf("write private hash failure manifest: %w", err)
+	}
+	if len(result.HashFailures) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %d file(s) could not be fingerprinted; paths omitted\n", len(result.HashFailures))
 	}
 
 	// Write JSONL index.
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		return err
 	}
-	if err := idx.Write(*out, files); err != nil {
+	if err := idx.Write(*out, result.Files); err != nil {
 		return err
 	}
 
-	// Persist to DB and mark missing files.
+	// Print summary.
 	if st != nil {
-		ids, err := st.UpsertFiles(ctx, files)
-		if err != nil {
-			return err
+		if !result.FullTraversal && result.Unavailable > 0 {
+			fmt.Fprintf(os.Stderr, "warning: partial traversal preserved %d unseen item(s) as unavailable; paths omitted\n", result.Unavailable)
 		}
-		for i, id := range ids {
-			if err := st.SaveContext(ctx, id, dircontext.Classify(files[i].Path), dircontext.RuleVersion()); err != nil {
-				return err
-			}
-		}
-		// Mark files not seen in this scan as missing.
-		seenPaths := make([]string, len(files))
-		for i, f := range files {
-			seenPaths[i] = f.Path
-		}
-		missing, _ := st.MarkFilesMissing(ctx, *storage, seenPaths)
-		// Complete checkpoint.
-		if checkpointID != 0 {
-			_ = st.CompleteCheckpoint(ctx, checkpointID, "completed")
-		}
-		fmt.Printf("indexed %d files into %s (%d missing marked, read-only scan)\n", len(files), *out, missing)
-		reportScanErrors(os.Stderr, len(stats.Errors))
-		return nil
+		fmt.Printf("indexed %d files into %s (%d missing, %d unavailable marked; read-only source scan)\n",
+			len(result.Files), *out, result.Missing, result.Unavailable)
+	} else {
+		fmt.Printf("indexed %d files into %s (read-only scan)\n", len(result.Files), *out)
 	}
-	fmt.Printf("indexed %d files into %s (read-only scan)\n", len(files), *out)
-	reportScanErrors(os.Stderr, len(stats.Errors))
+	reportScanErrors(os.Stderr, result.ScanErrors)
 	return nil
 }
 
@@ -326,14 +214,22 @@ func reportScanErrors(w io.Writer, count int) {
 	}
 }
 
+// reportHashErrors prints an aggregate warning for hash failures without
+// leaking sensitive source paths. Operators can consult the private hash
+// failure manifest for per-file details.
 func reportHashErrors(w io.Writer, errs []error) {
 	if len(errs) == 0 {
 		return
 	}
-	// Hash errors commonly embed full source paths. Keep ordinary logs free
-	// of sensitive filenames; operators can use aggregate counts to decide
-	// whether a private diagnostic run is needed.
 	fmt.Fprintf(w, "warning: %d file(s) could not be fingerprinted; paths omitted\n", len(errs))
+}
+
+// canMarkMissing returns true only when the scan completed a full traversal
+// without errors. Partial traversals must not reconcile missing state because
+// files that were skipped (permission denied, I/O error) would be incorrectly
+// marked as missing.
+func canMarkMissing(stats scanner.Stats) bool {
+	return len(stats.Errors) == 0
 }
 
 func runDuplicates(args []string) error {
@@ -346,9 +242,11 @@ func runDuplicates(args []string) error {
 	if err != nil {
 		return err
 	}
+	svc := app.NewDuplicateService()
+	groups := svc.DuplicateGroups(context.Background(), files)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(report.DuplicateGroups(files))
+	return enc.Encode(groups)
 }
 
 func runPlan(args []string) error {
@@ -362,7 +260,8 @@ func runPlan(args []string) error {
 	if err != nil {
 		return err
 	}
-	plans := planner.Build(report.DuplicateGroups(files))
+	svc := app.NewPlanService()
+	plans := svc.BuildPlans(context.Background(), files)
 	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
@@ -378,14 +277,15 @@ func runPlan(args []string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|retry-hashes|import-index|duplicates|plan|approve|execute|analyze|diagnose-formats|diagnose-governance|diagnose-paths|diagnose-merges|group|relations|merge|learn|rules|recover|review|version> [options]")
+	fmt.Fprintln(os.Stderr, "usage: nas-governance <scan|retry-hashes|import-index|duplicates|plan|approve|execute|quarantine|purge|analyze|diagnose-formats|diagnose-governance|diagnose-paths|diagnose-merges|group|relations|merge|learn|rules|recover|review|next-steps|version> [options]")
 }
 
 func runVersion(args []string) error {
-	if len(args) != 0 {
+	if len(args) > 0 {
 		return fmt.Errorf("version does not accept arguments")
 	}
-	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", version, commit, buildTime)
+	v := version.Get()
+	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", v.Version, v.Commit, v.BuildTime)
 	return nil
 }
 
@@ -414,24 +314,12 @@ func runApprove(args []string) error {
 	if err != nil {
 		return err
 	}
-	want := make(map[string]bool)
-	for _, id := range planIDs {
-		want[id] = true
-	}
-	approved := make([]domain.OperationPlan, 0, len(plans))
-	for _, p := range plans {
-		if *all || want[p.ID] {
-			if p.State != domain.PlanDraft {
-				return fmt.Errorf("plan %s is in state %s, expected DRAFT", p.ID, p.State)
-			}
-			if err := executor.Transition(&p, domain.PlanApproved); err != nil {
-				return fmt.Errorf("plan %s: %w", p.ID, err)
-			}
-			approved = append(approved, p)
-		}
-	}
-	if len(approved) == 0 {
-		return fmt.Errorf("no plans matched the selection")
+	svc := app.NewPlanService()
+	result, err := svc.ApprovePlans(context.Background(), app.ApprovePlansInput{
+		Plans: plans, IDs: planIDs, All: *all,
+	})
+	if err != nil {
+		return err
 	}
 	f, err := privatefs.Create(*out)
 	if err != nil {
@@ -440,10 +328,10 @@ func runApprove(args []string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(approved); err != nil {
+	if err := enc.Encode(result.Approved); err != nil {
 		return err
 	}
-	fmt.Printf("approved %d plan(s) into %s\n", len(approved), *out)
+	fmt.Printf("approved %d plan(s) into %s\n", len(result.Approved), *out)
 	return nil
 }
 
@@ -458,6 +346,7 @@ func runExecute(args []string) error {
 	fs.Var(&sourceRoots, "source-root", "approved task root (repeatable, absolute)")
 	dbPath := fs.String("db", "", "SQLite database for mandatory execution journal")
 	dryRun := fs.Bool("dry-run", false, "validate plans without executing filesystem actions")
+	retention := fs.Duration("retention", 30*24*time.Hour, "managed quarantine retention before PURGE eligibility (minimum 24h)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -484,71 +373,20 @@ func runExecute(args []string) error {
 			return err
 		}
 		defer st.Close()
-		// Create a task and save plans so operation_logs FK is satisfied.
-		taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
-		if err := st.CreateTask(ctx, domain.OperationTask{
-			ID: taskID, RootPath: sourceRoots[0], State: "executing", CreatedAt: time.Now(),
-		}); err != nil {
-			return fmt.Errorf("create task: %w", err)
-		}
-		// Populate TaskID on each plan so the execution journal FK is valid.
-		for i := range plans {
-			plans[i].TaskID = taskID
-		}
-		if err := st.SavePlans(ctx, taskID, plans); err != nil {
-			return fmt.Errorf("save plans: %w", err)
-		}
 	}
-	qCfg := executor.QuarantineConfig{
-		Root:        *quarantineRoot,
-		Structure:   executor.QuarantineFlat,
-		SourceRoots: sourceRoots,
-	}
-	// Real execution is fail-closed behind the persistent journal. Dry-run may
-	// validate without a database because it performs no filesystem writes.
-	var exec *executor.Executor
-	if !*dryRun {
-		exec, err = executor.NewWithJournal(qCfg, st)
-	} else {
-		exec, err = executor.New(qCfg)
-	}
+	// Delegate execution to the application service. The service handles
+	// task creation, plan persistence, journal management, audit logging,
+	// and quarantine registration.
+	svc := app.NewExecutionService(st)
+	summary, err := svc.Execute(ctx, app.ExecutionInput{
+		Plans:          plans,
+		QuarantineRoot: *quarantineRoot,
+		SourceRoots:    sourceRoots,
+		DryRun:         *dryRun,
+		Retention:      *retention,
+	})
 	if err != nil {
 		return err
-	}
-	results := make([]executor.Result, 0, len(plans))
-	executed, skipped, failed := 0, 0, 0
-	for i := range plans {
-		p := &plans[i]
-		if p.State != domain.PlanApproved {
-			skipped++
-			results = append(results, executor.Result{
-				PlanID:     p.ID,
-				FinalState: p.State,
-				Steps:      []executor.AuditStep{{Name: "skip", Status: executor.StepSkipped, Detail: map[string]any{"reason": "not approved"}}},
-			})
-			continue
-		}
-		if *dryRun {
-			result := exec.Validate(ctx, p)
-			results = append(results, result)
-			if result.Err != nil {
-				failed++
-			} else {
-				skipped++
-			}
-			continue
-		}
-		result := exec.Execute(ctx, p)
-		results = append(results, result)
-		if result.Err != nil {
-			failed++
-		} else {
-			executed++
-		}
-		// Persist audit steps to SQLite when a database is configured.
-		if st != nil {
-			persistAudit(ctx, st, result)
-		}
 	}
 	f, err := privatefs.Create(*out)
 	if err != nil {
@@ -557,28 +395,28 @@ func runExecute(args []string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(results); err != nil {
+	if err := enc.Encode(summary.Results); err != nil {
 		return err
 	}
-	fmt.Printf("executed %d, skipped %d, failed %d — audit: %s\n", executed, skipped, failed, *out)
-	return nil
+	fmt.Printf("executed %d, skipped %d, failed %d — audit: %s\n", summary.Executed, summary.Skipped, summary.Failed, *out)
+	return summary.LifecycleErr
 }
 
 // ---- analyze ----
 
-// formatReportEntry is one row in the analyze output.
-type formatReportEntry struct {
-	Path      string            `json:"path"`
-	StorageID string            `json:"storage_id"`
-	Format    domain.FormatInfo `json:"format"`
-	Error     string            `json:"error,omitempty"`
-}
+// formatReportEntry is a type alias for app.FormatReportEntry so existing
+// CLI tests that decode JSON into []formatReportEntry continue to work.
+type formatReportEntry = app.FormatReportEntry
 
 // runAnalyze reads a scan index, runs header-only format analysis (K-006) on
 // each file, and writes a JSON report. When --db is provided, results are also
 // persisted to SQLite in batches; the file rows must already exist
 // (created by a prior scan). Analyze is read-only with respect to user data:
 // it only reads file headers and writes its own report/database.
+//
+// The core analysis logic (worker pool, resume, persistence) lives in
+// app.AnalyzeService. This function handles flag parsing, file I/O, progress
+// reporting, and output formatting.
 func runAnalyze(args []string) error {
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	index := fs.String("index", "./var/index.jsonl", "index file from scan")
@@ -592,6 +430,8 @@ func runAnalyze(args []string) error {
 	refreshMetadata := fs.Bool("refresh-metadata", false, "with --resume, re-analyze supported media records with missing metadata")
 	batchSize := fs.Int("batch-size", 500, "format records per SQLite transaction")
 	progressEvery := fs.Int("progress-every", 10000, "aggregate progress interval (0 = disabled)")
+	progressOut := fs.String("progress-out", "", "owner-only aggregate progress snapshot (optional)")
+	progressInterval := fs.Duration("progress-interval", 15*time.Second, "progress snapshot interval")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -604,12 +444,6 @@ func runAnalyze(args []string) error {
 	if *refreshMetadata && !*resume {
 		return fmt.Errorf("--refresh-metadata requires --resume")
 	}
-	if *workers < 1 || *workers > 64 {
-		return fmt.Errorf("--workers must be between 1 and 64")
-	}
-	if *batchSize < 1 || *batchSize > 10000 {
-		return fmt.Errorf("--batch-size must be between 1 and 10000")
-	}
 	if *progressEvery < 0 {
 		return fmt.Errorf("--progress-every cannot be negative")
 	}
@@ -617,20 +451,9 @@ func runAnalyze(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *storageID != "" {
-		filtered := make([]domain.FileInstance, 0, len(files))
-		for _, f := range files {
-			if f.StorageID == *storageID {
-				filtered = append(filtered, f)
-			}
-		}
-		files = filtered
-	}
-	if *limit > 0 && len(files) > *limit {
-		files = files[:*limit]
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
 	var st *store.SQLiteStore
 	if *dbPath != "" {
 		st, err = store.Open(ctx, *dbPath)
@@ -640,144 +463,72 @@ func runAnalyze(args []string) error {
 		defer st.Close()
 	}
 
-	// Resume is based on durable format rows, not a fragile path cursor. This
-	// safely handles worker completion order and makes repeated runs idempotent.
-	existing := map[string]domain.FormatInfo{}
-	if *resume {
-		records, listErr := st.ListFormats(ctx, *storageID)
-		if listErr != nil {
-			return listErr
-		}
-		for _, record := range records {
-			existing[formatRecordKey(record.StorageID, record.Path)] = record.Info
-		}
-	}
-
-	// Concurrent format analysis via worker pool. Each worker reads file
-	// headers (read-only) and writes results to the shared entries slice.
-	// A separate local persistence stage batches SQLite writes; it never writes
-	// to the NAS and ordinary progress output contains aggregate counts only.
-	entries := make([]formatReportEntry, len(files))
-	var entriesMu sync.Mutex
-	var analyzed, unrecognized, failed int64
-	type pendingFile struct {
-		index int
-		file  domain.FileInstance
-	}
-	pending := make([]pendingFile, 0, len(files))
-	var reused int64
-	for i, file := range files {
-		if info, ok := existing[formatRecordKey(file.StorageID, file.Path)]; ok &&
-			!(*refreshUnknown && isUnknownFormat(info)) &&
-			!(*refreshMetadata && needsMetadataRefresh(info)) {
-			entries[i] = formatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
-			reused++
-			if info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown {
-				unrecognized++
-			} else {
-				analyzed++
-			}
-			continue
-		}
-		pending = append(pending, pendingFile{index: i, file: file})
-	}
-	if *resume {
-		fmt.Printf("resume: reused %d completed format record(s); source paths omitted\n", reused)
-	}
-
-	var persistCh chan store.FormatRecord
-	var persistWG sync.WaitGroup
-	var persistMu sync.Mutex
-	var persistErr error
-	var persisted, lookupFailed int64
+	// Create analyze service. The service encapsulates worker pool, resume,
+	// and batch persistence. Store may be nil for JSON-only mode.
+	var analyzeStore app.AnalyzeStore
 	if st != nil {
-		persistCh = make(chan store.FormatRecord, *batchSize*2)
-		persistWG.Add(1)
+		analyzeStore = st
+	}
+	svc := app.NewAnalyzeService(analyzeStore)
+
+	// Start progress reporter that polls the service's Progress() method.
+	reporter, err := startProgressReporter(*progressOut, *progressInterval, func() progressSnapshot {
+		p := svc.Progress()
+		return progressSnapshot{
+			Command: "analyze", Stage: p.Stage, Status: progressStatus(p.Stage),
+			Processed: p.Processed,
+			Details:   map[string]int{"total": int(p.Total), "reused": int(p.Reused), "failed": int(p.Failed)},
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if reporter != nil {
+		defer reporter.Stop()
+	}
+
+	// Periodic stderr progress (polls service Progress() on a short ticker).
+	if *progressEvery > 0 {
 		go func() {
-			defer persistWG.Done()
-			batch := make([]store.FormatRecord, 0, *batchSize)
-			flush := func() {
-				if len(batch) == 0 {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			var lastReported int64 = -1
+			for {
+				select {
+				case <-ctx.Done():
 					return
-				}
-				persistMu.Lock()
-				failedAlready := persistErr != nil
-				persistMu.Unlock()
-				if !failedAlready {
-					saved, missing, err := st.SaveFormatsByPath(context.Background(), batch)
-					persistMu.Lock()
-					persisted += int64(saved)
-					lookupFailed += int64(missing)
-					if err != nil && persistErr == nil {
-						persistErr = err
+				case <-ticker.C:
+					p := svc.Progress()
+					boundary := p.Processed / int64(*progressEvery)
+					if boundary > lastReported && p.Processed > 0 {
+						fmt.Fprintf(os.Stderr, "progress: analyzed %d/%d file(s); source paths omitted\n", p.Processed, p.Total)
+						lastReported = boundary
 					}
-					persistMu.Unlock()
-				}
-				batch = batch[:0]
-			}
-			for record := range persistCh {
-				batch = append(batch, record)
-				if len(batch) >= *batchSize {
-					flush()
 				}
 			}
-			flush()
 		}()
 	}
 
-	ar := runner.New(*workers)
-	var processedNew int64
-	var submitErr error
-	for _, item := range pending {
-		idx := item.index
-		file := item.file
-		if err := ar.Submit(ctx, func() error {
-			info, analyzeErr := format.Analyze(file.Path)
-			entry := formatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
-			if analyzeErr != nil {
-				entry.Error = analyzeErr.Error()
-				atomic.AddInt64(&failed, 1)
-			} else if info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown {
-				atomic.AddInt64(&unrecognized, 1)
-			} else {
-				atomic.AddInt64(&analyzed, 1)
-			}
-			if persistCh != nil && analyzeErr == nil && info.Format != "" {
-				persistCh <- store.FormatRecord{StorageID: file.StorageID, Path: file.Path, Info: info}
-			}
-			entriesMu.Lock()
-			entries[idx] = entry
-			entriesMu.Unlock()
-			done := reused + atomic.AddInt64(&processedNew, 1)
-			if *progressEvery > 0 && done%int64(*progressEvery) == 0 {
-				fmt.Fprintf(os.Stderr, "progress: analyzed %d/%d file(s); source paths omitted\n", done, len(files))
-			}
-			return nil
-		}); err != nil {
-			submitErr = err
-			break
-		}
-	}
-	ar.Wait()
-	if persistCh != nil {
-		close(persistCh)
-		persistWG.Wait()
-	}
-	persistMu.Lock()
-	batchErr := persistErr
-	persistMu.Unlock()
-	completed := reused + atomic.LoadInt64(&processedNew)
-	if completed != int64(len(files)) {
-		fmt.Fprintf(os.Stderr, "analysis interrupted after %d/%d file(s); rerun with --resume; source paths omitted\n", completed, len(files))
-		if submitErr != nil {
-			return submitErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return fmt.Errorf("analysis incomplete")
+	// Run the analysis through the service.
+	result, err := svc.Analyze(ctx, app.AnalyzeInput{
+		Files:           files,
+		StorageID:       *storageID,
+		Limit:           *limit,
+		Workers:         *workers,
+		Resume:          *resume,
+		RefreshUnknown:  *refreshUnknown,
+		RefreshMetadata: *refreshMetadata,
+		BatchSize:       *batchSize,
+	})
+	if err != nil {
+		return err
 	}
 
+	if *resume && result.Reused > 0 {
+		fmt.Printf("resume: reused %d completed format record(s); source paths omitted\n", result.Reused)
+	}
+
+	// Write JSON report.
 	f, err := privatefs.Create(*out)
 	if err != nil {
 		return err
@@ -785,40 +536,20 @@ func runAnalyze(args []string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(entries); err != nil {
+	if err := enc.Encode(result.Entries); err != nil {
 		return err
 	}
+
 	fmt.Printf("analyzed %d files (%d recognized, %d unrecognized, %d failed) — report: %s\n",
-		len(entries), analyzed, unrecognized, failed, *out)
+		len(result.Entries), result.Analyzed, result.Unrecognized, result.Failed, *out)
 	if st != nil {
-		fmt.Printf("persisted %d new format records to %s (%d reused)\n", persisted, *dbPath, reused)
+		fmt.Printf("persisted %d new format records to %s (%d reused)\n", result.Persisted, *dbPath, result.Reused)
 	}
-	reportAnalyzePersistenceErrors(os.Stderr, int(lookupFailed), 0)
-	if batchErr != nil {
-		return batchErr
+	reportAnalyzePersistenceErrors(os.Stderr, int(result.LookupFailed), 0)
+	if result.PersistErr != nil {
+		return result.PersistErr
 	}
 	return nil
-}
-
-func formatRecordKey(storageID, path string) string { return storageID + "\x00" + path }
-
-func isUnknownFormat(info domain.FormatInfo) bool {
-	return info.Format == "" || info.Format == "unknown" || info.Category == domain.CategoryUnknown
-}
-
-// needsMetadataRefresh is deliberately capability-scoped. Formats whose
-// parser cannot currently fill a missing field are not retried forever.
-func needsMetadataRefresh(info domain.FormatInfo) bool {
-	switch info.Format {
-	case "wav", "aiff", "flac", "m4a":
-		return info.Duration <= 0
-	case "mp4", "mov", "m4v", "avi":
-		return info.Duration <= 0 || info.Width <= 0 || info.Height <= 0
-	case "mpeg":
-		return info.Width <= 0 || info.Height <= 0
-	default:
-		return false
-	}
 }
 
 func reportAnalyzePersistenceErrors(w io.Writer, lookupFailed, saveFailed int) {
@@ -1279,8 +1010,11 @@ func runRecover(args []string) error {
 	}
 	defer st.Close()
 
-	exec := executor.NewForRecovery()
-	results := exec.Recover(ctx, st)
+	svc := app.NewRecoveryService(st)
+	results, err := svc.Recover(ctx)
+	if err != nil {
+		return err
+	}
 
 	rolledBack, reset, errors := 0, 0, 0
 	for _, r := range results {

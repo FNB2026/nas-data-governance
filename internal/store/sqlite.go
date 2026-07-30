@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -115,10 +116,27 @@ func (s *SQLiteStore) Close() error {
 
 // ---------------- storages ----------------
 
+// RegisterStorage inserts a new storage or verifies an existing one's root
+// path matches. It never silently rebinds a storage ID to a different root
+// directory — doing so would corrupt incremental scan metadata and
+// checkpoints associated with the original root.
 func (s *SQLiteStore) RegisterStorage(ctx context.Context, st domain.Storage) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO storages(id, root_path, kind, created_at) VALUES(?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET root_path=excluded.root_path, kind=excluded.kind`,
+	var existingRoot string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT root_path FROM storages WHERE id = ?`, st.ID).Scan(&existingRoot)
+	if err == nil {
+		// Storage exists — root must match; ID cannot be rebound.
+		if existingRoot != st.RootPath {
+			return fmt.Errorf("store: storage ID %q is registered to %q, not %q: root path cannot be changed",
+				st.ID, existingRoot, st.RootPath)
+		}
+		return nil // idempotent — same ID, same root
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("store: check existing storage: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO storages(id, root_path, kind, created_at) VALUES(?, ?, ?, ?)`,
 		st.ID, st.RootPath, st.Kind, st.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: register storage: %w", err)
@@ -159,11 +177,12 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 
 	ids := make([]int64, 0, len(files))
 	const stmt = `INSERT INTO file_instances
-		(storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(storage_id, path, name, size, mode, mtime, device, inode, physical_reliable, link_count, quick_hash, content_sha256, discovered_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(storage_id, path) DO UPDATE SET
 			name=excluded.name, size=excluded.size, mode=excluded.mode, mtime=excluded.mtime,
-			device=excluded.device, inode=excluded.inode, quick_hash=excluded.quick_hash,
+			device=excluded.device, inode=excluded.inode, physical_reliable=excluded.physical_reliable,
+			link_count=excluded.link_count, quick_hash=excluded.quick_hash,
 			content_sha256=excluded.content_sha256, discovered_at=excluded.discovered_at
 		RETURNING id`
 	prep, err := tx.PrepareContext(ctx, stmt)
@@ -176,7 +195,8 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 		err := prep.QueryRowContext(ctx,
 			f.StorageID, f.Path, f.Name, f.Size, f.Mode,
 			f.ModifiedAt.UTC().Format(time.RFC3339Nano),
-			sqliteUint64(f.Device), sqliteUint64(f.Inode), f.QuickHash, f.ContentSHA256,
+			sqliteUint64(f.Device), sqliteUint64(f.Inode), f.Physical.Reliable,
+			sqliteUint64(f.Physical.LinkCount), f.QuickHash, f.ContentSHA256,
 			f.DiscoveredAt.UTC().Format(time.RFC3339Nano),
 		).Scan(&id)
 		if err != nil {
@@ -192,14 +212,15 @@ func (s *SQLiteStore) UpsertFiles(ctx context.Context, files []domain.FileInstan
 
 func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain.FileInstance, error) {
 	query := `
-		SELECT storage_id, path, name, size, mode, mtime, device, inode, quick_hash, content_sha256, discovered_at
-		FROM file_instances`
+		SELECT storage_id, path, name, size, mode, mtime, device, inode, physical_reliable, link_count, quick_hash, content_sha256, discovered_at
+		FROM file_instances
+		WHERE file_status = 'active'`
 	var rows *sql.Rows
 	var err error
 	if storageID == "" {
 		rows, err = s.db.QueryContext(ctx, query+` ORDER BY storage_id, path`)
 	} else {
-		rows, err = s.db.QueryContext(ctx, query+` WHERE storage_id = ? ORDER BY path`, storageID)
+		rows, err = s.db.QueryContext(ctx, query+` AND storage_id = ? ORDER BY path`, storageID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: list files: %w", err)
@@ -209,12 +230,14 @@ func (s *SQLiteStore) ListFiles(ctx context.Context, storageID string) ([]domain
 	for rows.Next() {
 		var f domain.FileInstance
 		var mtime, discoveredAt string
-		var device, inode int64
+		var device, inode, linkCount int64
 		if err := rows.Scan(&f.StorageID, &f.Path, &f.Name, &f.Size, &f.Mode, &mtime,
-			&device, &inode, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
+			&device, &inode, &f.Physical.Reliable, &linkCount, &f.QuickHash, &f.ContentSHA256, &discoveredAt); err != nil {
 			return nil, err
 		}
 		f.Device, f.Inode = uint64(device), uint64(inode)
+		f.Physical.Device, f.Physical.Inode = f.Device, f.Inode
+		f.Physical.LinkCount = uint64(linkCount)
 		f.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
 		f.DiscoveredAt, _ = time.Parse(time.RFC3339Nano, discoveredAt)
 		out = append(out, f)
@@ -364,10 +387,11 @@ func (s *SQLiteStore) SaveFormatsByPath(ctx context.Context, records []FormatRec
 
 func (s *SQLiteStore) ListFormats(ctx context.Context, storageID string) ([]FormatRecord, error) {
 	query := `SELECT f.storage_id, f.path, x.format_json
-		FROM file_formats x JOIN file_instances f ON f.id=x.file_id`
+		FROM file_formats x JOIN file_instances f ON f.id=x.file_id
+		WHERE f.file_status = 'active'`
 	var args []any
 	if storageID != "" {
-		query += ` WHERE f.storage_id = ?`
+		query += ` AND f.storage_id = ?`
 		args = append(args, storageID)
 	}
 	query += ` ORDER BY f.storage_id, f.path`
@@ -650,21 +674,22 @@ func (s *SQLiteStore) SavePlans(ctx context.Context, taskID string, plans []doma
 
 func (s *SQLiteStore) ListPlans(ctx context.Context, taskID string) ([]domain.OperationPlan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT evidence_json FROM operation_plans WHERE task_id = ? ORDER BY id`, taskID)
+		`SELECT evidence_json, state FROM operation_plans WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list plans: %w", err)
 	}
 	defer rows.Close()
 	out := make([]domain.OperationPlan, 0)
 	for rows.Next() {
-		var blob string
-		if err := rows.Scan(&blob); err != nil {
+		var blob, state string
+		if err := rows.Scan(&blob, &state); err != nil {
 			return nil, err
 		}
 		var env planEnvelope
 		if err := json.Unmarshal([]byte(blob), &env); err != nil {
 			return nil, fmt.Errorf("store: unmarshal plan: %w", err)
 		}
+		env.Plan.State = domain.PlanState(state)
 		out = append(out, env.Plan)
 	}
 	return out, rows.Err()
@@ -674,7 +699,7 @@ func (s *SQLiteStore) ListPlans(ctx context.Context, taskID string) ([]domain.Op
 // time then plan id. Used by feedback learning (L4).
 func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT p.evidence_json
+		`SELECT p.evidence_json, p.state
 		 FROM operation_plans p
 		 JOIN operation_tasks t ON t.id = p.task_id
 		 ORDER BY t.created_at, p.id`)
@@ -684,14 +709,15 @@ func (s *SQLiteStore) ListAllPlans(ctx context.Context) ([]domain.OperationPlan,
 	defer rows.Close()
 	out := make([]domain.OperationPlan, 0)
 	for rows.Next() {
-		var blob string
-		if err := rows.Scan(&blob); err != nil {
+		var blob, state string
+		if err := rows.Scan(&blob, &state); err != nil {
 			return nil, err
 		}
 		var env planEnvelope
 		if err := json.Unmarshal([]byte(blob), &env); err != nil {
 			return nil, fmt.Errorf("store: unmarshal plan: %w", err)
 		}
+		env.Plan.State = domain.PlanState(state)
 		out = append(out, env.Plan)
 	}
 	return out, rows.Err()
@@ -1003,27 +1029,64 @@ func (s *SQLiteStore) ListFileMetadata(ctx context.Context, storageID string) ([
 // MarkFilesMissing sets file_status='missing' for paths not seen in the
 // current scan. Uses a parameterized IN clause built safely.
 func (s *SQLiteStore) MarkFilesMissing(ctx context.Context, storageID string, paths []string) (int64, error) {
-	if len(paths) == 0 {
-		return 0, nil
+	return s.reconcileUnseen(ctx, storageID, paths, "missing")
+}
+
+// MarkFilesUnavailable is used after a partial traversal. Unseen rows remain
+// auditable but cannot participate in current-snapshot diagnostics or plans.
+func (s *SQLiteStore) MarkFilesUnavailable(ctx context.Context, storageID string, paths []string) (int64, error) {
+	return s.reconcileUnseen(ctx, storageID, paths, "unavailable")
+}
+
+// reconcileUnseen uses a temporary table instead of a giant NOT IN clause.
+// Real NAS snapshots commonly exceed SQLite's host-parameter limit.
+func (s *SQLiteStore) reconcileUnseen(ctx context.Context, storageID string, paths []string, status string) (int64, error) {
+	if status != "missing" && status != "unavailable" {
+		return 0, fmt.Errorf("store: invalid reconciliation status")
 	}
-	// Build a parameterized NOT IN clause: WHERE storage_id = ? AND path NOT IN (?, ?, ...)
-	// paths is the set of SEEN paths; everything else in this storage is missing.
-	placeholders := make([]string, len(paths))
-	args := make([]any, 0, len(paths)+1)
-	args = append(args, storageID)
-	for i, p := range paths {
-		placeholders[i] = "?"
-		args = append(args, p)
-	}
-	query := fmt.Sprintf(
-		`UPDATE file_instances SET file_status = 'missing'
-		 WHERE storage_id = ? AND file_status = 'active' AND path NOT IN (%s)`,
-		strings.Join(placeholders, ","))
-	res, err := s.db.ExecContext(ctx, query, args...)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("store: mark files missing: %w", err)
+		return 0, fmt.Errorf("store: begin file reconciliation: %w", err)
 	}
-	return res.RowsAffected()
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS scan_seen_paths(path TEXT PRIMARY KEY) WITHOUT ROWID`); err != nil {
+		return 0, fmt.Errorf("store: create seen-path table: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scan_seen_paths`); err != nil {
+		return 0, fmt.Errorf("store: reset seen-path table: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO scan_seen_paths(path) VALUES(?)`)
+	if err != nil {
+		return 0, fmt.Errorf("store: prepare seen path: %w", err)
+	}
+	for _, path := range paths {
+		if _, err := stmt.ExecContext(ctx, path); err != nil {
+			_ = stmt.Close()
+			return 0, fmt.Errorf("store: insert seen path: %w", err)
+		}
+	}
+	if err := stmt.Close(); err != nil {
+		return 0, err
+	}
+	eligible := "file_status = 'active'"
+	if status == "missing" {
+		eligible = "file_status IN ('active','unavailable')"
+	}
+	query := fmt.Sprintf(`UPDATE file_instances SET file_status = ?
+		WHERE storage_id = ? AND %s
+		AND NOT EXISTS (SELECT 1 FROM scan_seen_paths s WHERE s.path = file_instances.path)`, eligible)
+	res, err := tx.ExecContext(ctx, query, status, storageID)
+	if err != nil {
+		return 0, fmt.Errorf("store: reconcile unseen files: %w", err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit file reconciliation: %w", err)
+	}
+	return count, nil
 }
 
 // MarkFileActive sets file_status='active' for a single path.

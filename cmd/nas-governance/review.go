@@ -113,27 +113,28 @@ func runReviewPlans(args []string) error {
 	fmt.Printf("found %d plan(s) with REVIEW actions\n\n", len(reviewPlans))
 
 	reader := bufio.NewReader(os.Stdin)
-	var approved []domain.OperationPlan
+	var acknowledged []domain.OperationPlan
 	quit := false
 	for len(reviewPlans) > 0 && !quit {
 		p := reviewPlans[0]
 		displayPlanReview(p)
-		fmt.Printf("\n[%d/%d] approve this plan? [y]es / [n]o / [s]kip / [q]uit: ", len(approved)+1, len(reviewPlans))
+		fmt.Printf("\n[%d/%d] keep all files? [k]eep-all (REVIEW→SKIP) / [n]o (leave REVIEW) / [q]uit: ", len(acknowledged)+1, len(reviewPlans))
 		resp, _ := reader.ReadString('\n')
 		resp = strings.TrimSpace(strings.ToLower(resp))
 		switch resp {
-		case "y", "yes":
-			// 将 REVIEW action 转为 SKIP（保留所有文件，等待人工后续处理）
+		case "k", "keep", "keep-all", "y", "yes":
+			// 将 REVIEW action 转为 SKIP（保留所有文件，不执行任何文件操作）。
+			// 注意：这不是执行批准（APPROVED），而是人工确认保留全部文件。
 			for j := range p.Actions {
 				if p.Actions[j].Action == domain.OperationReview {
 					p.Actions[j].Action = domain.OperationSkip
-					p.Actions[j].Reason = "approved by human review: " + p.Actions[j].Reason
+					p.Actions[j].Reason = "keep-all by human review: " + p.Actions[j].Reason
 				}
 			}
-			approved = append(approved, p)
+			acknowledged = append(acknowledged, p)
 			reviewPlans = reviewPlans[1:]
 		case "n", "no":
-			// 不批准，保留 REVIEW 标记
+			// 保留 REVIEW 标记，不做任何变更
 			reviewPlans = reviewPlans[1:]
 		case "q", "quit":
 			fmt.Println("quitting review")
@@ -143,12 +144,12 @@ func runReviewPlans(args []string) error {
 		}
 	}
 
-	if len(approved) == 0 {
-		fmt.Println("no plans approved")
+	if len(acknowledged) == 0 {
+		fmt.Println("no plans acknowledged")
 		return nil
 	}
 
-	// 写入已批准的 plan 文件
+	// 写入已确认的 plan 文件（REVIEW 已转为 SKIP，不涉及执行批准）
 	f, err := privatefs.Create(*approvedOut)
 	if err != nil {
 		return err
@@ -156,10 +157,10 @@ func runReviewPlans(args []string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(approved); err != nil {
+	if err := enc.Encode(acknowledged); err != nil {
 		return err
 	}
-	fmt.Printf("\napproved %d plan(s) → %s (REVIEW actions converted to SKIP)\n", len(approved), *approvedOut)
+	fmt.Printf("\nacknowledged %d plan(s) → %s (REVIEW actions converted to SKIP, not approved for execution)\n", len(acknowledged), *approvedOut)
 	return nil
 }
 

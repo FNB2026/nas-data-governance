@@ -2,9 +2,9 @@
 
 面向个人、家庭和组织数字资产的本地化数据治理与归档工程基座。
 
-本仓库实现安全索引、目录语境、去重计划与受限的安全执行流水线：只读扫描、元数据采集、分层哈希、完全重复报告、可解释的目录角色、草案计划、审批与执行。任何文件写入只能通过显式批准的计划和配置了源根目录的执行器发生。
+本仓库实现安全索引、目录语境、去重计划与受限的安全执行流水线：只读扫描、元数据采集、分层哈希、完全重复报告、可解释的目录角色、草案计划、审批与执行。M7 增加受管隔离、恢复、保留期候选和最终永久清除；任何文件写入只能通过显式批准的计划和配置了根目录的独立执行器发生。
 
-方法论与安全边界见脱敏后的 [NAS 数据治理与安全归档白皮书](docs/whitepaper.md)。公开范围、禁止提交的资料及发布检查清单见 [开源边界](docs/open-source-boundary.md)。
+方法论与安全边界见脱敏后的 [NAS 数据治理与安全归档白皮书](docs/whitepaper.md)。桌面端当前实施基线见 [NDG 桌面端前端架构与后端协同推进方案](docs/desktop-frontend-architecture.md)。公开范围、禁止提交的资料及发布检查清单见 [开源边界](docs/open-source-boundary.md)。
 
 ## 许可
 
@@ -29,6 +29,8 @@ make build
 ./bin/nas-governance analyze --index ./var/index.jsonl --out ./var/formats.json --db ./var/governance.db --workers 4 --resume --refresh-unknown
 ./bin/nas-governance analyze --index ./var/index.jsonl --out ./var/formats.json --db ./var/governance.db --workers 8 --resume --refresh-metadata
 ./bin/nas-governance diagnose-formats --db ./var/governance.db --out ./var/format-review-private.json
+# 长任务可选写入 owner-only 聚合进度，不含路径/文件名/哈希
+./bin/nas-governance scan --root /path/to/read-only-mount --out ./var/index.jsonl --db ./var/governance.db --progress-out ./var/scan-progress.json
 ./bin/nas-governance diagnose-governance --db ./var/governance.db --out ./var/governance-review-private.json
 ./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --legacy-log ./var/private-scan.log --out ./var/path-compat-private.json
 ./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --failures-manifest ./var/index.jsonl.hash-failures.jsonl --out ./var/path-compat-private.json
@@ -44,7 +46,7 @@ make build
 
 ## 高级风险操作
 
-文件写操作不属于快速开始。执行前必须同时满足：已有独立备份；先在复制的测试目录验证；隔离区位于所有源根目录之外；人工逐项批准计划；持久化 SQLite Journal 可用。首次使用不推荐 `approve --all`。
+文件写操作不属于快速开始。执行前必须同时满足：已有独立备份；先在复制的测试目录验证；隔离区位于所有源根目录之外；人工逐项批准计划；持久化 SQLite Journal 可用。首次使用不推荐 `approve --all`；永久清除不提供 `--all`。
 
 先批准明确选中的计划，并执行完全只读的预检：
 
@@ -56,15 +58,39 @@ make build
 人工复核 dry-run 审计结果后，真实执行必须提供 `--db`。Journal 初始化或动作完成记录失败时，执行器会在下一次文件写入前停止并回滚已完成动作：
 
 ```bash
-./bin/nas-governance execute --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --db ./var/governance.db --out ./var/audit.json
+./bin/nas-governance execute --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --retention 720h --db ./var/governance.db --out ./var/audit.json
 ./bin/nas-governance recover --db ./var/governance.db
 ```
+
+### M7 分级删除生命周期
+
+`execute` 成功隔离的文件会进入 `quarantine_items` 私有台账，默认保留 30 天。受保护目录角色自动进入 `HOLD`。隔离项可通过独立的草案、审批、dry-run、执行链路恢复：
+
+```bash
+./bin/nas-governance quarantine list --db ./var/governance.db --out ./var/quarantine-private.json
+./bin/nas-governance quarantine restore-plan --db ./var/governance.db --item-id ITEM_ID --out ./var/restore-plan.json
+./bin/nas-governance quarantine restore-approve --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST
+./bin/nas-governance quarantine restore-execute --dry-run --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data
+./bin/nas-governance quarantine restore-execute --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data
+```
+
+保留期届满只产生 `DRAFT` 永久清除候选，不会自动删除。永久清除必须逐项二次审批，并在执行时再次提交相同摘要：
+
+```bash
+./bin/nas-governance purge plan --db ./var/governance.db --out ./var/purge-plan.json
+./bin/nas-governance purge approve --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST
+./bin/nas-governance purge execute --dry-run --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine
+./bin/nas-governance purge execute --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine
+./bin/nas-governance purge recover --db ./var/governance.db --quarantine /path/outside/source/quarantine
+```
+
+永久清除仅允许处理受管隔离项，不允许直接删除源目录文件。它表示文件从当前文件系统命名空间不可恢复地移除，不等同于 NAS 快照、备份、写时复制或 SSD 介质上的物理安全擦除。
 
 ## 支持平台
 
 发布包覆盖 `darwin/arm64`、`darwin/amd64`、`linux/arm64` 和 `linux/amd64`。其他平台可从源码构建，但不属于首个公开版本的发布矩阵。
 
-扫描默认不跟随符号链接，不跨挂载点，不读取文件内容之外的外部服务，不上传任何数据。完整哈希采用 SHA-256；文件先按大小分组，只有潜在重复项才计算完整哈希。增量扫描复用 size+mtime+inode 三元组匹配的既有哈希，断点续扫通过 `scan_checkpoints` 表记录进度，已删除文件标记为 missing 而非物理删除。
+扫描默认不跟随符号链接，不跨挂载点，不读取文件内容之外的外部服务，不上传任何数据。哈希采用两阶段策略：第一阶段对所有新文件或变更文件计算快速指纹（quick hash）；第二阶段按 size+quick_hash 分组，仅对成员数大于 1 的候选组计算完整 SHA-256。增量扫描复用 size+mtime+inode 三元组匹配的既有哈希，断点续扫通过 `scan_checkpoints` 表记录进度，已删除文件标记为 missing 而非物理删除。
 
 哈希读取默认最多尝试 3 次。仍失败的文件会保留在索引中（哈希字段为空），并写入默认权限为 `0600` 的 `<index>.hash-failures.jsonl` 私有清单；普通日志只报告数量，不输出路径或文件名。`retry-hashes` 会再次核对任务根目录、符号链接、挂载点以及 size+mtime+inode stale 状态，只读取通过检查的目标，并生成新的补录索引和剩余失败清单。它拒绝原地覆盖源索引，也不直接修改数据库；复核新索引后，再单独运行 `import-index` 幂等补录。
 
@@ -73,6 +99,15 @@ make build
 `analyze --resume` 以 SQLite 中已持久化的格式记录为检查点，跳过已完成项的 NAS 读取；`--refresh-unknown` 仅重新分析旧版本未识别项，`--refresh-metadata` 仅重新分析当前解析器能补齐的媒体元数据缺口。结果按 `--batch-size` 分批事务落库，进度日志只输出聚合数量。中断时保留已落库进度，不覆盖完整报告。
 
 `diagnose-formats` 只读项目 SQLite，生成默认 `0600` 的私有人工复核报告：列出大型 unknown、扩展名/文件头冲突和按格式聚合的元数据缺口。终端只显示数量，路径仅保留在私有报告中；诊断不会自动重命名文件。
+
+对真实基线的后续治理仍与执行分离：
+
+```bash
+# 登记 critical HOLD；普通 approve（包括 --all）会拒绝 critical
+./bin/nas-governance next-steps hold-critical --plan ./var/plan.json --out ./var/critical-hold-register.json
+# 将大媒体分为在线保护/项目归档复核/冷存储复核，仅产生 DRAFT
+./bin/nas-governance next-steps media-tiering --review ./var/governance-review-private.json --out ./var/media-tiering-draft.json
+```
 
 `diagnose-governance` 也只读项目 SQLite：对完全重复组生成仅 DRAFT 的复核计划，对零字节文件区分占位标记/失败产物/潜在临时产物/无法解释空文件，并聚合大容量媒体的格式、编码、时长、尺寸、目录职责及版本/派生/侧车关系。该命令不写审批状态，不保存可执行任务，不调用执行器；任何非 DRAFT 结果都会被拒绝写入。
 
@@ -87,7 +122,7 @@ make build
 ## 仓库结构
 
 ```text
-cmd/nas-governance/       CLI 入口（scan/retry-hashes/import-index/analyze/group/relations/merge/plan/approve/execute/recover/learn/review）
+cmd/nas-governance/       CLI 入口（含 quarantine/restore/purge 生命周期）
 internal/domain/          核心对象与安全约束
 internal/scanner/         只读文件系统扫描（context-aware BFS、增量哈希复用、断点续扫）
 internal/fingerprint/     快速指纹与完整哈希
@@ -105,6 +140,7 @@ internal/planner/         草案计划与可解释保留评分
 internal/learning/        L2 统计学习、L3 行业资料学习、L4 决策反馈学习
 internal/store/           SQLite 持久化层（项目自身数据库）
 internal/executor/        安全执行器（stale 复核、隔离、跨卷复制-校验-删除源、回滚、执行日志）
+internal/purge/           恢复与永久清除草案计划（只建议，不写文件）
 internal/runner/          worker pool（semaphore 并发控制）
 internal/drill/           NAS 故障演练（隔离只读场景）
 internal/report/          完全重复报告
@@ -116,11 +152,12 @@ docs/adr/                 架构决策记录
 
 ## 当前边界
 
-- 已有：只读扫描（含增量、断点续扫、哈希有限重试与失败补扫）、JSONL/SQLite 索引、目录语境、格式分析、资产关系、目录合并建议、草案计划、安全执行器（含执行日志与崩溃恢复）、L1–L4 规则学习、人工复核 CLI（plans/rules/merges/conflicts）。`scan --db` 可直接写入后续 `analyze --db` 所需的文件和目录语境记录。
+- 已有：只读扫描（含增量、断点续扫、哈希有限重试与失败补扫）、JSONL/SQLite 索引、目录语境、格式分析、资产关系、目录合并建议、草案计划、安全执行器（含执行日志与崩溃恢复）、M7 受管隔离/恢复/延时清除/永久清除、L1–L4 规则学习、人工复核 CLI。`scan --db` 可直接写入后续 `analyze --db` 所需的文件和目录语境记录。
 - 执行前置条件：计划须处于 `APPROVED`；非 dry-run 必须提供 SQLite `--db`；每个写操作必须位于显式配置的 `SourceRoots` 内；源根目录与隔离根目录必须是互不重叠的真实目录且不能是符号链接；执行失败不会把路径写入普通日志；执行动作通过 `execution_journal` 表同步落盘，Journal 失败即停止，崩溃后 `recover` 可回滚未完成的动作。
-- 并发控制：`scan`/`analyze` 支持 `--workers N`，由 `internal/runner` 的 semaphore 通道约束并发度；`analyze` 支持断点复用、unknown/媒体元数据定向刷新、SQLite 分批持久化和脱敏聚合进度。
+- 并发与可观测性：`scan`/`analyze` 支持 `--workers N`和可选 `--progress-out`；进度快照仅有阶段、计数、失败数和复用数，权限为 `0600`。扫描每 1,000 个文件更新聚合检查点；中断后安全重遍历并复用哈希，不使用可能跳过 BFS 后代目录的路径游标。
 - 外部 AI 继续关闭；L2/L3/L4 学习只生成 `status=draft` 规则草案，priority≤60（K-008），不覆盖已审批规则。
-- 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；跨备份域自动去重。
+- 永久清除边界：仅从受管隔离区逐项执行；默认 30 天冷静期；保护项进入 HOLD；无 `--all`；审批摘要须在执行时再次提供；提交前可回滚，提交后仅允许审计对账。
+- 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；直接对源目录执行 PURGE；跨备份域自动去重。
 
 详见 [知识地图](knowledge/maps/knowledge-map.md) 与 [开发路线](knowledge/maps/roadmap.md)。
 

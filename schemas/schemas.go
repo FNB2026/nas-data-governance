@@ -17,7 +17,22 @@ var Schema003 string
 //go:embed 004_scan_checkpoints.sql
 var Schema004 string
 
+//go:embed 005_deletion_lifecycle.sql
+var Schema005 string
+
+//go:embed 006_desktop_jobs.sql
+var Schema006 string
+
+//go:embed 007_directory_context_query_fields.sql
+var Schema007 string
+
+//go:embed 008_governance_decisions.sql
+var Schema008 string
+
+//go:embed 009_physical_identity_reliability.sql
+var Schema009 string
+
 // All returns every migration in order. Append here when adding a new file.
 func All() []string {
-	return []string{Schema001, Schema002, Schema003, Schema004}
+	return []string{Schema001, Schema002, Schema003, Schema004, Schema005, Schema006, Schema007, Schema008, Schema009}
 }

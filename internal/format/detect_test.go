@@ -128,6 +128,71 @@ func TestDetectMKV(t *testing.T) {
 	}
 }
 
+func TestDetectProfessionalAndLegacyFormats(t *testing.T) {
+	tests := []struct {
+		name, format string
+		category     domain.FormatCategory
+		data         []byte
+	}{
+		{"sample.mxf", "mxf", domain.CategoryVideo, append([]byte{0x06, 0x0e, 0x2b, 0x34}, make([]byte, 24)...)},
+		{"sample.dpx", "dpx", domain.CategoryImage, append([]byte("XPDS"), make([]byte, 24)...)},
+		{"sample.eps", "eps", domain.CategoryImage, []byte("%!PS-Adobe-3.0 EPSF-3.0")},
+		{"font.ttf", "ttf", domain.CategoryOther, append([]byte{0, 1, 0, 0}, make([]byte, 24)...)},
+		{"catalog.db", "sqlite", domain.CategoryOther, []byte("SQLite format 3\x00more")},
+		{"model.step", "step", domain.CategoryOther, []byte("ISO-10303-21;\nHEADER;")},
+		{"page.html", "html", domain.CategoryCode, []byte("<!doctype html><html>")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info, err := Detect(writeBytes(t, test.name, test.data))
+			if err != nil || info.Format != test.format || info.Category != test.category {
+				t.Fatalf("got %#v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestDetectTransportStreams(t *testing.T) {
+	for _, offset := range []int{0, 4} {
+		packet := 188
+		if offset == 4 {
+			packet = 192
+		}
+		header := make([]byte, 512)
+		header[offset], header[offset+packet] = 0x47, 0x47
+		info, err := Detect(writeBytes(t, "sample.mts", header))
+		if err != nil || info.Format != "mpeg-ts" || info.Category != domain.CategoryVideo {
+			t.Fatalf("offset %d: got %#v err=%v", offset, info, err)
+		}
+	}
+}
+
+func TestDetectAACAndMPEGAudio(t *testing.T) {
+	for _, test := range []struct {
+		header []byte
+		want   string
+	}{{[]byte{0xff, 0xf1, 0x4c, 0x80}, "aac"}, {[]byte{0xff, 0xfa, 0x93, 0x64}, "mp3"}} {
+		info, err := Detect(writeBytes(t, "audio.bin", test.header))
+		if err != nil || info.Format != test.want {
+			t.Fatalf("got %#v err=%v, want %s", info, err, test.want)
+		}
+	}
+}
+
+func TestAnalyzeProtectsProfessionalProjectSources(t *testing.T) {
+	for _, test := range []struct{ name, want string }{
+		{"project.aep", "after-effects-project"},
+		{"timeline.prproj", "premiere-project"},
+		{"catalog.lrcat", "lightroom-catalog"},
+		{"model.step", "step"},
+	} {
+		info, err := Analyze(writeBytes(t, test.name, []byte("extension-governed project source")))
+		if err != nil || info.Format != test.want || info.Role != domain.FormatRoleProjectSource || !info.Protected {
+			t.Fatalf("%s: got %#v err=%v", test.name, info, err)
+		}
+	}
+}
+
 func TestDetectMP3(t *testing.T) {
 	for _, sig := range [][]byte{{0xFF, 0xFB}, {0xFF, 0xF3}, {0xFF, 0xF2}} {
 		path := writeBytes(t, "test.mp3", append(sig, make([]byte, 20)...))
@@ -465,13 +530,38 @@ func TestAnalyzeComposedForm(t *testing.T) {
 }
 
 func TestAnalyzeUnrecognizedReturnsUnknown(t *testing.T) {
-	path := writeBytes(t, "unknown.bin", []byte("nothing matches this"))
+	path := writeBytes(t, "unknown.bin", []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10})
 	info, err := Analyze(path)
 	if err != nil {
 		t.Fatalf("analyze should not error on unrecognized: %v", err)
 	}
 	if info.Category != domain.CategoryUnknown {
 		t.Fatalf("expected unknown category, got %s", info.Category)
+	}
+}
+
+func TestAnalyzeRecognizesStructuredTextWithoutTrustingExtension(t *testing.T) {
+	cases := []struct {
+		name, data, want string
+	}{
+		{"payload.bin", `{"kind":"inventory","count":2}`, "json"},
+		{"notes.dat", "plain UTF-8 notes with no binary control bytes", "text"},
+		{"preview.eps", string([]byte{0xC5, 0xD0, 0xD3, 0xC6}) + "preview", "eps"},
+	}
+	for _, tc := range cases {
+		path := writeBytes(t, tc.name, []byte(tc.data))
+		got, err := Analyze(path)
+		if err != nil || got.Format != tc.want {
+			t.Fatalf("%s: got=%#v err=%v", tc.name, got, err)
+		}
+	}
+}
+
+func TestAnalyzeKeepsBinaryDataUnknown(t *testing.T) {
+	path := writeBytes(t, "opaque.dat", []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10})
+	got, err := Analyze(path)
+	if err != nil || got.Format != "unknown" {
+		t.Fatalf("got=%#v err=%v", got, err)
 	}
 }
 

@@ -43,8 +43,61 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	// default for all pre-existing rows.
 	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{
 		{"file_status", "TEXT NOT NULL DEFAULT 'active'"},
+		{"physical_reliable", "INTEGER NOT NULL DEFAULT 0"},
 	}); err != nil {
 		return fmt.Errorf("store: migration 4 alter file_instances: %w", err)
+	}
+	// Migration 011: bind a successful purge dry-run to the approved plan
+	// digest. Real permanent deletion is rejected until these fields are set.
+	if err := addColumnsIfMissing(ctx, conn, "purge_plans", []columnDef{
+		{"dry_run_digest", "TEXT"},
+		{"dry_run_verified_at", "TEXT"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 11 alter purge_plans: %w", err)
+	}
+	// Migration 010: persist filesystem link_count (nlink) captured at
+	// scan time so the desktop UI can display hardlink evidence per file.
+	if err := addColumnsIfMissing(ctx, conn, "file_instances", []columnDef{
+		{"link_count", "INTEGER NOT NULL DEFAULT 0"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 10 alter file_instances: %w", err)
+	}
+	// Migration 007: denormalize directory_contexts query fields for fast
+	// desktop filtering by role, protected flag, business anchor, authority
+	// level, branch point and privacy level. context_json remains the full
+	// evidence blob; these columns are for indexed query only.
+	if err := addColumnsIfMissing(ctx, conn, "directory_contexts", []columnDef{
+		{"role", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"protected", "INTEGER NOT NULL DEFAULT 0"},
+		{"business_anchor", "TEXT NOT NULL DEFAULT ''"},
+		{"authority_level", "INTEGER NOT NULL DEFAULT 0"},
+		{"branch_point", "TEXT NOT NULL DEFAULT ''"},
+		{"privacy_level", "TEXT NOT NULL DEFAULT ''"},
+	}); err != nil {
+		return fmt.Errorf("store: migration 7 alter directory_contexts: %w", err)
+	}
+	// Migration 007 indexes: created after columns exist. CREATE INDEX IF
+	// NOT EXISTS is idempotent, safe across re-init. These reference columns
+	// added by Go code (role/protected/business_anchor via migration 7,
+	// file_status via migration 4), so they cannot live in the .sql file
+	// which executes before addColumnsIfMissing.
+	_, err = conn.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS idx_dirctx_role
+  ON directory_contexts(role);
+CREATE INDEX IF NOT EXISTS idx_dirctx_protected
+  ON directory_contexts(protected)
+  WHERE protected = 1;
+CREATE INDEX IF NOT EXISTS idx_dirctx_anchor
+  ON directory_contexts(business_anchor)
+  WHERE business_anchor <> '';
+CREATE INDEX IF NOT EXISTS idx_files_active_content
+  ON file_instances(storage_id, content_sha256, size)
+  WHERE file_status = 'active'
+    AND content_sha256 IS NOT NULL
+    AND content_sha256 <> '';
+`)
+	if err != nil {
+		return fmt.Errorf("store: migration 7 indexes: %w", err)
 	}
 	return nil
 }
