@@ -7,6 +7,7 @@ import { isRouteEnabled } from "./app/capability";
 import { DEFAULT_ROUTE, type AppRoute } from "./app/routes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import AppShell from "./components/AppShell";
+import ErrorBoundary from "./components/ErrorBoundary";
 import ToastContainer from "./components/Toast";
 import SourcesPage from "./pages/SourcesPage";
 import ScanJobsPage from "./pages/ScanJobsPage";
@@ -82,10 +83,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ProjectProvider>
-      <AppContent />
-      <ToastBridge />
-    </ProjectProvider>
+    <ErrorBoundary>
+      <ProjectProvider>
+        <AppContent />
+        <ToastBridge />
+      </ProjectProvider>
+    </ErrorBoundary>
   );
 }
 

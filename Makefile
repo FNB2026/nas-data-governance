@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist
+.PHONY: build test fmt vet public-check release-check release clean-dist desktop desktop-dev desktop-build
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -55,3 +55,16 @@ release: release-check clean-dist
 
 clean-dist:
 	rm -rf $(DIST_DIR)
+
+# ---- Desktop (Wails) targets ----
+# Requires wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+DESKTOP_DIR = cmd/ndg-desktop
+
+desktop-dev:
+	cd $(DESKTOP_DIR) && wails dev
+
+desktop-build:
+	cd $(DESKTOP_DIR) && wails build
+
+desktop: desktop-build

@@ -1,10 +1,11 @@
-// Sources page: project open/close, storage list, scan readiness.
-// Wraps existing ProjectPanel and StorageList components.
+// Sources page: project open/close, storage list, scan readiness,
+// and diagnostic reports (format / governance / merge).
 
 import { useState } from "react";
 import ProjectPanel from "../components/ProjectPanel";
 import StorageList from "../components/StorageList";
 import OnboardingGuide from "../components/OnboardingGuide";
+import DiagnosticPanel from "../components/DiagnosticPanel";
 import { useProject } from "../state/ProjectContext";
 
 export default function SourcesPage() {
@@ -28,7 +29,7 @@ export default function SourcesPage() {
     <div className="page page--sources">
       <div className="page-header">
         <h2>数据源</h2>
-        <p className="muted">项目、存储与扫描准备</p>
+        <p className="muted">项目、存储、扫描准备与诊断报告</p>
       </div>
 
       <ProjectPanel
@@ -48,7 +49,10 @@ export default function SourcesPage() {
       {!project && <OnboardingGuide />}
 
       {project && (
-        <StorageList storages={storages} storagesError={storagesError} />
+        <>
+          <StorageList storages={storages} storagesError={storagesError} />
+          <DiagnosticPanel storages={storages} />
+        </>
       )}
     </div>
   );

@@ -1747,6 +1747,69 @@ button.secondary {
   color: var(--text-muted);
 }
 
+/* ---- ErrorBoundary ---- */
+
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--bg);
+}
+
+.error-boundary-card {
+  max-width: 28rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  text-align: center;
+}
+
+.error-boundary-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.error-boundary-card h2 {
+  margin-bottom: 0.5rem;
+}
+
+.error-boundary-message {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.error-boundary-details {
+  text-align: left;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+}
+
+.error-boundary-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.error-boundary-stack {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: var(--bg);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.error-boundary-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
 .audit-recovery-panel {
   margin-bottom: 1rem;
   padding: 1rem;
