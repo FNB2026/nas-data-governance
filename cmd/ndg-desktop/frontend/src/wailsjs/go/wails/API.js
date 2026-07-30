@@ -90,6 +90,10 @@ export function GetProjectReadiness() {
   return window['go']['wails']['API']['GetProjectReadiness']();
 }
 
+export function GetScanCheckpoint(arg1) {
+  return window['go']['wails']['API']['GetScanCheckpoint'](arg1);
+}
+
 export function GetScanProgress(arg1) {
   return window['go']['wails']['API']['GetScanProgress'](arg1);
 }

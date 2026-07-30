@@ -88,9 +88,10 @@ type Store interface {
 	// CompleteCheckpoint marks a checkpoint as 'completed' or 'aborted'.
 	CompleteCheckpoint(ctx context.Context, checkpointID int64, status string) error
 
-	// LastCheckpoint returns the most recent incomplete checkpoint for a
-	// storage, or ErrNotFound if none exists. Used at scan start to
-	// decide whether to resume.
+	// LastCheckpoint returns the most recent resumable checkpoint for a
+	// storage — one whose status is 'running' (crash-interrupted) or
+	// 'aborted' (user-cancelled) and not superseded by a later 'completed'
+	// checkpoint. Returns ErrNotFound if none exists.
 	LastCheckpoint(ctx context.Context, storageID string) (Checkpoint, error)
 
 	// SaveContext upserts a directory context for the given file row.
