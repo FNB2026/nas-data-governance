@@ -77,6 +77,7 @@ DEFERRED   明确延后到 1.0 或后续平台
 | R-37 | `docs/release/beta-test-guide.md` | 不存在 | R5 | E.6 |
 | R-38 | `docs/troubleshooting.md` | 不存在 | R5 | E.6 |
 | R-39 | `docs/support-bundle.md` | 不存在 | R5 | E.6 |
+| R-40 | 语义版本到 macOS Bundle 版本映射（CFBundleShortVersionString 纯三段数字，CFBundleVersion 递增数字构建号，禁止 `-beta.N` 后缀） | 未定义映射规则 | R1 | B.1 |
 
 ---
 
@@ -119,10 +120,10 @@ DEFERRED   明确延后到 1.0 或后续平台
 | 状态 | 数量 |
 |---|---|
 | BLOCKER | 12 |
-| REQUIRED | 39 |
+| REQUIRED | 40 |
 | RECOMMENDED | 11 |
 | DEFERRED | 9 |
-| **合计** | **71** |
+| **合计** | **72** |
 
 ---
 

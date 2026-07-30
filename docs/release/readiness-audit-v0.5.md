@@ -56,14 +56,25 @@
 |---|---|---|---|
 | CFBundleIdentifier | `com.wails.{{safeBundleID .Name}}` | `com.wails.ndg-desktop` | `com.fnb.ndg`（待用户确认） |
 | CFBundleExecutable | `{{.OutputFilename}}` | `ndg-desktop` | `NDG` |
-| CFBundleVersion | `{{.Info.ProductVersion}}` | `1.0.0` | `0.5.0-beta.1` |
-| CFBundleShortVersionString | `{{.Info.ProductVersion}}` | `1.0.0` | `0.5.0-beta.1` |
+| CFBundleShortVersionString | `{{.Info.ProductVersion}}` | `1.0.0` | `0.5.0`（三段数字，Apple 要求纯数字与句点） |
+| CFBundleVersion | `{{.Info.ProductVersion}}` | `1.0.0` | `1`（递增数字构建号，Apple 要求纯数字） |
 | CFBundleName | `{{.Info.ProductName}}` | `NDG 数据治理工作台` | 一致 |
 | NSHumanReadableCopyright | — | `Copyright © 2026 NDG` | 待用户确认主体 |
 | LSMinimumSystemVersion | `10.13.0` | `10.13.0` | `13.0`（执行手册建议） |
 | LSApplicationCategoryType | **缺失** | **缺失** | `public.app-category.utilities` |
 | CFBundleDevelopmentRegion | `zh_CN` | `zh_CN` | 一致 |
 | CFBundleLocalizations | `zh_CN`, `en` | `zh_CN`, `en` | 一致 |
+
+> **Apple Bundle 版本映射规则**：`CFBundleShortVersionString` 和 `CFBundleVersion` 只能包含数字和句点，不得使用 SemVer 预发布后缀（如 `-beta.1`）。语义版本到 Bundle 版本的映射如下：
+>
+> | 语义版本（Git Tag / 应用内显示） | CFBundleShortVersionString | CFBundleVersion |
+> |---|---|---|
+> | `0.5.0-beta.1` | `0.5.0` | `1` |
+> | `0.5.0-beta.2` | `0.5.0` | `2` |
+> | `0.5.0-beta.3` | `0.5.0` | `3` |
+> | `0.5.0`（正式版） | `0.5.0` | `4` |
+>
+> 应用内部展示版本（About 页、设置页）仍使用完整语义版本 `0.5.0-beta.1`，仅 macOS Bundle 元数据使用纯数字映射。
 
 ### B.2 签名状态
 
