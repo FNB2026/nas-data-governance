@@ -310,8 +310,15 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		// that a resumed scan can skip already-traversed paths. The path
 		// is the absolute filesystem path of the most recently discovered
 		// file at this 1000-file boundary.
+		//
+		// The scanned_count written to the checkpoint MUST include the
+		// files already counted by the resumed checkpoint (ResumedCount).
+		// Without this, every resume cycle resets the running count to
+		// near-zero, and the stored count regresses instead of growing
+		// monotonically across multiple interrupt→resume cycles.
 		if s.store != nil && result.CheckpointID != 0 && count%1000 == 0 {
-			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, file.Path, int(count)); err != nil {
+			totalScanned := result.ResumedCount + int(count)
+			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, file.Path, totalScanned); err != nil {
 				return errors.New("update aggregate scan checkpoint failed")
 			}
 		}

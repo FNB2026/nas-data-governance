@@ -1146,6 +1146,11 @@ func (s *SQLiteStore) CompleteCheckpoint(ctx context.Context, checkpointID int64
 // checkpoint exists for the same storage. The NOT EXISTS clause ensures
 // that once a fresh full scan completes, stale aborted checkpoints from
 // earlier runs are no longer offered for resume.
+//
+// Recency is determined by the auto-increment primary key (id) rather than
+// the started_at text column. The id is monotonically increasing per row,
+// so c2.id > c.id is an exact "strictly later" test that is immune to the
+// variable precision of RFC3339Nano string comparison.
 func (s *SQLiteStore) LastCheckpoint(ctx context.Context, storageID string) (Checkpoint, error) {
 	var cp Checkpoint
 	var startedAt, updatedAt string
@@ -1156,9 +1161,9 @@ func (s *SQLiteStore) LastCheckpoint(ctx context.Context, storageID string) (Che
 		 AND NOT EXISTS (
 		     SELECT 1 FROM scan_checkpoints c2
 		     WHERE c2.storage_id = ? AND c2.status = 'completed'
-		     AND c2.started_at > c.started_at
+		     AND c2.id > c.id
 		 )
-		 ORDER BY c.started_at DESC LIMIT 1`, storageID, storageID).
+		 ORDER BY c.id DESC LIMIT 1`, storageID, storageID).
 		Scan(&cp.ID, &cp.StorageID, &cp.LastScannedPath, &cp.ScannedCount, &cp.Status, &startedAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return cp, ErrNotFound

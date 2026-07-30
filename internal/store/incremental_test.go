@@ -238,18 +238,128 @@ func TestLastCheckpointNotFound(t *testing.T) {
 	}
 }
 
-// TestCheckpointAbort verifies that 'aborted' status is handled same as
-// 'completed' for LastCheckpoint purposes (not returned as running).
+// TestCheckpointAbort verifies that an 'aborted' checkpoint is resumable:
+// LastCheckpoint returns it (not ErrNotFound). 'aborted' means the scan was
+// cancelled by the user or interrupted, and may be resumed later, so it must
+// remain discoverable. This replaces an earlier assertion that treated
+// 'aborted' the same as 'completed'.
 func TestCheckpointAbort(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	seedStorage(t, st, "s1")
 
-	id, _ := st.StartCheckpoint(ctx, "s1")
-	st.CompleteCheckpoint(ctx, id, "aborted")
+	id, err := st.StartCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateCheckpoint(ctx, id, "/vol/last.txt", 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id, "aborted"); err != nil {
+		t.Fatal(err)
+	}
 
-	_, err := st.LastCheckpoint(ctx, "s1")
+	cp, err := st.LastCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatalf("expected aborted checkpoint to be resumable, got error: %v", err)
+	}
+	if cp.ID != id {
+		t.Fatalf("expected checkpoint %d, got %d", id, cp.ID)
+	}
+	if cp.Status != "aborted" {
+		t.Fatalf("expected status 'aborted', got %q", cp.Status)
+	}
+	if cp.LastScannedPath != "/vol/last.txt" {
+		t.Fatalf("expected last path /vol/last.txt, got %s", cp.LastScannedPath)
+	}
+	if cp.ScannedCount != 7 {
+		t.Fatalf("expected count 7, got %d", cp.ScannedCount)
+	}
+}
+
+// TestLastCheckpointAbortedSupersededByLaterCompleted verifies that an
+// aborted checkpoint is no longer resumable once a later (higher-id)
+// completed checkpoint exists for the same storage. This guards against
+// offering a stale aborted checkpoint after a fresh full scan finished,
+// and exercises the id-based NOT EXISTS clause (c2.id > c.id).
+func TestLastCheckpointAbortedSupersededByLaterCompleted(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedStorage(t, st, "s1")
+
+	// First checkpoint: aborted.
+	id1, err := st.StartCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id1, "aborted"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alone, the aborted checkpoint is resumable.
+	cp, err := st.LastCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatalf("aborted alone should be resumable: %v", err)
+	}
+	if cp.ID != id1 {
+		t.Fatalf("expected aborted checkpoint %d, got %d", id1, cp.ID)
+	}
+
+	// A later completed checkpoint supersedes it. id2 > id1 because id is an
+	// auto-increment primary key, so the NOT EXISTS clause excludes id1.
+	id2, err := st.StartCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id2, "completed"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = st.LastCheckpoint(ctx, "s1")
 	if err != ErrNotFound {
-		t.Fatalf("expected ErrNotFound for aborted checkpoint, got %v", err)
+		t.Fatalf("expected ErrNotFound after later completed checkpoint, got %v", err)
+	}
+}
+
+// TestLastCheckpointReturnsLatestAbortedByID verifies that when multiple
+// aborted checkpoints exist, the one with the highest id (most recent) is
+// returned. This validates ORDER BY c.id DESC, which replaced the earlier
+// started_at text-column ordering.
+func TestLastCheckpointReturnsLatestAbortedByID(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedStorage(t, st, "s1")
+
+	id1, err := st.StartCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateCheckpoint(ctx, id1, "/vol/first.txt", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id1, "aborted"); err != nil {
+		t.Fatal(err)
+	}
+
+	id2, err := st.StartCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateCheckpoint(ctx, id2, "/vol/second.txt", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id2, "aborted"); err != nil {
+		t.Fatal(err)
+	}
+
+	cp, err := st.LastCheckpoint(ctx, "s1")
+	if err != nil {
+		t.Fatalf("LastCheckpoint: %v", err)
+	}
+	if cp.ID != id2 {
+		t.Fatalf("expected latest aborted checkpoint %d, got %d", id2, cp.ID)
+	}
+	if cp.ScannedCount != 2 {
+		t.Fatalf("expected count 2, got %d", cp.ScannedCount)
 	}
 }

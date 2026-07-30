@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -196,16 +197,108 @@ func TestScanResumePathSkipsEarlierFiles(t *testing.T) {
 	writeFile(t, filepath.Join(root, "b.txt"), "b")
 	writeFile(t, filepath.Join(root, "c.txt"), "c")
 
-	// Resume from "b.txt": should skip "a.txt" and find "b.txt" + "c.txt".
+	// Resume from "b.txt" means b.txt was the last scanned file: resume
+	// skips a.txt and b.txt (path <= ResumePath) and finds only c.txt.
 	resumePath := filepath.Join(root, "b.txt")
 	stats, files := collectFiles(t, Options{Root: root, ResumePath: resumePath})
 
-	if stats.FilesScanned != 2 {
-		t.Fatalf("expected 2 files after resume, got %d", stats.FilesScanned)
+	if stats.FilesScanned != 1 {
+		t.Fatalf("expected 1 file after resume, got %d", stats.FilesScanned)
 	}
+	if len(files) != 1 || files[0].Name != "c.txt" {
+		t.Fatalf("expected only c.txt, got %v", files)
+	}
+}
+
+// TestScanVisitsInGlobalDictionaryOrder verifies the core ordering invariant
+// that checkpoint resume relies on: files are visited in ascending global
+// dictionary order of their full paths. This layout is specifically chosen so
+// that BFS (the previous implementation) and DFS disagree:
+//
+//	root/
+//	  a.txt          (root file)
+//	  a/z.txt        (subdir file — globally sorts AFTER a.txt, BEFORE b.txt)
+//	  b.txt          (root file)
+//	  c/deep/d.txt   (deeper nested)
+//
+// BFS would visit root-level files first (a.txt, b.txt) then descend, yielding
+// a.txt, b.txt, a/z.txt, c/deep/d.txt — which is NOT dictionary order. DFS with
+// dirSortKey yields a.txt, a/z.txt, b.txt, c/deep/d.txt. A checkpoint recorded
+// at b.txt is only safe to resume from if a/z.txt was already scanned, which
+// requires the DFS order.
+func TestScanVisitsInGlobalDictionaryOrder(t *testing.T) {
+	root := t.TempDir()
+	// Create out of order to avoid accidentally relying on creation order.
+	writeFile(t, filepath.Join(root, "b.txt"), "b")
+	writeFile(t, filepath.Join(root, "c", "deep", "d.txt"), "d")
+	writeFile(t, filepath.Join(root, "a", "z.txt"), "z")
+	writeFile(t, filepath.Join(root, "a.txt"), "a")
+
+	var order []string
+	_, err := Scan(context.Background(), Options{Root: root}, func(f domain.FileInstance) error {
+		order = append(order, f.Path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	want := []string{
+		filepath.Join(root, "a.txt"),
+		filepath.Join(root, "a", "z.txt"),
+		filepath.Join(root, "b.txt"),
+		filepath.Join(root, "c", "deep", "d.txt"),
+	}
+	if len(order) != len(want) {
+		t.Fatalf("expected %d files, got %d: %v", len(want), len(order), order)
+	}
+	for i, p := range want {
+		if order[i] != p {
+			t.Fatalf("visit order[%d] = %q, want %q (full order: %v)", i, order[i], p, order)
+		}
+	}
+	// Defensive: the collected order must itself be sorted ascending.
+	if !sort.StringsAreSorted(order) {
+		t.Fatalf("visited paths are not in ascending dictionary order: %v", order)
+	}
+}
+
+// TestScanResumeNestedDirsNotMissed is the regression test requested in the
+// PR review: it proves that resuming from a checkpoint does not skip nested
+// directory files that were never scanned. With the DFS dictionary order, a
+// subdir file that sorts before the checkpoint boundary (e.g. a/z.txt before
+// b.txt) was already visited prior to the checkpoint, so skipping it on resume
+// is correct rather than a miss.
+func TestScanResumeNestedDirsNotMissed(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a", "z.txt"), "z") // subdir, sorts before b.txt
+	writeFile(t, filepath.Join(root, "b.txt"), "b")      // root file = checkpoint
+	writeFile(t, filepath.Join(root, "c", "deep", "d.txt"), "d")
+	writeFile(t, filepath.Join(root, "c", "a.txt"), "a2")
+
+	// Checkpoint recorded at b.txt: a/z.txt and b.txt are <= b.txt (already
+	// scanned), so resume must skip them and discover only the files that
+	// sort after b.txt. None of the post-boundary files may be skipped.
+	resumePath := filepath.Join(root, "b.txt")
+	stats, files := collectFiles(t, Options{Root: root, ResumePath: resumePath})
+
+	want := map[string]bool{
+		filepath.Join(root, "c", "a.txt"):         true,
+		filepath.Join(root, "c", "deep", "d.txt"): true,
+	}
+	if stats.FilesScanned != len(want) {
+		t.Fatalf("expected %d files after resume, got %d: %v", len(want), stats.FilesScanned, files)
+	}
+	seen := make(map[string]bool, len(files))
 	for _, f := range files {
-		if f.Name == "a.txt" {
-			t.Fatal("a.txt should have been skipped by resume path")
+		seen[f.Path] = true
+		if !want[f.Path] {
+			t.Errorf("unexpected file discovered on resume: %q (should have been skipped)", f.Path)
+		}
+	}
+	for p := range want {
+		if !seen[p] {
+			t.Errorf("file missed on resume: %q (DFS order must not skip unscanned nested files)", p)
 		}
 	}
 }
