@@ -487,13 +487,18 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	}
 
 	storageID := strings.TrimSpace(req.StorageID)
-	if storageID == "" {
-		// Derive a stable ID from the root path, consistent with
-		// RegisterScanSource / CreateProjectFromSource. This avoids a
-		// "default" vs "src_<hash>" mismatch when the user types a root
-		// manually instead of picking a registered storage.
-		storageID = projectsvc.GenerateStorageID(req.Root)
+	// Always derive a stable ID from the root path. This is the only
+	// authoritative source of storage identity — the same root always
+	// maps to the same ID, regardless of what the frontend sends.
+	derivedID := projectsvc.GenerateStorageID(req.Root)
+	if storageID != "" && storageID != derivedID {
+		return StartScanResponse{}, fmt.Errorf(
+			"wails: storage_id %q does not match the ID derived from root %q (expected %q); "+
+				"storage ID is determined by the scan root and cannot be set manually",
+			storageID, req.Root, derivedID,
+		)
 	}
+	storageID = derivedID
 
 	workers := req.Workers
 	if workers < 1 {

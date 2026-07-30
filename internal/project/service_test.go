@@ -103,3 +103,38 @@ func TestRollbackProjectCreationRemovesOnlyClaimedDirectory(t *testing.T) {
 		t.Fatalf("scan source was modified by rollback: %v", err)
 	}
 }
+
+// TestGenerateStorageIDNormalizesPath verifies that the storage ID is
+// derived from the normalized (filepath.Clean) root path, so trailing
+// slashes, double slashes, and "." segments all produce the same ID.
+// This ensures the backend never creates duplicate storage entries for
+// the same physical directory expressed with different path strings.
+func TestGenerateStorageIDNormalizesPath(t *testing.T) {
+	root := "/Volumes/NAS/产业资料库"
+
+	idBase := GenerateStorageID(root)
+	idTrailingSlash := GenerateStorageID(root + "/")
+	idDoubleSlash := GenerateStorageID("/Volumes//NAS/产业资料库")
+	idDotSegment := GenerateStorageID("/Volumes/NAS/./产业资料库")
+
+	if idBase != idTrailingSlash {
+		t.Errorf("trailing slash should normalize: base=%q trailing=%q", idBase, idTrailingSlash)
+	}
+	if idBase != idDoubleSlash {
+		t.Errorf("double slash should normalize: base=%q double=%q", idBase, idDoubleSlash)
+	}
+	if idBase != idDotSegment {
+		t.Errorf("dot segment should normalize: base=%q dot=%q", idBase, idDotSegment)
+	}
+
+	// Different roots must produce different IDs.
+	other := GenerateStorageID("/Volumes/NAS/其他目录")
+	if idBase == other {
+		t.Fatalf("different roots produced the same ID: %q", idBase)
+	}
+
+	// ID must have the src_ prefix.
+	if len(idBase) < 4 || idBase[:4] != "src_" {
+		t.Fatalf("ID missing src_ prefix: %q", idBase)
+	}
+}

@@ -23,7 +23,6 @@ import { api } from "../api/client";
 
 interface ScanStartParams {
   root: string;
-  storageId: string;
   fullScan: boolean;
   workers?: number;
 }
@@ -498,8 +497,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // V9 first-launch: create a fresh project from a scan source in a
   // single atomic backend call. The backend validates the source, creates
   // the DB under the OS app-support dir, registers the source as a
-  // storage with a backend-generated ID, writes project.json, and records
-  // recent — all with rollback on failure. The frontend only sets
+  // storage with a backend-generated ID, and writes project.json — all
+  // with rollback on failure. The recent-projects manifest is recorded
+  // separately after the atomic transaction succeeds; its failure is
+  // non-fatal and does not trigger rollback. The frontend only sets
   // pendingScanRoot so the scan page can prefill the root. The user never
   // types a .db path and never picks a storage ID.
   const createNewProject = useCallback(async (name: string, scanRoot: string) => {
@@ -588,11 +589,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const normalizedParams = {
         ...params,
         root: params.root.trim(),
-        storageId: params.storageId.trim(),
       };
       const resp = await api.scan.start({
         root: normalizedParams.root,
-        storage_id: normalizedParams.storageId,
         full_scan: normalizedParams.fullScan,
         workers: normalizedParams.workers,
       } as wails.StartScanRequest);

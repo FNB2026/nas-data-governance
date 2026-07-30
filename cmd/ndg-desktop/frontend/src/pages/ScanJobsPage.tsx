@@ -36,32 +36,19 @@ export default function ScanJobsPage() {
 
   // Form state (page-local) — initialized from global scan defaults
   const [scanRoot, setScanRoot] = useState("");
-  const [scanStorageId, setScanStorageId] = useState("");
   const [scanFullScan, setScanFullScan] = useState(defaultFullScan);
   const [scanWorkers, setScanWorkers] = useState(defaultWorkers);
   const [scanStarting, setScanStarting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
   // Consume a pending scan root set by the start card's "new project"
-  // flow: prefill the root and the default storage id, then clear it so
-  // it only applies once. Also auto-select the registered storage when a
-  // pending root matches a known storage.
+  // flow: prefill the root, then clear it so it only applies once.
   useEffect(() => {
     if (!pendingScanRoot) return;
     setScanRoot(pendingScanRoot);
     setScanError(null);
     clearPendingScanRoot();
   }, [pendingScanRoot, clearPendingScanRoot]);
-
-  // Auto-select the storage whose root matches the prefilled scan root,
-  // so the user can hit "开始扫描" without picking a storage manually.
-  useEffect(() => {
-    if (!scanRoot) return;
-    const match = storages.find((s) => s.root_path === scanRoot);
-    if (match) {
-      setScanStorageId(match.id);
-    }
-  }, [scanRoot, storages]);
 
   // Job detail (page-local)
   const [selectedJob, setSelectedJob] = useState<wails.JobDetailResponse | null>(null);
@@ -72,7 +59,6 @@ export default function ScanJobsPage() {
 
   const handleRegisteredRootSelect = (storage: wails.StorageInfo) => {
     setScanRoot(storage.root_path);
-    setScanStorageId(storage.id);
     setScanError(null);
   };
 
@@ -87,7 +73,6 @@ export default function ScanJobsPage() {
       const workersNum = scanWorkers.trim() ? parseInt(scanWorkers, 10) : undefined;
       const params = {
         root: scanRoot.trim(),
-        storageId: scanStorageId.trim(),
         fullScan: scanFullScan,
         workers: Number.isFinite(workersNum) && workersNum! > 0 ? workersNum : undefined,
       };
@@ -140,7 +125,6 @@ export default function ScanJobsPage() {
 
       <ScanPanel
         scanRoot={scanRoot}
-        scanStorageId={scanStorageId}
         scanFullScan={scanFullScan}
         scanWorkers={scanWorkers}
         scanStarting={scanStarting}
@@ -159,7 +143,6 @@ export default function ScanJobsPage() {
         typeFilter={scanFilterType}
         onScanRootChange={setScanRoot}
         onRegisteredRootSelect={handleRegisteredRootSelect}
-        onScanStorageIdChange={setScanStorageId}
         onScanFullScanChange={setScanFullScan}
         onScanWorkersChange={setScanWorkers}
         onStartScan={() => void handleStartScan()}

@@ -311,7 +311,7 @@ func TestSmokeGovernanceExecutionLifecycle(t *testing.T) {
 	}
 
 	scan, err := api.StartScan(StartScanRequest{
-		Root: sourceRoot, StorageID: "execution-smoke", FullScan: true, Workers: 1,
+		Root: sourceRoot, FullScan: true, Workers: 1,
 	})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
@@ -321,7 +321,7 @@ func TestSmokeGovernanceExecutionLifecycle(t *testing.T) {
 		t.Fatalf("scan state=%s error=%s", progress.State, progress.ErrorCode)
 	}
 
-	drafts, err := api.SaveDraftPlans("execution-smoke")
+	drafts, err := api.SaveDraftPlans(generateStorageID(sourceRoot))
 	if err != nil {
 		t.Fatalf("SaveDraftPlans: %v", err)
 	}

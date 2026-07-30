@@ -136,17 +136,56 @@ func TestRegisterAndListStorages(t *testing.T) {
 	if err := s.RegisterStorage(ctx, want); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// Re-register with a different root; upsert should update, not error.
-	want.RootPath = "/Volumes/NAS2"
+	// Re-register with the same root — idempotent, no error.
 	if err := s.RegisterStorage(ctx, want); err != nil {
-		t.Fatalf("re-register: %v", err)
+		t.Fatalf("re-register same root: %v", err)
 	}
 	got, err := s.ListStorages(ctx)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "nas-1" || got[0].RootPath != "/Volumes/NAS2" {
+	if len(got) != 1 || got[0].ID != "nas-1" || got[0].RootPath != "/Volumes/NAS" {
 		t.Fatalf("unexpected storages: %#v", got)
+	}
+}
+
+// TestRegisterStorageRejectsRootMismatch verifies that a storage ID cannot
+// be silently rebound to a different root directory. This prevents old
+// metadata, checkpoints, and a new scan root from sharing the same ID.
+func TestRegisterStorageRejectsRootMismatch(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	original := domain.Storage{ID: "src_abc123", RootPath: "/Volumes/NAS/A", Kind: "filesystem", CreatedAt: time.Now()}
+	if err := s.RegisterStorage(ctx, original); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// Attempt to re-register the same ID with a different root.
+	original.RootPath = "/Volumes/NAS/B"
+	err := s.RegisterStorage(ctx, original)
+	if err == nil {
+		t.Fatal("expected error when re-registering with a different root, got nil")
+	}
+	// Verify the original root is preserved.
+	got, _ := s.ListStorages(ctx)
+	if len(got) != 1 || got[0].RootPath != "/Volumes/NAS/A" {
+		t.Fatalf("root should be unchanged: %#v", got)
+	}
+}
+
+// TestRegisterStorageIdempotentSameRoot verifies that registering the same
+// storage (same ID, same root) multiple times is safe and does not error.
+func TestRegisterStorageIdempotentSameRoot(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	st := domain.Storage{ID: "src_abc123", RootPath: "/data/archive", Kind: "filesystem", CreatedAt: time.Now()}
+	for i := 0; i < 3; i++ {
+		if err := s.RegisterStorage(ctx, st); err != nil {
+			t.Fatalf("register attempt %d: %v", i+1, err)
+		}
+	}
+	got, _ := s.ListStorages(ctx)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 storage after idempotent re-register, got %d", len(got))
 	}
 }
 

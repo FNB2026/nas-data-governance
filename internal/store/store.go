@@ -42,7 +42,8 @@ type Store interface {
 	// Init applies any pending schema migrations. Idempotent.
 	Init(ctx context.Context) error
 
-	// RegisterStorage inserts or replaces a storage by ID.
+	// RegisterStorage inserts a new storage. If the ID already exists, the
+	// root_path must match — an ID is never rebound to a different root.
 	RegisterStorage(ctx context.Context, s domain.Storage) error
 	ListStorages(ctx context.Context) ([]domain.Storage, error)
 

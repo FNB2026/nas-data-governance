@@ -13,7 +13,6 @@ import { useProject } from "../state/ProjectContext";
 export interface ScanPanelProps {
   // form state
   scanRoot: string;
-  scanStorageId: string;
   scanFullScan: boolean;
   scanWorkers: string;
   scanStarting: boolean;
@@ -37,7 +36,6 @@ export interface ScanPanelProps {
   // handlers
   onScanRootChange: (v: string) => void;
   onRegisteredRootSelect: (storage: wails.StorageInfo) => void;
-  onScanStorageIdChange: (v: string) => void;
   onScanFullScanChange: (v: boolean) => void;
   onScanWorkersChange: (v: string) => void;
   onStartScan: () => void;
@@ -127,7 +125,6 @@ type SortDir = "asc" | "desc";
 
 export default function ScanPanel({
   scanRoot,
-  scanStorageId,
   scanFullScan,
   scanWorkers,
   scanStarting,
@@ -146,7 +143,6 @@ export default function ScanPanel({
   typeFilter,
   onScanRootChange,
   onRegisteredRootSelect,
-  onScanStorageIdChange,
   onScanFullScanChange,
   onScanWorkersChange,
   onStartScan,
@@ -166,7 +162,7 @@ export default function ScanPanel({
     return () => clearInterval(id);
   }, [scanActive]);
 
-  // Advanced settings collapse (storage ID, workers, full scan)
+  // Advanced settings collapse (workers, full scan)
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Column sorting state for the job history table
@@ -293,16 +289,6 @@ export default function ScanPanel({
           </button>
           {showAdvanced && (
             <div id="scan-advanced-options" className="scan-advanced">
-              <label>
-                存储 ID（可选）
-                <input
-                  type={pathPrivacyMode ? "password" : "text"}
-                  value={scanStorageId}
-                  onChange={(e) => onScanStorageIdChange(e.target.value)}
-                  placeholder="default"
-                  disabled={scanActive}
-                />
-              </label>
               <label>
                 并发数（可选）
                 <input

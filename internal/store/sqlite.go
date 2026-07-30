@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -115,10 +116,27 @@ func (s *SQLiteStore) Close() error {
 
 // ---------------- storages ----------------
 
+// RegisterStorage inserts a new storage or verifies an existing one's root
+// path matches. It never silently rebinds a storage ID to a different root
+// directory — doing so would corrupt incremental scan metadata and
+// checkpoints associated with the original root.
 func (s *SQLiteStore) RegisterStorage(ctx context.Context, st domain.Storage) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO storages(id, root_path, kind, created_at) VALUES(?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET root_path=excluded.root_path, kind=excluded.kind`,
+	var existingRoot string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT root_path FROM storages WHERE id = ?`, st.ID).Scan(&existingRoot)
+	if err == nil {
+		// Storage exists — root must match; ID cannot be rebound.
+		if existingRoot != st.RootPath {
+			return fmt.Errorf("store: storage ID %q is registered to %q, not %q: root path cannot be changed",
+				st.ID, existingRoot, st.RootPath)
+		}
+		return nil // idempotent — same ID, same root
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("store: check existing storage: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO storages(id, root_path, kind, created_at) VALUES(?, ?, ?, ?)`,
 		st.ID, st.RootPath, st.Kind, st.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: register storage: %w", err)

@@ -32,9 +32,8 @@ func TestSmokeScanLifecycle(t *testing.T) {
 
 	// 2. Start an asynchronous scan.
 	resp, err := api.StartScan(StartScanRequest{
-		Root:      scanDir,
-		StorageID: "smoke",
-		Workers:   2,
+		Root:    scanDir,
+		Workers: 2,
 	})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
@@ -65,13 +64,13 @@ func TestSmokeScanLifecycle(t *testing.T) {
 	}
 	found := false
 	for _, s := range storages {
-		if s.ID == "smoke" {
+		if s.RootPath == scanDir {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected storage 'smoke' after scan")
+		t.Errorf("expected storage for scan dir %q after scan, got %#v", scanDir, storages)
 	}
 
 	// 5. Verify duplicate groups are visible.
@@ -132,8 +131,7 @@ func TestSmokeCancelAndHistory(t *testing.T) {
 	}
 
 	resp, err := api.StartScan(StartScanRequest{
-		Root:      scanDir,
-		StorageID: "smoke-cancel",
+		Root: scanDir,
 	})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
@@ -282,8 +280,7 @@ func TestSmokeCrashRecovery(t *testing.T) {
 
 		// Phase 3: Verify a new scan can be started after recovery.
 		resp, err := api.StartScan(StartScanRequest{
-			Root:      scanDir,
-			StorageID: "smoke-post-recovery",
+			Root: scanDir,
 		})
 		if err != nil {
 			t.Fatalf("StartScan (phase 3): %v", err)

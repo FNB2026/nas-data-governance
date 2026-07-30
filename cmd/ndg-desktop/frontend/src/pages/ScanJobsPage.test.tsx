@@ -78,14 +78,11 @@ describe("ScanJobsPage scan defaults", () => {
   it("sends normalized defaults in the scan request", async () => {
     render(<ScanJobsPage />);
     fireEvent.change(screen.getByLabelText("根目录"), { target: { value: "  /source/root  " } });
-    fireEvent.click(screen.getByRole("button", { name: "高级选项" }));
-    fireEvent.change(screen.getByLabelText("存储 ID（可选）"), { target: { value: "  archive  " } });
     fireEvent.click(screen.getByRole("button", { name: "开始扫描" }));
 
     await waitFor(() => {
       expect(startScanMock).toHaveBeenCalledWith({
         root: "/source/root",
-        storageId: "archive",
         fullScan: true,
         workers: 6,
       });
@@ -100,7 +97,7 @@ describe("ScanJobsPage scan defaults", () => {
     expect(startScanMock).not.toHaveBeenCalled();
   });
 
-  it("fills the root and storage ID from the registered-directory dropdown", () => {
+  it("fills the root from the registered-directory dropdown", () => {
     contextMock.storages = [{
       id: "nas-industry",
       root_path: "/Volumes/archive/F.industry",
@@ -114,8 +111,6 @@ describe("ScanJobsPage scan defaults", () => {
     });
 
     expect(screen.getByLabelText("根目录")).toHaveValue("/Volumes/archive/F.industry");
-    fireEvent.click(screen.getByRole("button", { name: "高级选项" }));
-    expect(screen.getByLabelText("存储 ID（可选）")).toHaveValue("nas-industry");
   });
 
   it("prefills the newly created project's source without starting a scan", async () => {

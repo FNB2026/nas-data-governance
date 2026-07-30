@@ -561,7 +561,7 @@ func TestStartScanAndPollProgress(t *testing.T) {
 		t.Fatalf("OpenProjectReadWrite: %v", err)
 	}
 
-	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-scan"})
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
 	}
@@ -587,14 +587,50 @@ func TestStartScanAndPollProgress(t *testing.T) {
 	}
 	found := false
 	for _, s := range storages {
-		if s.ID == "test-scan" {
+		if s.RootPath == scanDir {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected storage 'test-scan' to be registered after scan")
+		t.Errorf("expected storage for scan dir %q to be registered after scan, got %#v", scanDir, storages)
 	}
+}
+
+// TestStartScanRejectsMismatchedStorageID verifies that the backend rejects
+// a StorageID that does not match the ID derived from the scan root. This
+// prevents a frontend or API client from silently rebinding an existing
+// storage ID to a different directory.
+func TestStartScanRejectsMismatchedStorageID(t *testing.T) {
+	scanDir := createScanDir(t)
+	path := filepath.Join(t.TempDir(), "project.db")
+	api := NewAPI()
+	t.Cleanup(func() { _ = api.CloseProject() })
+
+	if _, err := api.OpenProjectReadWrite(path); err != nil {
+		t.Fatalf("OpenProjectReadWrite: %v", err)
+	}
+
+	// 1. Mismatched StorageID must be rejected.
+	_, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "wrong-id"})
+	if err == nil {
+		t.Fatal("expected error for mismatched storage_id, got nil")
+	}
+
+	// 2. Correct derived StorageID must succeed.
+	correctID := generateStorageID(scanDir)
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: correctID})
+	if err != nil {
+		t.Fatalf("StartScan with correct derived ID: %v", err)
+	}
+	_ = waitForJobTerminal(t, api, resp.JobID, 30*time.Second)
+
+	// 3. Empty StorageID must also succeed (backend derives it).
+	resp2, err := api.StartScan(StartScanRequest{Root: scanDir})
+	if err != nil {
+		t.Fatalf("StartScan with empty storage_id: %v", err)
+	}
+	_ = waitForJobTerminal(t, api, resp2.JobID, 30*time.Second)
 }
 
 func TestGetScanProgressJobNotFound(t *testing.T) {
@@ -621,7 +657,7 @@ func TestCancelScan(t *testing.T) {
 		t.Fatalf("OpenProjectReadWrite: %v", err)
 	}
 
-	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-cancel"})
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
 	}
@@ -649,7 +685,7 @@ func TestListRecentJobs(t *testing.T) {
 		t.Fatalf("OpenProjectReadWrite: %v", err)
 	}
 
-	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-list"})
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
 	}
@@ -684,7 +720,7 @@ func TestGetJobDetail(t *testing.T) {
 		t.Fatalf("OpenProjectReadWrite: %v", err)
 	}
 
-	resp, err := api.StartScan(StartScanRequest{Root: scanDir, StorageID: "test-detail"})
+	resp, err := api.StartScan(StartScanRequest{Root: scanDir})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
 	}

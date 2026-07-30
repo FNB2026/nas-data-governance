@@ -59,7 +59,6 @@ function ContextHarness() {
       <button onClick={() => void ctx.closeProject()}>close</button>
       <button onClick={() => void ctx.startScan({
         root: "  /source/root  ",
-        storageId: "  archive  ",
         fullScan: true,
         workers: 8,
       })}>start scan</button>
@@ -123,7 +122,6 @@ describe("ProjectContext safety and scan wiring", () => {
     await waitFor(() => {
       expect(apiMock.scan.start).toHaveBeenCalledWith({
         root: "/source/root",
-        storage_id: "archive",
         full_scan: true,
         workers: 8,
       });
