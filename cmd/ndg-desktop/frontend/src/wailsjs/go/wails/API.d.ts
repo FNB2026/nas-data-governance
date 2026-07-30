@@ -19,6 +19,8 @@ export function CheckRecoveryLock():Promise<wails.RecoveryStatusDTO>;
 
 export function CloseProject():Promise<void>;
 
+export function CreateProjectFromSource(arg1:wails.CreateProjectInput):Promise<wails.ProjectInfo>;
+
 export function CreatePurgePlans():Promise<Array<wails.PurgePlanDTO>>;
 
 export function CreateRestorePlan(arg1:string):Promise<wails.RestorePlanDTO>;
@@ -67,6 +69,8 @@ export function ListQuarantineItems(arg1:string):Promise<Array<wails.QuarantineI
 
 export function ListRecentJobs(arg1:number):Promise<Array<wails.JobSummary>>;
 
+export function ListRecentProjects():Promise<Array<wails.RecentProjectEntry>>;
+
 export function ListRestorePlans():Promise<Array<wails.RestorePlanDTO>>;
 
 export function ListReviewPlans():Promise<Array<wails.PlanDTO>>;
@@ -77,15 +81,21 @@ export function OpenProject(arg1:string):Promise<wails.ProjectInfo>;
 
 export function OpenProjectReadWrite(arg1:string):Promise<wails.ProjectInfo>;
 
+export function PickDirectory(arg1:string):Promise<string>;
+
 export function RecoverPurges(arg1:string):Promise<Array<wails.PurgeRecoveryResultDTO>>;
 
 export function RecoverRestores(arg1:wails.RecoverRestoresRequest):Promise<Array<wails.RestoreRecoveryResultDTO>>;
 
 export function RecoverSourcePlans():Promise<Array<wails.RecoveryResultDTO>>;
 
+export function RegisterScanSource(arg1:string):Promise<wails.StorageInfo>;
+
 export function SaveDraftPlans(arg1:string):Promise<Array<wails.PlanDTO>>;
 
 export function SaveGroupDecision(arg1:wails.SaveDecisionRequest):Promise<wails.GroupDecisionDTO>;
+
+export function SetDirectoryPicker(arg1:wails.DirectoryPicker):Promise<void>;
 
 export function StartScan(arg1:wails.StartScanRequest):Promise<wails.StartScanResponse>;
 

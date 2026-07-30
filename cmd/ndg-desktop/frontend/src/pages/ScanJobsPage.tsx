@@ -1,7 +1,7 @@
 // Scan jobs page: new scan form, active progress, job history, job detail.
 // Scan form state is page-local; scan status and polling are global (context).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ScanPanel from "../components/ScanPanel";
 import JobDetail from "../components/JobDetail";
 import { useProject } from "../state/ProjectContext";
@@ -30,6 +30,8 @@ export default function ScanJobsPage() {
     capabilities,
     defaultFullScan,
     defaultWorkers,
+    pendingScanRoot,
+    clearPendingScanRoot,
   } = useProject();
 
   // Form state (page-local) — initialized from global scan defaults
@@ -39,6 +41,27 @@ export default function ScanJobsPage() {
   const [scanWorkers, setScanWorkers] = useState(defaultWorkers);
   const [scanStarting, setScanStarting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+
+  // Consume a pending scan root set by the start card's "new project"
+  // flow: prefill the root and the default storage id, then clear it so
+  // it only applies once. Also auto-select the registered storage when a
+  // pending root matches a known storage.
+  useEffect(() => {
+    if (!pendingScanRoot) return;
+    setScanRoot(pendingScanRoot);
+    setScanError(null);
+    clearPendingScanRoot();
+  }, [pendingScanRoot, clearPendingScanRoot]);
+
+  // Auto-select the storage whose root matches the prefilled scan root,
+  // so the user can hit "开始扫描" without picking a storage manually.
+  useEffect(() => {
+    if (!scanRoot) return;
+    const match = storages.find((s) => s.root_path === scanRoot);
+    if (match) {
+      setScanStorageId(match.id);
+    }
+  }, [scanRoot, storages]);
 
   // Job detail (page-local)
   const [selectedJob, setSelectedJob] = useState<wails.JobDetailResponse | null>(null);

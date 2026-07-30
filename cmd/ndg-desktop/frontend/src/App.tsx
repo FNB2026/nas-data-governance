@@ -31,7 +31,7 @@ function renderPage(route: AppRoute) {
 }
 
 function AppContent() {
-  const { capabilities, refreshProject, project } = useProject();
+  const { capabilities, refreshProject, project, pendingScanRoot } = useProject();
   const [activeRoute, setActiveRoute] = useState<AppRoute>(DEFAULT_ROUTE);
 
   // Reset to default route if current route becomes disabled (e.g. project closed)
@@ -40,6 +40,16 @@ function AppContent() {
       setActiveRoute(DEFAULT_ROUTE);
     }
   }, [activeRoute, capabilities]);
+
+  // After a project is created from the start card, pendingScanRoot is set
+  // and the project opens read-write: jump straight to the scan page so
+  // the user can hit "开始扫描" with the root already prefilled. The flag
+  // is cleared by the scan page once it consumes the prefilled root.
+  useEffect(() => {
+    if (project && pendingScanRoot && isRouteEnabled("scan-jobs", capabilities)) {
+      setActiveRoute("scan-jobs");
+    }
+  }, [project, pendingScanRoot, capabilities]);
 
   // Focus project path input (for Cmd+O shortcut)
   const focusProjectPath = useCallback(() => {

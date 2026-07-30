@@ -41,6 +41,11 @@ type VersionInfo struct {
 
 // ProjectInfo describes the currently open project.
 type ProjectInfo struct {
+	// ProjectID is the immutable logical project identifier. For managed
+	// projects it comes from project.json and is intentionally distinct
+	// from Path, which is the database location.
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
 	// Path is the database file path (display-safe: this is the user's
 	// chosen project file, not a NAS data path).
 	Path         string `json:"path"`
@@ -80,6 +85,11 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 // CheckRecoveryLock, RecoverSourcePlans, RecoverRestores, RecoverPurges.
 //
 // V8 (audit): ListOperationLogs, ListJournalEntries.
+//
+// V9 (first-launch): PickDirectory, CreateProjectFromSource, RegisterScanSource,
+// ListRecentProjects. New projects are created under the OS app-support
+// dir (~/Library/Application Support/NDG/projects/<id>/governance.db on
+// macOS) with 0700/0600 perms, never inside the scan source.
 type API struct {
 	mu            sync.RWMutex
 	store         *store.SQLiteStore
@@ -94,7 +104,9 @@ type API struct {
 	recoverySvc   *app.RecoveryService
 	executionSvc  *app.ExecutionService
 	path          string
-	projectID     string // used as JobManager project scope; set to abs DB path
+	projectID     string          // logical ID exposed through ProjectInfo; never a database path
+	jobScope      string          // legacy JobManager compatibility scope; may be the historical abs path
+	dirPicker     DirectoryPicker // injected by main.go; nil outside Wails runtime
 }
 
 // NewAPI creates a new Wails API instance. The store starts nil;
@@ -149,6 +161,8 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.recoverySvc = app.NewRecoveryService(st)
 	a.executionSvc = app.NewExecutionService(st)
 	a.path = absPath
+	a.projectID, _ = projectIdentity(absPath)
+	a.jobScope = projectJobScope(absPath, a.projectID)
 
 	info, err := a.projectInfoLocked(context.Background())
 	if err != nil {
@@ -166,8 +180,10 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 		a.jobMgr = nil
 		a.path = ""
 		a.projectID = ""
+		a.jobScope = ""
 		return ProjectInfo{}, err
 	}
+	_ = a.recordRecentLocked(projectDisplayName(absPath), absPath)
 	return info, nil
 }
 
@@ -195,6 +211,7 @@ func (a *API) CloseProject() error {
 	a.jobMgr = nil
 	a.path = ""
 	a.projectID = ""
+	a.jobScope = ""
 	return err
 }
 
@@ -256,6 +273,8 @@ func (a *API) projectInfoLocked(ctx context.Context) (ProjectInfo, error) {
 		return ProjectInfo{}, fmt.Errorf("wails: read project metadata: %w", err)
 	}
 	return ProjectInfo{
+		ProjectID:    a.projectID,
+		Name:         projectDisplayName(a.path),
 		Path:         a.path,
 		IsOpen:       true,
 		StorageCount: len(storages),
@@ -391,44 +410,21 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 		return ProjectInfo{}, fmt.Errorf("wails: open project (read-write): %w", err)
 	}
 
-	// Crash recovery: mark stale non-terminal jobs as FAILED before
-	// accepting new work. Errors here are non-fatal — the project is
-	// still usable.
-	mgr := jobs.New(st)
-	_, _ = mgr.Recover(context.Background())
-
-	a.store = st
-	a.dupSvc = app.NewDuplicateServiceWithReader(st)
-	a.diagSvc = app.NewDiagnosticService(st)
-	a.planSvc = app.NewPlanService()
-	a.reviewSvc = app.NewReviewService(st)
-	a.quarantineSvc = app.NewQuarantineService(st)
-	a.purgeSvc = app.NewPurgeService(st)
-	a.recoverySvc = app.NewRecoveryService(st)
-	a.executionSvc = app.NewExecutionService(st)
-	a.jobMgr = mgr
-	a.scanRunner = app.NewScanJobRunner(app.NewScanService(st), mgr)
+	// Crash recovery + service init. initReadWriteServicesLocked runs
+	// crash recovery (marking stale non-terminal jobs FAILED) and wires
+	// the scan runner / job manager required for V4 scan operations.
+	a.initReadWriteServicesLocked(st)
 	a.path = absPath
-	a.projectID = absPath
+	a.projectID, _ = projectIdentity(absPath)
+	a.jobScope = projectJobScope(absPath, a.projectID)
 
 	info, err := a.projectInfoLocked(context.Background())
 	if err != nil {
 		_ = st.Close()
-		a.store = nil
-		a.dupSvc = nil
-		a.diagSvc = nil
-		a.planSvc = nil
-		a.reviewSvc = nil
-		a.quarantineSvc = nil
-		a.purgeSvc = nil
-		a.recoverySvc = nil
-		a.executionSvc = nil
-		a.scanRunner = nil
-		a.jobMgr = nil
-		a.path = ""
-		a.projectID = ""
+		a.resetProjectStateLocked()
 		return ProjectInfo{}, err
 	}
+	_ = a.recordRecentLocked(projectDisplayName(absPath), absPath)
 	return info, nil
 }
 
@@ -437,7 +433,7 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 //
 // The project must be opened with OpenProjectReadWrite (not OpenProject).
 // The root directory must exist and be readable. If storage_id is empty,
-// it defaults to "default".
+// a stable ID is derived from the root path (same as RegisterScanSource).
 func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -451,10 +447,17 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	if strings.TrimSpace(req.Root) == "" {
 		return StartScanResponse{}, errors.New("wails: root is required")
 	}
+	if err := rejectScanRootContainingProjectFiles(req.Root, a.path); err != nil {
+		return StartScanResponse{}, err
+	}
 
 	storageID := strings.TrimSpace(req.StorageID)
 	if storageID == "" {
-		storageID = "default"
+		// Derive a stable ID from the root path, consistent with
+		// RegisterScanSource / CreateProjectFromSource. This avoids a
+		// "default" vs "src_<hash>" mismatch when the user types a root
+		// manually instead of picking a registered storage.
+		storageID = generateStorageID(req.Root)
 	}
 
 	workers := req.Workers
@@ -471,7 +474,7 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		HashRetryDelay: 1 * time.Second,
 	}
 
-	jobID, err := a.scanRunner.StartScanJob(context.Background(), a.projectID, in)
+	jobID, err := a.scanRunner.StartScanJob(context.Background(), a.jobScope, in)
 	if err != nil {
 		return StartScanResponse{}, fmt.Errorf("wails: start scan: %w", err)
 	}
@@ -549,7 +552,7 @@ func (a *API) ListRecentJobs(limit int) ([]JobSummary, error) {
 		limit = 100
 	}
 
-	jobRuns, err := a.jobMgr.ListRecent(context.Background(), a.projectID, limit)
+	jobRuns, err := a.jobMgr.ListRecent(context.Background(), a.jobScope, limit)
 	if err != nil {
 		return nil, fmt.Errorf("wails: list recent jobs: %w", err)
 	}

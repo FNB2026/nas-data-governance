@@ -40,6 +40,8 @@ const { contextMock, startScanMock } = vi.hoisted(() => {
       defaultFullScan: true,
       defaultWorkers: "6",
       pathPrivacyMode: false,
+      pendingScanRoot: "",
+      clearPendingScanRoot: vi.fn(),
     },
   };
 });
@@ -55,6 +57,8 @@ beforeEach(() => {
   contextMock.activeJobId = null;
   contextMock.scanProgress = null;
   contextMock.storages = [];
+  contextMock.pendingScanRoot = "";
+  contextMock.clearPendingScanRoot.mockReset();
 });
 
 afterEach(() => {
@@ -112,6 +116,22 @@ describe("ScanJobsPage scan defaults", () => {
     expect(screen.getByLabelText("根目录")).toHaveValue("/Volumes/archive/F.industry");
     fireEvent.click(screen.getByRole("button", { name: "高级选项" }));
     expect(screen.getByLabelText("存储 ID（可选）")).toHaveValue("nas-industry");
+  });
+
+  it("prefills the newly created project's source without starting a scan", async () => {
+    contextMock.pendingScanRoot = "/Volumes/NAS/产业资料库";
+    contextMock.storages = [{
+      id: "src_industry",
+      root_path: "/Volumes/NAS/产业资料库",
+      kind: "filesystem",
+      created_at: "2026-07-30T08:00:00Z",
+    }];
+
+    render(<ScanJobsPage />);
+
+    expect(screen.getByLabelText("根目录")).toHaveValue("/Volumes/NAS/产业资料库");
+    await waitFor(() => expect(contextMock.clearPendingScanRoot).toHaveBeenCalledOnce());
+    expect(startScanMock).not.toHaveBeenCalled();
   });
 
   it("shows full hashing as indeterminate candidate verification", () => {

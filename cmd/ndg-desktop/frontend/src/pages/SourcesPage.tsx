@@ -1,10 +1,10 @@
-// Sources page: project open/close, storage list, scan readiness,
-// and diagnostic reports (format / governance / merge).
+// Sources page: project start card / open-project summary, storage list,
+// scan readiness, and diagnostic reports (format / governance / merge).
 
 import { useState, useEffect, useCallback } from "react";
 import ProjectPanel from "../components/ProjectPanel";
+import ProjectStartCard from "../components/ProjectStartCard";
 import StorageList from "../components/StorageList";
-import OnboardingGuide from "../components/OnboardingGuide";
 import DiagnosticPanel from "../components/DiagnosticPanel";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime } from "../lib/utils";
@@ -14,20 +14,19 @@ import { api } from "../api/client";
 export default function SourcesPage() {
   const {
     project,
-    projectPath,
     busy,
     error,
     isReadWrite,
     storages,
     storagesError,
+    recentProjects,
     dataRevision,
-    setProjectPath,
-    openProject,
+    createNewProject,
+    openExisting,
     closeProject,
     refreshProject,
   } = useProject();
 
-  const [readWriteMode, setReadWriteMode] = useState(false);
   const [readiness, setReadiness] = useState<wails.ProjectReadinessDTO | null>(null);
 
   const loadReadiness = useCallback(async () => {
@@ -56,21 +55,25 @@ export default function SourcesPage() {
         <p className="muted">项目、存储、扫描准备与诊断报告</p>
       </div>
 
-      <ProjectPanel
-        project={project}
-        projectPath={projectPath}
-        busy={busy}
-        error={error}
-        readWriteMode={readWriteMode}
-        isReadWrite={isReadWrite}
-        onProjectPathChange={setProjectPath}
-        onReadWriteModeChange={setReadWriteMode}
-        onOpenProject={() => void openProject(readWriteMode)}
-        onCloseProject={() => void closeProject()}
-        onRefreshProject={() => void refreshProject()}
-      />
-
-      {!project && <OnboardingGuide />}
+      {project ? (
+        <ProjectPanel
+          project={project}
+          busy={busy}
+          error={error}
+          isReadWrite={isReadWrite}
+          onCloseProject={() => void closeProject()}
+          onRefreshProject={() => void refreshProject()}
+        />
+      ) : (
+        <ProjectStartCard
+          busy={busy}
+          error={error}
+          recentProjects={recentProjects}
+          onCreate={(name, scanRoot) => void createNewProject(name, scanRoot)}
+          onOpenRecent={(path) => void openExisting(path, true)}
+          onOpenExisting={(path, readWrite) => void openExisting(path, readWrite)}
+        />
+      )}
 
       {project && (
         <>

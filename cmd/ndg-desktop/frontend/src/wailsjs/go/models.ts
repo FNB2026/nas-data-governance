@@ -960,6 +960,20 @@ export namespace wails {
 		    return a;
 		}
 	}
+	export class CreateProjectInput {
+	    name: string;
+	    source_path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateProjectInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.source_path = source["source_path"];
+	    }
+	}
 	export class DiagnoseFormatsRequest {
 	    storage_id?: string;
 	    large_unknown_minimum?: number;
@@ -998,26 +1012,6 @@ export namespace wails {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
-	    }
-	}
-	export class ExecutePlansRequest {
-	    plan_ids: string[];
-	    quarantine_root: string;
-	    source_roots: string[];
-	    dry_run: boolean;
-	    retention_hours: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new ExecutePlansRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.plan_ids = source["plan_ids"];
-	        this.quarantine_root = source["quarantine_root"];
-	        this.source_roots = source["source_roots"];
-	        this.dry_run = source["dry_run"];
-	        this.retention_hours = source["retention_hours"];
 	    }
 	}
 	export class ExecutionStepDTO {
@@ -1071,6 +1065,26 @@ export namespace wails {
 		    }
 		    return a;
 		}
+	}
+	export class ExecutePlansRequest {
+	    plan_ids: string[];
+	    quarantine_root: string;
+	    source_roots: string[];
+	    dry_run: boolean;
+	    retention_hours: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecutePlansRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan_ids = source["plan_ids"];
+	        this.quarantine_root = source["quarantine_root"];
+	        this.source_roots = source["source_roots"];
+	        this.dry_run = source["dry_run"];
+	        this.retention_hours = source["retention_hours"];
+	    }
 	}
 	export class ExecutePlansResponse {
 	    results: ExecutePlanResultDTO[];
@@ -1188,6 +1202,7 @@ export namespace wails {
 	        this.error = source["error"];
 	    }
 	}
+	
 	export class FileItem {
 	    storage_id: string;
 	    path: string;
@@ -1546,6 +1561,8 @@ export namespace wails {
 	
 	
 	export class ProjectInfo {
+	    project_id: string;
+	    name: string;
 	    path: string;
 	    is_open: boolean;
 	    storage_count: number;
@@ -1556,6 +1573,8 @@ export namespace wails {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project_id = source["project_id"];
+	        this.name = source["name"];
 	        this.path = source["path"];
 	        this.is_open = source["is_open"];
 	        this.storage_count = source["storage_count"];
@@ -1708,6 +1727,42 @@ export namespace wails {
 	        this.restored_at = source["restored_at"];
 	        this.purged_at = source["purged_at"];
 	    }
+	}
+	
+	export class RecentProjectEntry {
+	    name: string;
+	    path: string;
+	    // Go type: time
+	    opened_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new RecentProjectEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.opened_at = this.convertValues(source["opened_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class RecoverRestoresRequest {
 	    quarantine_root: string;
@@ -1927,3 +1982,4 @@ export namespace wails {
 	}
 
 }
+

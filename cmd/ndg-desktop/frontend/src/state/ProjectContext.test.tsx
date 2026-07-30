@@ -11,6 +11,7 @@ const { apiMock } = vi.hoisted(() => ({
       openReadWrite: vi.fn(),
       close: vi.fn(),
       info: vi.fn(),
+      listRecent: vi.fn(),
     },
     storages: { list: vi.fn() },
     scan: {
@@ -96,6 +97,7 @@ beforeEach(() => {
   apiMock.project.open.mockReset().mockResolvedValue({ path: "/tmp/project.db", is_open: true });
   apiMock.project.close.mockReset().mockResolvedValue(undefined);
   apiMock.project.info.mockReset().mockResolvedValue({ path: "/tmp/project.db", is_open: true });
+  apiMock.project.listRecent.mockReset().mockResolvedValue([]);
   apiMock.storages.list.mockReset().mockResolvedValue([]);
   apiMock.scan.listJobs.mockReset().mockResolvedValue([]);
   apiMock.scan.start.mockReset().mockResolvedValue({ job_id: "job-1" });

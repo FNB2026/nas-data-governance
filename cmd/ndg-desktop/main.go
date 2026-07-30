@@ -41,6 +41,16 @@ func main() {
 			// disconnected external display, so we use an explicit
 			// position that is always on the primary screen.
 			runtime.WindowSetPosition(ctx, 100, 100)
+			// Inject the native directory picker. The adapter layer
+			// must not import the Wails runtime (ADR-0006), so the
+			// dialog is wired here and exposed to the frontend via
+			// API.PickDirectory.
+			api.SetDirectoryPicker(func(title string) (string, error) {
+				return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
+					Title:           title,
+					ShowHiddenFiles: true,
+				})
+			})
 		},
 		OnShutdown: func(ctx context.Context) {
 			// Ensure the project database is closed on exit.

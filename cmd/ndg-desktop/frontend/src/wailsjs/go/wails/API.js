@@ -30,6 +30,10 @@ export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
 }
 
+export function CreateProjectFromSource(arg1) {
+  return window['go']['wails']['API']['CreateProjectFromSource'](arg1);
+}
+
 export function CreatePurgePlans() {
   return window['go']['wails']['API']['CreatePurgePlans']();
 }
@@ -126,6 +130,10 @@ export function ListRecentJobs(arg1) {
   return window['go']['wails']['API']['ListRecentJobs'](arg1);
 }
 
+export function ListRecentProjects() {
+  return window['go']['wails']['API']['ListRecentProjects']();
+}
+
 export function ListRestorePlans() {
   return window['go']['wails']['API']['ListRestorePlans']();
 }
@@ -146,6 +154,10 @@ export function OpenProjectReadWrite(arg1) {
   return window['go']['wails']['API']['OpenProjectReadWrite'](arg1);
 }
 
+export function PickDirectory(arg1) {
+  return window['go']['wails']['API']['PickDirectory'](arg1);
+}
+
 export function RecoverPurges(arg1) {
   return window['go']['wails']['API']['RecoverPurges'](arg1);
 }
@@ -158,12 +170,20 @@ export function RecoverSourcePlans() {
   return window['go']['wails']['API']['RecoverSourcePlans']();
 }
 
+export function RegisterScanSource(arg1) {
+  return window['go']['wails']['API']['RegisterScanSource'](arg1);
+}
+
 export function SaveDraftPlans(arg1) {
   return window['go']['wails']['API']['SaveDraftPlans'](arg1);
 }
 
 export function SaveGroupDecision(arg1) {
   return window['go']['wails']['API']['SaveGroupDecision'](arg1);
+}
+
+export function SetDirectoryPicker(arg1) {
+  return window['go']['wails']['API']['SetDirectoryPicker'](arg1);
 }
 
 export function StartScan(arg1) {

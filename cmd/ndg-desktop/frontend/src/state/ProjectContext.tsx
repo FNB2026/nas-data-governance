@@ -39,6 +39,13 @@ interface ProjectContextValue {
   busy: boolean;
   error: string | null;
 
+  // Recent projects (start-card entry; available before a project opens)
+  recentProjects: wails.RecentProjectEntry[];
+  // Pending scan root: set when a project is created from the start card
+  // so the scan page can prefill the root, then cleared once consumed.
+  pendingScanRoot: string;
+  clearPendingScanRoot: () => void;
+
   // Storages (shared across pages)
   storages: wails.StorageInfo[];
   storagesError: string | null;
@@ -90,6 +97,8 @@ interface ProjectContextValue {
   // Actions
   setProjectPath: (path: string) => void;
   openProject: (readWrite: boolean) => Promise<void>;
+  openExisting: (path: string, readWrite: boolean) => Promise<void>;
+  createNewProject: (name: string, scanRoot: string) => Promise<void>;
   closeProject: () => Promise<void>;
   refreshProject: () => Promise<void>;
   startScan: (params: ScanStartParams) => Promise<void>;
@@ -114,6 +123,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Storages
   const [storages, setStorages] = useState<wails.StorageInfo[]>([]);
   const [storagesError, setStoragesError] = useState<string | null>(null);
+
+  // Recent projects + pending scan root (start-card flow)
+  const [recentProjects, setRecentProjects] = useState<wails.RecentProjectEntry[]>([]);
+  const [pendingScanRoot, setPendingScanRoot] = useState<string>("");
 
   // Scan status
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -220,6 +233,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Best-effort recent-projects refresh for the start card. Failures are
+  // swallowed so an unreadable manifest never blocks opening a project.
+  const loadRecentProjects = useCallback(async () => {
+    if (!hasWailsRuntime()) return;
+    try {
+      const list = await api.project.listRecent();
+      setRecentProjects(list || []);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   const loadJobs = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     const loadRev = projectRevRef.current;
@@ -263,7 +288,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     api.project.version()
       .then(setVersion)
       .catch((e: unknown) => setError((e as Error).message));
-  }, []);
+    // Load recent projects for the start card (available before any
+    // project is open).
+    void loadRecentProjects();
+  }, [loadRecentProjects]);
 
   // ---- Scan polling (global — survives page navigation) ----
   // Uses recursive setTimeout with exponential backoff for network drive tolerance.
@@ -394,6 +422,42 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Shared post-open wiring: bump rev, set project state, check recovery
+  // lock, and reload storages / jobs / recent. Used by openProject,
+  // openRecent and createNewProject so all entry points stay consistent.
+  const wireOpenProject = useCallback(async (
+    info: wails.ProjectInfo,
+    readWrite: boolean,
+  ) => {
+    // Bump project revision to invalidate any in-flight poll from a
+    // previous project session.
+    projectRevRef.current++;
+    setProject(info);
+    setProjectPath(info.path);
+    setIsReadWrite(readWrite);
+    setLastScanParams(null);
+    setError(null);
+
+    // Check recovery lock after opening
+    try {
+      const status = await api.recovery.checkLock();
+      setRecoveryLockActive(status.lock_active);
+      if (status.lock_active) {
+        pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
+      }
+    } catch {
+      setRecoveryLockActive(false);
+    }
+
+    const loads: Promise<void>[] = [loadStorages(), loadRecentProjects()];
+    if (readWrite) {
+      loads.push(loadJobs());
+    }
+    await Promise.all(loads);
+    setConnectionStatus("connected");
+    notifyDataChanged();
+  }, [loadStorages, loadJobs, loadRecentProjects, notifyDataChanged, pushToast]);
+
   const openProject = useCallback(async (readWrite: boolean) => {
     if (!projectPath.trim()) {
       setError("请先选择或输入项目数据库路径");
@@ -404,38 +468,59 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const info = readWrite
         ? await api.project.openReadWrite(projectPath.trim())
         : await api.project.open(projectPath.trim());
-      // Bump project revision to invalidate any in-flight poll from a
-      // previous project session.
-      projectRevRef.current++;
-      setProject(info);
-      setIsReadWrite(readWrite);
-      setLastScanParams(null);
-      setError(null);
-
-      // Check recovery lock after opening
-      try {
-        const status = await api.recovery.checkLock();
-        setRecoveryLockActive(status.lock_active);
-        if (status.lock_active) {
-          pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
-        }
-      } catch {
-        setRecoveryLockActive(false);
-      }
-
-      const loads: Promise<void>[] = [loadStorages()];
-      if (readWrite) {
-        loads.push(loadJobs());
-      }
-      await Promise.all(loads);
-      setConnectionStatus("connected");
-      notifyDataChanged();
+      await wireOpenProject(info, readWrite);
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [projectPath, loadStorages, loadJobs, notifyDataChanged]);
+  }, [projectPath, wireOpenProject]);
+
+  // Open an existing project database at an explicit path. Used by the
+  // start card's "recent project" (read-write) and "advanced: open
+  // existing database" (read-write or read-only) entries. Decoupled from
+  // projectPath state so the start card never has to sync local input.
+  const openExisting = useCallback(async (path: string, readWrite: boolean) => {
+    if (!path.trim()) return;
+    setBusy(true);
+    try {
+      const info = readWrite
+        ? await api.project.openReadWrite(path.trim())
+        : await api.project.open(path.trim());
+      await wireOpenProject(info, readWrite);
+    } catch (e: unknown) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [wireOpenProject]);
+
+  // V9 first-launch: create a fresh project from a scan source in a
+  // single atomic backend call. The backend validates the source, creates
+  // the DB under the OS app-support dir, registers the source as a
+  // storage with a backend-generated ID, writes project.json, and records
+  // recent — all with rollback on failure. The frontend only sets
+  // pendingScanRoot so the scan page can prefill the root. The user never
+  // types a .db path and never picks a storage ID.
+  const createNewProject = useCallback(async (name: string, scanRoot: string) => {
+    setBusy(true);
+    try {
+      const info = await api.project.createFromSource({
+        name: name,
+        source_path: scanRoot,
+      });
+      await wireOpenProject(info, true);
+      setPendingScanRoot(scanRoot);
+      pushToast("success", "项目已创建", "已在本机创建项目数据库并登记数据源，可开始扫描");
+    } catch (e: unknown) {
+      setError((e as Error).message);
+      pushToast("error", "创建项目失败", (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [wireOpenProject, pushToast]);
+
+  const clearPendingScanRoot = useCallback(() => setPendingScanRoot(""), []);
 
   const closeProject = useCallback(async () => {
     setBusy(true);
@@ -459,18 +544,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setScanFilterType("");
       setRecoveryLockActive(false);
       setConnectionStatus("connected");
+      setPendingScanRoot("");
       if (reconnectToastIdRef.current !== null) {
         const reconnectToastId = reconnectToastIdRef.current;
         setToasts((prev) => prev.filter((toast) => toast.id !== reconnectToastId));
         reconnectToastIdRef.current = null;
       }
       setError(null);
+      // Refresh the recent list so the just-closed project appears in the
+      // start card (the backend records it on open/create).
+      void loadRecentProjects();
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [loadRecentProjects]);
 
   const refreshProject = useCallback(async () => {
     setBusy(true);
@@ -551,6 +640,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     isReadWrite,
     busy,
     error,
+    recentProjects,
+    pendingScanRoot,
+    clearPendingScanRoot,
     storages,
     storagesError,
     activeJobId,
@@ -580,6 +672,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setDefaultWorkers,
     setProjectPath,
     openProject,
+    openExisting,
+    createNewProject,
     closeProject,
     refreshProject,
     startScan,
