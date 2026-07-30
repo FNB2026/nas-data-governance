@@ -62,6 +62,10 @@ export function ExecuteRestore(arg1) {
   return window['go']['wails']['API']['ExecuteRestore'](arg1);
 }
 
+export function GetAppCapabilities() {
+  return window['go']['wails']['API']['GetAppCapabilities']();
+}
+
 export function GetGroupDecision(arg1) {
   return window['go']['wails']['API']['GetGroupDecision'](arg1);
 }
@@ -76,6 +80,10 @@ export function GetJobDetail(arg1) {
 
 export function GetProjectInfo() {
   return window['go']['wails']['API']['GetProjectInfo']();
+}
+
+export function GetProjectReadiness() {
+  return window['go']['wails']['API']['GetProjectReadiness']();
 }
 
 export function GetScanProgress(arg1) {

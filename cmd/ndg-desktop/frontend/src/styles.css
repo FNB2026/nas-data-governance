@@ -1810,6 +1810,90 @@ button.secondary {
   justify-content: center;
 }
 
+/* ---- Readiness panel ---- */
+
+.readiness-panel {
+  margin-bottom: 1rem;
+}
+
+.readiness-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.readiness-badge--ready {
+  background: rgba(52, 199, 89, 0.15);
+  color: #248a3d;
+}
+
+.readiness-badge--not-ready {
+  background: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
+}
+
+.readiness-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.readiness-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.readiness-check-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.readiness-check--passed .readiness-check-icon {
+  background: rgba(52, 199, 89, 0.15);
+  color: #248a3d;
+}
+
+.readiness-check--failed .readiness-check-icon {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.readiness-check-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.readiness-check-label {
+  font-weight: 500;
+}
+
+.readiness-check-reason {
+  font-size: 0.8rem;
+}
+
+.readiness-stats {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
 .audit-recovery-panel {
   margin-bottom: 1rem;
   padding: 1rem;

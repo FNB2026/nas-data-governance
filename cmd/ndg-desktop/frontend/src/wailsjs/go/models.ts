@@ -820,6 +820,36 @@ export namespace merge {
 
 export namespace wails {
 	
+	export class AppCapabilitiesDTO {
+	    project_open: boolean;
+	    project_mode: string;
+	    can_scan: boolean;
+	    can_view_results: boolean;
+	    can_edit_reviews: boolean;
+	    can_approve_plans: boolean;
+	    can_execute_quarantine: boolean;
+	    can_execute_purge: boolean;
+	    recovery_lock_active: boolean;
+	    disabled_reasons: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppCapabilitiesDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project_open = source["project_open"];
+	        this.project_mode = source["project_mode"];
+	        this.can_scan = source["can_scan"];
+	        this.can_view_results = source["can_view_results"];
+	        this.can_edit_reviews = source["can_edit_reviews"];
+	        this.can_approve_plans = source["can_approve_plans"];
+	        this.can_execute_quarantine = source["can_execute_quarantine"];
+	        this.can_execute_purge = source["can_execute_purge"];
+	        this.recovery_lock_active = source["recovery_lock_active"];
+	        this.disabled_reasons = source["disabled_reasons"];
+	    }
+	}
 	export class ApprovePlansRequest {
 	    plan_ids: string[];
 	
@@ -1530,6 +1560,62 @@ export namespace wails {
 	        this.is_open = source["is_open"];
 	        this.storage_count = source["storage_count"];
 	    }
+	}
+	export class ReadinessCheckDTO {
+	    key: string;
+	    label: string;
+	    passed: boolean;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReadinessCheckDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.passed = source["passed"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class ProjectReadinessDTO {
+	    ready: boolean;
+	    checks: ReadinessCheckDTO[];
+	    storage_count: number;
+	    file_count: number;
+	    plan_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProjectReadinessDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ready = source["ready"];
+	        this.checks = this.convertValues(source["checks"], ReadinessCheckDTO);
+	        this.storage_count = source["storage_count"];
+	        this.file_count = source["file_count"];
+	        this.plan_count = source["plan_count"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class PurgePlanDTO {
 	    id: string;

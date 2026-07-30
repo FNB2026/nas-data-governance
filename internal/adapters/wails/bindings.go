@@ -1446,3 +1446,184 @@ func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error
 		Failed:   summary.Failed,
 	}, nil
 }
+
+// ---- V9 Capability & Readiness bindings ----
+
+// GetAppCapabilities returns the real capability set derived from the
+// backend's actual store/service state. This replaces the frontend's
+// pure-inference deriveCapabilities() so that protection rules,
+// recovery locks, and service availability are reflected accurately.
+//
+// Returns a minimal "closed" capability set when no project is open.
+func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return AppCapabilitiesDTO{
+			ProjectOpen:    false,
+			ProjectMode:    "closed",
+			CanViewResults: false,
+			DisabledReasons: map[string]string{
+				"scan-jobs":         "请先打开项目",
+				"duplicate-results": "请先打开项目",
+				"governance-review": "请先打开项目",
+				"execution-center":  "请先打开项目",
+				"audit-recovery":    "请先打开项目",
+			},
+		}, nil
+	}
+
+	isRW := a.scanRunner != nil
+
+	// Check recovery lock from real backend state.
+	recoveryLock := false
+	lockStatus, err := checkRecoveryLock(context.Background(), a.store)
+	if err == nil {
+		recoveryLock = lockStatus.LockActive
+	}
+
+	mode := "read_only"
+	if isRW {
+		mode = "read_write"
+	}
+
+	disabled := map[string]string{}
+	if !isRW {
+		disabled["execution-center"] = "只读模式，无法执行写操作"
+	}
+	if recoveryLock {
+		disabled["scan-jobs"] = "恢复锁激活中，请先处理未完成执行"
+		disabled["execution-center"] = "恢复锁激活中，请先处理未完成执行"
+	}
+
+	return AppCapabilitiesDTO{
+		ProjectOpen:          true,
+		ProjectMode:          mode,
+		CanScan:              isRW && !recoveryLock,
+		CanViewResults:       true,
+		CanEditReviews:       isRW && !recoveryLock,
+		CanApprovePlans:      isRW && !recoveryLock,
+		CanExecuteQuarantine: isRW && !recoveryLock,
+		CanExecutePurge:      isRW && !recoveryLock,
+		RecoveryLockActive:   recoveryLock,
+		DisabledReasons:      disabled,
+	}, nil
+}
+
+// GetProjectReadiness checks whether the project is ready for scanning
+// and governance. It inspects storage entries, file counts, and plan
+// state to produce a per-dimension checklist that the data source page
+// displays.
+//
+// Returns an empty (not-ready) result when no project is open.
+func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.store == nil {
+		return ProjectReadinessDTO{
+			Ready: false,
+			Checks: []ReadinessCheckDTO{
+				{Key: "project_open", Label: "项目已打开", Passed: false, Reason: "请先打开项目"},
+			},
+		}, nil
+	}
+
+	ctx := context.Background()
+	var checks []ReadinessCheckDTO
+
+	// 1. Storage exists
+	storages, err := a.store.ListStorages(ctx)
+	if err != nil {
+		return ProjectReadinessDTO{}, fmt.Errorf("wails: check storage readiness: %w", err)
+	}
+	storageOK := len(storages) > 0
+	checks = append(checks, ReadinessCheckDTO{
+		Key:    "has_storage",
+		Label:  "已注册存储",
+		Passed: storageOK,
+		Reason: func() string {
+			if !storageOK {
+				return "请先扫描一个目录以注册存储"
+			}
+			return ""
+		}(),
+	})
+
+	// 2. Files discovered
+	files, err := a.store.ListFiles(ctx, "")
+	if err != nil {
+		return ProjectReadinessDTO{}, fmt.Errorf("wails: check file readiness: %w", err)
+	}
+	fileOK := len(files) > 0
+	checks = append(checks, ReadinessCheckDTO{
+		Key:    "has_files",
+		Label:  "已发现文件",
+		Passed: fileOK,
+		Reason: func() string {
+			if !fileOK {
+				return "请先完成一次扫描"
+			}
+			return ""
+		}(),
+	})
+
+	// 3. Read-write mode (required for new scans)
+	isRW := a.scanRunner != nil
+	checks = append(checks, ReadinessCheckDTO{
+		Key:    "read_write",
+		Label:  "读写模式",
+		Passed: isRW,
+		Reason: func() string {
+			if !isRW {
+				return "读写模式才能启动新扫描"
+			}
+			return ""
+		}(),
+	})
+
+	// 4. Recovery lock inactive
+	recoveryLock := false
+	lockStatus, lockErr := checkRecoveryLock(ctx, a.store)
+	if lockErr == nil {
+		recoveryLock = lockStatus.LockActive
+	}
+	checks = append(checks, ReadinessCheckDTO{
+		Key:    "no_recovery_lock",
+		Label:  "恢复锁未激活",
+		Passed: !recoveryLock,
+		Reason: func() string {
+			if recoveryLock {
+				return "请先在执行中心处理未完成的执行计划"
+			}
+			return ""
+		}(),
+	})
+
+	// 5. Plans available (optional — for governance, not scanning)
+	plans, _ := a.store.ListAllPlans(ctx)
+	planOK := len(plans) > 0
+	checks = append(checks, ReadinessCheckDTO{
+		Key:    "has_plans",
+		Label:  "已有治理计划",
+		Passed: planOK,
+		Reason: func() string {
+			if !planOK {
+				return "可选 — 治理复核需要先生成草案"
+			}
+			return ""
+		}(),
+	})
+
+	// Ready = first 4 checks pass (plans are optional)
+	ready := storageOK && fileOK && isRW && !recoveryLock
+
+	return ProjectReadinessDTO{
+		Ready:        ready,
+		Checks:       checks,
+		StorageCount: len(storages),
+		FileCount:    len(files),
+		PlanCount:    len(plans),
+	}, nil
+}

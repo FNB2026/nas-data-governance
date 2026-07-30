@@ -35,6 +35,8 @@ export function ExecutePurge(arg1:wails.ExecutePurgeRequest):Promise<wails.Execu
 
 export function ExecuteRestore(arg1:wails.ExecuteRestoreRequest):Promise<wails.ExecuteRestoreResponse>;
 
+export function GetAppCapabilities():Promise<wails.AppCapabilitiesDTO>;
+
 export function GetGroupDecision(arg1:string):Promise<wails.GroupDecisionDTO>;
 
 export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetailResponse>;
@@ -42,6 +44,8 @@ export function GetGroupDetail(arg1:string,arg2:string):Promise<wails.GroupDetai
 export function GetJobDetail(arg1:string):Promise<wails.JobDetailResponse>;
 
 export function GetProjectInfo():Promise<wails.ProjectInfo>;
+
+export function GetProjectReadiness():Promise<wails.ProjectReadinessDTO>;
 
 export function GetScanProgress(arg1:string):Promise<wails.ScanJobProgress>;
 

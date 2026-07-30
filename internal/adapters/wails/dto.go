@@ -774,3 +774,41 @@ func mapExecutionResult(r app.ExecutionResult) ExecutePlanResultDTO {
 		ErrorType:  r.ErrorType,
 	}
 }
+
+// ---- V9 Capability & Readiness DTOs ----
+
+// AppCapabilitiesDTO reports what the user can do given the current
+// project state. The backend derives this from real store/service
+// availability, not just the open/close flag.
+type AppCapabilitiesDTO struct {
+	ProjectOpen          bool              `json:"project_open"`
+	ProjectMode          string            `json:"project_mode"` // closed, read_only, read_write
+	CanScan              bool              `json:"can_scan"`
+	CanViewResults       bool              `json:"can_view_results"`
+	CanEditReviews       bool              `json:"can_edit_reviews"`
+	CanApprovePlans      bool              `json:"can_approve_plans"`
+	CanExecuteQuarantine bool              `json:"can_execute_quarantine"`
+	CanExecutePurge      bool              `json:"can_execute_purge"`
+	RecoveryLockActive   bool              `json:"recovery_lock_active"`
+	DisabledReasons      map[string]string `json:"disabled_reasons"`
+}
+
+// ReadinessCheckDTO is a single readiness dimension with pass/fail and
+// a human-readable reason. The data source page displays these as a
+// checklist so the user knows exactly what to fix before scanning.
+type ReadinessCheckDTO struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// ProjectReadinessDTO aggregates all readiness checks. Ready is true
+// only when every check passes.
+type ProjectReadinessDTO struct {
+	Ready        bool                `json:"ready"`
+	Checks       []ReadinessCheckDTO `json:"checks"`
+	StorageCount int                 `json:"storage_count"`
+	FileCount    int                 `json:"file_count"`
+	PlanCount    int                 `json:"plan_count"`
+}
