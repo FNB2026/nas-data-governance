@@ -1,11 +1,7 @@
 import { useState } from "react";
 import { wails, formatdiag, governancediag, merge } from "../wailsjs/go/models";
-import {
-  DiagnoseFormats,
-  DiagnoseGovernance,
-  DiagnoseMerges,
-} from "../wailsjs/go/wails/API";
-import { formatBytes, formatDateTime, hasWailsRuntime, errorText } from "../lib/utils";
+import { api } from "../api/client";
+import { formatBytes, formatDateTime, hasWailsRuntime } from "../lib/utils";
 
 type DiagTab = "formats" | "governance" | "merges";
 
@@ -35,23 +31,23 @@ export default function DiagnosticPanel({ storages }: DiagnosticPanelProps) {
     setError(null);
     try {
       if (activeTab === "formats") {
-        const report = await DiagnoseFormats({
+        const report = await api.diagnostics.formats({
           storage_id: storageId,
         } as wails.DiagnoseFormatsRequest);
         setFormatReport(report);
       } else if (activeTab === "governance") {
-        const report = await DiagnoseGovernance({
+        const report = await api.diagnostics.governance({
           storage_id: storageId,
         } as wails.DiagnoseGovernanceRequest);
         setGovReport(report);
       } else {
-        const report = await DiagnoseMerges({
+        const report = await api.diagnostics.merges({
           storage_id: storageId,
         } as wails.DiagnoseMergesRequest);
         setMergeReport(report);
       }
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }

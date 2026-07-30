@@ -11,25 +11,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  CancelScan,
-  CheckRecoveryLock,
-  CloseProject,
-  GetProjectInfo,
-  GetScanProgress,
-  GetVersion,
-  ListRecentJobs,
-  ListStorages,
-  OpenProject,
-  OpenProjectReadWrite,
-  StartScan,
-} from "../wailsjs/go/wails/API";
+import { GetScanProgress } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
-import { TERMINAL_STATES, hasWailsRuntime, friendlyError } from "../lib/utils";
+import { TERMINAL_STATES, hasWailsRuntime } from "../lib/utils";
 import type { ToastItem, ToastType } from "../components/Toast";
 import { deriveCapabilities, type AppCapabilities } from "../app/capability";
 import { loadSettings, saveSettings, maskPath } from "./settings";
-import { isNetworkError, computeBackoffDelay, retryWithBackoff } from "../lib/retry";
+import { isNetworkError, computeBackoffDelay } from "../lib/retry";
+import { api } from "../api/client";
 
 // ---- Context value type ----
 
@@ -93,6 +82,12 @@ interface ProjectContextValue {
   togglePathPrivacy: () => void;
   displayPath: (path: string) => string;
 
+  // Scan defaults (global — reactive across pages)
+  defaultFullScan: boolean;
+  defaultWorkers: string;
+  setDefaultFullScan: (v: boolean) => void;
+  setDefaultWorkers: (v: string) => void;
+
   // Actions
   setProjectPath: (path: string) => void;
   openProject: (readWrite: boolean) => Promise<void>;
@@ -152,13 +147,25 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // Settings (global — reactive across all pages)
   const [pathPrivacyMode, setPathPrivacyMode] = useState<boolean>(() => loadSettings().pathPrivacyMode);
+  const [defaultFullScan, setDefaultFullScanState] = useState<boolean>(() => loadSettings().defaultFullScan);
+  const [defaultWorkers, setDefaultWorkersState] = useState<string>(() => loadSettings().defaultWorkers);
 
   const togglePathPrivacy = useCallback(() => {
     setPathPrivacyMode((prev) => {
       const next = !prev;
-      saveSettings({ pathPrivacyMode: next });
+      saveSettings({ ...loadSettings(), pathPrivacyMode: next });
       return next;
     });
+  }, []);
+
+  const setDefaultFullScan = useCallback((v: boolean) => {
+    setDefaultFullScanState(v);
+    saveSettings({ ...loadSettings(), defaultFullScan: v });
+  }, []);
+
+  const setDefaultWorkers = useCallback((v: string) => {
+    setDefaultWorkersState(v);
+    saveSettings({ ...loadSettings(), defaultWorkers: v });
   }, []);
 
   const displayPath = useCallback(
@@ -204,15 +211,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!hasWailsRuntime()) return;
     const loadRev = projectRevRef.current;
     try {
-      const list = await retryWithBackoff(() => ListStorages(), {
-        maxRetries: 3,
-      });
+      const list = await api.storages.list();
       if (projectRevRef.current !== loadRev) return;
       setStorages(list || []);
       setStoragesError(null);
     } catch (e: unknown) {
       if (projectRevRef.current !== loadRev) return;
-      setStoragesError(friendlyError(e));
+      setStoragesError((e as Error).message);
     }
   }, []);
 
@@ -221,14 +226,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const loadRev = projectRevRef.current;
     try {
       const limit = jobsLimitRef.current;
-      const list = await retryWithBackoff(() => ListRecentJobs(limit), { maxRetries: 3 });
+      const list = await api.scan.listJobs(limit);
       if (projectRevRef.current !== loadRev) return;
       setJobs(list || []);
       setHasMoreJobs((list || []).length >= limit);
       setJobsError(null);
     } catch (e: unknown) {
       if (projectRevRef.current !== loadRev) return;
-      setJobsError(friendlyError(e));
+      setJobsError((e as Error).message);
     }
   }, []);
 
@@ -237,7 +242,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const loadRev = projectRevRef.current;
     const nextLimit = jobsLimitRef.current + 20;
     try {
-      const list = await retryWithBackoff(() => ListRecentJobs(nextLimit), { maxRetries: 3 });
+      const list = await api.scan.listJobs(nextLimit);
       if (projectRevRef.current !== loadRev) return;
       jobsLimitRef.current = nextLimit;
       setJobs(list || []);
@@ -245,7 +250,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setJobsError(null);
     } catch (e: unknown) {
       if (projectRevRef.current !== loadRev) return;
-      setJobsError(friendlyError(e));
+      setJobsError((e as Error).message);
     }
   }, []);
 
@@ -256,9 +261,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setVersion({ version: "dev", commit: "n/a", build_time: "n/a" } as wails.VersionInfo);
       return;
     }
-    GetVersion()
+    api.project.version()
       .then(setVersion)
-      .catch((e: unknown) => setError(friendlyError(e)));
+      .catch((e: unknown) => setError((e as Error).message));
   }, []);
 
   // ---- Scan polling (global — survives page navigation) ----
@@ -382,7 +387,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const refreshRecoveryLock = useCallback(async () => {
     if (!hasWailsRuntime()) return null;
     try {
-      const status = await CheckRecoveryLock();
+      const status = await api.recovery.checkLock();
       setRecoveryLockActive(status.lock_active);
       return status;
     } catch {
@@ -398,8 +403,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setBusy(true);
     try {
       const info = readWrite
-        ? await OpenProjectReadWrite(projectPath.trim())
-        : await OpenProject(projectPath.trim());
+        ? await api.project.openReadWrite(projectPath.trim())
+        : await api.project.open(projectPath.trim());
       // Bump project revision to invalidate any in-flight poll from a
       // previous project session.
       projectRevRef.current++;
@@ -410,7 +415,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
       // Check recovery lock after opening
       try {
-        const status = await CheckRecoveryLock();
+        const status = await api.recovery.checkLock();
         setRecoveryLockActive(status.lock_active);
         if (status.lock_active) {
           pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
@@ -427,7 +432,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setConnectionStatus("connected");
       notifyDataChanged();
     } catch (e: unknown) {
-      setError(friendlyError(e));
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -436,7 +441,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const closeProject = useCallback(async () => {
     setBusy(true);
     try {
-      await CloseProject();
+      await api.project.close();
       // Bump project revision to invalidate in-flight polls.
       projectRevRef.current++;
       setProject(null);
@@ -462,7 +467,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       }
       setError(null);
     } catch (e: unknown) {
-      setError(friendlyError(e));
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -471,7 +476,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const refreshProject = useCallback(async () => {
     setBusy(true);
     try {
-      const info = await GetProjectInfo();
+      const info = await api.project.info();
       setProject(info);
       setError(null);
       await Promise.all([
@@ -481,7 +486,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setConnectionStatus("connected");
       notifyDataChanged();
     } catch (e: unknown) {
-      setError(friendlyError(e));
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -497,7 +502,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         root: params.root.trim(),
         storageId: params.storageId.trim(),
       };
-      const resp = await StartScan({
+      const resp = await api.scan.start({
         root: normalizedParams.root,
         storage_id: normalizedParams.storageId,
         full_scan: normalizedParams.fullScan,
@@ -508,7 +513,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setScanProgress(null);
       setConnectionStatus("connected");
     } catch (e: unknown) {
-      pushToast("error", "启动扫描失败", friendlyError(e));
+      pushToast("error", "启动扫描失败", (e as Error).message);
     }
   }, [pushToast]);
 
@@ -524,9 +529,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!activeJobId) return;
     setCancelling(true);
     try {
-      await CancelScan(activeJobId);
+      await api.scan.cancel(activeJobId);
     } catch (e: unknown) {
-      pushToast("error", "取消扫描失败", friendlyError(e));
+      pushToast("error", "取消扫描失败", (e as Error).message);
       setCancelling(false);
     }
     // Polling will detect CANCELLED state and reset cancelling.
@@ -570,6 +575,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     pathPrivacyMode,
     togglePathPrivacy,
     displayPath,
+    defaultFullScan,
+    defaultWorkers,
+    setDefaultFullScan,
+    setDefaultWorkers,
     setProjectPath,
     openProject,
     closeProject,

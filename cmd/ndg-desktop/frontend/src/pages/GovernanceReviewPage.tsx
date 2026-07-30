@@ -3,16 +3,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, friendlyError, formatBytes, shortHash } from "../lib/utils";
+import { hasWailsRuntime, formatBytes, shortHash } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
-import {
-  ApprovePlans,
-  BuildDraftPlans,
-  ListAllPlans,
-  ListGroupDecisions,
-  SaveDraftPlans,
-  SaveGroupDecision,
-} from "../wailsjs/go/wails/API";
+import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
 // ---- Constants ----
@@ -128,10 +121,10 @@ export default function GovernanceReviewPage() {
     setPlansLoading(true);
     setPlansError(null);
     try {
-      const list = await ListAllPlans();
+      const list = await api.governance.listAll();
       setPlans(list || []);
     } catch (e: unknown) {
-      setPlansError(friendlyError(e));
+      setPlansError((e as Error).message);
       setPlans([]);
     } finally {
       setPlansLoading(false);
@@ -141,7 +134,7 @@ export default function GovernanceReviewPage() {
   const loadDecisions = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const list = await ListGroupDecisions("");
+      const list = await api.governance.listDecisions("");
       const map = new Map<string, wails.GroupDecisionDTO>();
       for (const d of list || []) {
         map.set(d.group_id, d);
@@ -168,11 +161,11 @@ export default function GovernanceReviewPage() {
   const handleBuildDrafts = async () => {
     setBuildingDrafts(true);
     try {
-      const drafts = await BuildDraftPlans("");
+      const drafts = await api.governance.buildDrafts("");
       setDraftPlans(drafts || []);
       pushToast("success", "草案生成完成", `共 ${drafts?.length || 0} 条规划`);
     } catch (e: unknown) {
-      pushToast("error", "生成草案失败", friendlyError(e));
+      pushToast("error", "生成草案失败", (e as Error).message);
     } finally {
       setBuildingDrafts(false);
     }
@@ -181,12 +174,12 @@ export default function GovernanceReviewPage() {
   const handleSaveDrafts = async () => {
     setSavingDrafts(true);
     try {
-      const saved = await SaveDraftPlans("");
+      const saved = await api.governance.saveDrafts("");
       setDraftPlans(null);
       setPlans(saved || []);
       pushToast("success", "草案已落库", `共保存 ${saved?.length || 0} 条计划`);
     } catch (e: unknown) {
-      pushToast("error", "保存草案失败", friendlyError(e));
+      pushToast("error", "保存草案失败", (e as Error).message);
     } finally {
       setSavingDrafts(false);
     }
@@ -196,7 +189,7 @@ export default function GovernanceReviewPage() {
     if (!selectedPlan) return;
     setSavingDecision(true);
     try {
-      const result = await SaveGroupDecision({
+      const result = await api.governance.saveDecision({
         group_id: selectedPlan.group_id,
         decision_type: decisionType,
         reason: decisionReason.trim(),
@@ -208,7 +201,7 @@ export default function GovernanceReviewPage() {
       });
       pushToast("success", "决策已保存", `${selectedPlan.group_id}: ${decisionLabel(decisionType)}`);
     } catch (e: unknown) {
-      pushToast("error", "保存决策失败", friendlyError(e));
+      pushToast("error", "保存决策失败", (e as Error).message);
     } finally {
       setSavingDecision(false);
     }
@@ -217,7 +210,7 @@ export default function GovernanceReviewPage() {
   const handleApprove = async (planId: string) => {
     setApproving(true);
     try {
-      await ApprovePlans({ plan_ids: [planId] } as wails.ApprovePlansRequest);
+      await api.governance.approve({ plan_ids: [planId] } as wails.ApprovePlansRequest);
       // Update local state
       setPlans((prev) =>
         prev.map((p) =>
@@ -228,7 +221,7 @@ export default function GovernanceReviewPage() {
       );
       pushToast("success", "计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", friendlyError(e));
+      pushToast("error", "批准失败", (e as Error).message);
     } finally {
       setApproving(false);
     }

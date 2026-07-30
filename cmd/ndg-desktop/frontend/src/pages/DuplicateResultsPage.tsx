@@ -7,8 +7,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import DuplicateGroups from "../components/DuplicateGroups";
 import GroupDetail from "../components/GroupDetail";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, friendlyError, formatBytes } from "../lib/utils";
-import { ListDuplicateGroups, GetGroupDetail } from "../wailsjs/go/wails/API";
+import { hasWailsRuntime, formatBytes } from "../lib/utils";
+import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 import {
   computeCapacity,
@@ -48,7 +48,7 @@ export default function DuplicateResultsPage() {
     if (isPagination) paginationRequestInFlightRef.current = true;
     setGroupsLoading(true);
     try {
-      const resp = await ListDuplicateGroups({
+      const resp = await api.duplicates.listGroups({
         storage_id: storageId,
         page_size: 20,
         cursor,
@@ -65,7 +65,7 @@ export default function DuplicateResultsPage() {
       setGroupsError(null);
     } catch (e: unknown) {
       if (requestId !== groupsRequestIdRef.current) return;
-      setGroupsError(friendlyError(e));
+      setGroupsError((e as Error).message);
     } finally {
       if (isPagination) paginationRequestInFlightRef.current = false;
       if (requestId === groupsRequestIdRef.current) {
@@ -117,10 +117,10 @@ export default function DuplicateResultsPage() {
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const detail = await GetGroupDetail(storageId, sha256);
+      const detail = await api.duplicates.getDetail(storageId, sha256);
       setSelectedGroup(detail);
     } catch (e: unknown) {
-      setDetailError(friendlyError(e));
+      setDetailError((e as Error).message);
       setSelectedGroup(null);
     } finally {
       setDetailLoading(false);

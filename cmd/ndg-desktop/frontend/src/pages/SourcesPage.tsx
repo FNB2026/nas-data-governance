@@ -8,8 +8,8 @@ import OnboardingGuide from "../components/OnboardingGuide";
 import DiagnosticPanel from "../components/DiagnosticPanel";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime } from "../lib/utils";
-import { GetProjectReadiness } from "../wailsjs/go/wails/API";
 import { wails } from "../wailsjs/go/models";
+import { api } from "../api/client";
 
 export default function SourcesPage() {
   const {
@@ -33,7 +33,7 @@ export default function SourcesPage() {
   const loadReadiness = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const result = await GetProjectReadiness();
+      const result = await api.capabilities.readiness();
       setReadiness(result);
     } catch {
       // Non-fatal: readiness is informational

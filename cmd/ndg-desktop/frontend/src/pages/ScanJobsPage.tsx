@@ -5,9 +5,9 @@ import { useState } from "react";
 import ScanPanel from "../components/ScanPanel";
 import JobDetail from "../components/JobDetail";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, friendlyError } from "../lib/utils";
-import { GetJobDetail } from "../wailsjs/go/wails/API";
+import { hasWailsRuntime } from "../lib/utils";
 import { wails } from "../wailsjs/go/models";
+import { api } from "../api/client";
 
 export default function ScanJobsPage() {
   const {
@@ -27,13 +27,15 @@ export default function ScanJobsPage() {
     retryLastScan,
     cancelScan,
     capabilities,
+    defaultFullScan,
+    defaultWorkers,
   } = useProject();
 
-  // Form state (page-local)
+  // Form state (page-local) — initialized from global scan defaults
   const [scanRoot, setScanRoot] = useState("");
   const [scanStorageId, setScanStorageId] = useState("");
-  const [scanFullScan, setScanFullScan] = useState(false);
-  const [scanWorkers, setScanWorkers] = useState("");
+  const [scanFullScan, setScanFullScan] = useState(defaultFullScan);
+  const [scanWorkers, setScanWorkers] = useState(defaultWorkers);
   const [scanStarting, setScanStarting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
@@ -61,7 +63,7 @@ export default function ScanJobsPage() {
       };
       await startScan(params);
     } catch (e: unknown) {
-      setScanError(friendlyError(e));
+      setScanError((e as Error).message);
     } finally {
       setScanStarting(false);
     }
@@ -73,7 +75,7 @@ export default function ScanJobsPage() {
     try {
       await retryLastScan();
     } catch (e: unknown) {
-      setScanError(friendlyError(e));
+      setScanError((e as Error).message);
     } finally {
       setScanStarting(false);
     }
@@ -84,10 +86,10 @@ export default function ScanJobsPage() {
     setJobDetailLoading(true);
     setJobDetailError(null);
     try {
-      const detail = await GetJobDetail(jobId);
+      const detail = await api.scan.getJobDetail(jobId);
       setSelectedJob(detail);
     } catch (e: unknown) {
-      setJobDetailError(friendlyError(e));
+      setJobDetailError((e as Error).message);
       setSelectedJob(null);
     } finally {
       setJobDetailLoading(false);

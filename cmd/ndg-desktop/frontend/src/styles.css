@@ -1,14 +1,4 @@
-:root {
-  --bg: #f5f5f7;
-  --card-bg: #ffffff;
-  --text: #1d1d1f;
-  --text-muted: #86868b;
-  --border: #d2d2d7;
-  --accent: #0071e3;
-  --error: #ff3b30;
-  --radius: 12px;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
+/* Design tokens are defined in styles/tokens.css */
 
 * {
   margin: 0;
@@ -17,8 +7,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif, "Noto Sans CJK SC", "WenQuanYi Micro Hei";
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -82,26 +71,26 @@ body {
 }
 
 .mode-badge--read_write {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .mode-badge--read_only {
-  background: rgba(0, 113, 227, 0.12);
+  background: var(--accent-bg);
   color: var(--accent);
 }
 
 .mode-badge--closed {
-  background: #e8e8ed;
+  background: var(--surface-secondary);
   color: var(--text-muted);
 }
 
 .header-scan-indicator {
-  font-size: 0.78rem;
+  font-size: var(--font-size-sm);
   color: var(--accent);
-  background: rgba(0, 113, 227, 0.08);
+  background: var(--accent-bg);
   padding: 0.15rem 0.55rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
   position: relative;
 }
@@ -148,14 +137,14 @@ body {
 }
 
 .header-conn-indicator--reconnecting {
-  color: #bf5600;
-  background: rgba(255, 149, 0, 0.12);
+  color: var(--warning);
+  background: var(--warning-bg);
   animation: conn-pulse 1.6s ease-in-out infinite;
 }
 
 .header-conn-indicator--disconnected {
   color: var(--error);
-  background: rgba(255, 59, 48, 0.12);
+  background: var(--error-bg);
 }
 
 @keyframes conn-pulse {
@@ -188,6 +177,22 @@ body {
 .settings-preview-path {
   font-size: 0.82rem;
   color: var(--text);
+}
+
+.settings-scan-workers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.settings-workers-input {
+  width: 80px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  margin-left: 0.5rem;
 }
 
 /* ---- Sidebar + content layout ---- */
@@ -230,12 +235,12 @@ body {
 }
 
 .nav-item--active {
-  background: rgba(0, 113, 227, 0.1);
+  background: var(--accent-bg-hover);
   color: var(--accent);
 }
 
 .nav-item--active:hover {
-  background: rgba(0, 113, 227, 0.12);
+  background: var(--accent-bg-active);
 }
 
 .nav-item--disabled {
@@ -334,7 +339,7 @@ button:disabled {
 }
 
 button.secondary {
-  background: #e8e8ed;
+  background: var(--surface-secondary);
   color: var(--text);
 }
 
@@ -595,8 +600,8 @@ button.secondary {
 }
 
 .mono {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
-  font-size: 0.82rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
 }
 
 .path-cell {

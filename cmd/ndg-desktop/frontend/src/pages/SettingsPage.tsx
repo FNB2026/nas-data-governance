@@ -1,10 +1,19 @@
-// Settings page: version info, AI/telemetry status, privacy settings, developer info.
+// Settings page: version info, scan defaults, privacy, developer info.
 
 import { useProject } from "../state/ProjectContext";
 import { maskPath } from "../state/settings";
 
 export default function SettingsPage() {
-  const { version, capabilities, pathPrivacyMode, togglePathPrivacy } = useProject();
+  const {
+    version,
+    capabilities,
+    pathPrivacyMode,
+    togglePathPrivacy,
+    defaultFullScan,
+    defaultWorkers,
+    setDefaultFullScan,
+    setDefaultWorkers,
+  } = useProject();
 
   return (
     <div className="page page--settings">
@@ -87,6 +96,42 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
+        <h3>扫描参数默认值</h3>
+        <div className="settings-toggle-row">
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              checked={defaultFullScan}
+              onChange={(e) => setDefaultFullScan(e.target.checked)}
+            />
+            默认完整扫描（完整哈希校验）
+          </label>
+          <p className="muted settings-toggle-hint">
+            开启后，新建扫描将默认使用完整哈希（SHA-256）而非快速哈希。
+            完整哈希更精确但速度较慢，适用于最终归档前的全量校验。
+          </p>
+          <div className="settings-scan-workers">
+            <label className="mode-toggle">
+              默认并发工作线程数
+              <input
+                type="number"
+                min={1}
+                max={64}
+                value={defaultWorkers}
+                onChange={(e) => setDefaultWorkers(e.target.value)}
+                placeholder="自动"
+                className="settings-workers-input"
+              />
+            </label>
+            <p className="muted settings-toggle-hint">
+              留空则由后端自动检测最优并发数（通常等于 CPU 核心数）。
+              手动指定可控制资源占用，范围 1–64。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
         <h3>能力状态</h3>
         <table className="data-table">
           <tbody>
@@ -112,9 +157,6 @@ export default function SettingsPage() {
             </tr>
           </tbody>
         </table>
-        <p className="muted diag-read-only-hint">
-          扫描参数默认值等其他配置将在后续阶段接入。
-        </p>
       </div>
     </div>
   );

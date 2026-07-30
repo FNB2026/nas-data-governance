@@ -3,25 +3,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, friendlyError, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
-import {
-  ApprovePurgePlan,
-  ApproveRestorePlan,
-  CheckRecoveryLock,
-  CreatePurgePlans,
-  CreateRestorePlan,
-  ExecutePlans,
-  ExecutePurge,
-  ExecuteRestore,
-  ListAllPlans,
-  ListPurgePlans,
-  ListQuarantineItems,
-  ListRestorePlans,
-  RecoverPurges,
-  RecoverRestores,
-  RecoverSourcePlans,
-} from "../wailsjs/go/wails/API";
+import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
 // ---- Constants ----
@@ -121,10 +105,10 @@ export default function ExecutionCenterPage() {
     setQuarantineLoading(true);
     setQuarantineError(null);
     try {
-      const list = await ListQuarantineItems(statusFilter);
+      const list = await api.execution.listQuarantine(statusFilter);
       setQuarantineItems(list || []);
     } catch (e: unknown) {
-      setQuarantineError(friendlyError(e));
+      setQuarantineError((e as Error).message);
       setQuarantineItems([]);
     } finally {
       setQuarantineLoading(false);
@@ -135,7 +119,7 @@ export default function ExecutionCenterPage() {
     if (!hasWailsRuntime()) return;
     setRecoveryLoading(true);
     try {
-      const status = await CheckRecoveryLock();
+      const status = await api.recovery.checkLock();
       setRecoveryStatus(status);
     } catch {
       // Non-fatal
@@ -147,11 +131,11 @@ export default function ExecutionCenterPage() {
   const loadLifecyclePlans = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const [restores, purges] = await Promise.all([ListRestorePlans(), ListPurgePlans()]);
+      const [restores, purges] = await Promise.all([api.execution.listRestores(), api.execution.listPurges()]);
       setRestorePlans(restores || []);
       setPurgePlans(purges || []);
     } catch (e: unknown) {
-      setPurgeError(friendlyError(e));
+      setPurgeError((e as Error).message);
     }
   }, []);
 
@@ -160,10 +144,10 @@ export default function ExecutionCenterPage() {
     setPlansLoading(true);
     setPlansError(null);
     try {
-      const list = await ListAllPlans();
+      const list = await api.governance.listAll();
       setAllPlans(list || []);
     } catch (e: unknown) {
-      setPlansError(friendlyError(e));
+      setPlansError((e as Error).message);
       setAllPlans([]);
     } finally {
       setPlansLoading(false);
@@ -220,7 +204,7 @@ export default function ExecutionCenterPage() {
 
     setExecutingPlans(true);
     try {
-      const resp = await ExecutePlans({
+      const resp = await api.execution.executePlans({
         plan_ids: Array.from(selectedPlanIds),
         quarantine_root: execRootInput.trim(),
         source_roots: roots,
@@ -249,7 +233,7 @@ export default function ExecutionCenterPage() {
         await Promise.all([loadAllPlans(), loadQuarantine()]);
       }
     } catch (e: unknown) {
-      pushToast("error", "执行计划失败", friendlyError(e));
+      pushToast("error", "执行计划失败", (e as Error).message);
     } finally {
       setExecutingPlans(false);
     }
@@ -260,14 +244,14 @@ export default function ExecutionCenterPage() {
   const handleCreateRestorePlan = async (itemId: string) => {
     setRestoring(true);
     try {
-      const plan = await CreateRestorePlan(itemId);
+      const plan = await api.execution.createRestorePlan(itemId);
       setRestorePlans((prev) => {
         const next = prev.filter((p) => p.item_id !== itemId);
         return [...next, plan];
       });
       pushToast("success", "恢复草案已创建", `计划 ${plan.id}`);
     } catch (e: unknown) {
-      pushToast("error", "创建恢复计划失败", friendlyError(e));
+      pushToast("error", "创建恢复计划失败", (e as Error).message);
     } finally {
       setRestoring(false);
     }
@@ -275,20 +259,20 @@ export default function ExecutionCenterPage() {
 
   const handleApproveRestore = async (planId: string, digest: string) => {
     try {
-      await ApproveRestorePlan(planId, digest);
+      await api.execution.approveRestore(planId, digest);
       setRestorePlans((prev) =>
         prev.map((p) => (p.id === planId ? wails.RestorePlanDTO.createFrom({ ...p, state: "APPROVED" }) : p)),
       );
       pushToast("success", "恢复计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", friendlyError(e));
+      pushToast("error", "批准失败", (e as Error).message);
     }
   };
 
   const handleExecuteRestore = async (planId: string, digest: string, dryRun: boolean) => {
     setRestoring(true);
     try {
-      const result = await ExecuteRestore({
+      const result = await api.execution.executeRestore({
         plan_id: planId,
         digest,
         quarantine_root: restoreRoot.trim(),
@@ -302,7 +286,7 @@ export default function ExecutionCenterPage() {
       }
       await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
     } catch (e: unknown) {
-      pushToast("error", "执行恢复失败", friendlyError(e));
+      pushToast("error", "执行恢复失败", (e as Error).message);
     } finally {
       setRestoring(false);
     }
@@ -314,12 +298,12 @@ export default function ExecutionCenterPage() {
     setPurging(true);
     setPurgeError(null);
     try {
-      const plans = await CreatePurgePlans();
+      const plans = await api.execution.createPurgePlans();
       setPurgePlans(plans || []);
       pushToast("success", "清理草案已生成", `共 ${plans?.length || 0} 条`);
     } catch (e: unknown) {
-      setPurgeError(friendlyError(e));
-      pushToast("error", "生成清理计划失败", friendlyError(e));
+      setPurgeError((e as Error).message);
+      pushToast("error", "生成清理计划失败", (e as Error).message);
     } finally {
       setPurging(false);
     }
@@ -327,20 +311,20 @@ export default function ExecutionCenterPage() {
 
   const handleApprovePurge = async (planId: string, digest: string) => {
     try {
-      await ApprovePurgePlan(planId, digest);
+      await api.execution.approvePurge(planId, digest);
       setPurgePlans((prev) =>
         prev.map((p) => (p.id === planId ? wails.PurgePlanDTO.createFrom({ ...p, state: "APPROVED" }) : p)),
       );
       pushToast("success", "清理计划已批准", planId);
     } catch (e: unknown) {
-      pushToast("error", "批准失败", friendlyError(e));
+      pushToast("error", "批准失败", (e as Error).message);
     }
   };
 
   const handleExecutePurge = async (planId: string, digest: string, dryRun: boolean, confirmation = "") => {
     setPurging(true);
     try {
-      const result = await ExecutePurge({
+      const result = await api.execution.executePurge({
         plan_id: planId,
         digest,
         quarantine_root: purgeRoot.trim(),
@@ -354,7 +338,7 @@ export default function ExecutionCenterPage() {
       }
       await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
     } catch (e: unknown) {
-      pushToast("error", "执行清理失败", friendlyError(e));
+      pushToast("error", "执行清理失败", (e as Error).message);
     } finally {
       setPurging(false);
     }
@@ -365,7 +349,7 @@ export default function ExecutionCenterPage() {
   const handleRecoverSource = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverSourcePlans();
+      const results = await api.recovery.recoverSource();
       if (results.length === 0) {
         pushToast("success", "无需恢复", "没有检测到卡住的执行计划");
         setRecoveryResults("无需恢复 — 没有卡住的执行计划");
@@ -377,7 +361,7 @@ export default function ExecutionCenterPage() {
       void loadRecoveryStatus();
       void loadQuarantine();
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", friendlyError(e));
+      pushToast("error", "恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }
@@ -386,7 +370,7 @@ export default function ExecutionCenterPage() {
   const handleRecoverRestores = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverRestores({
+      const results = await api.recovery.recoverRestores({
         quarantine_root: restoreRoot.trim(),
         source_roots: restoreSourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
       } as wails.RecoverRestoresRequest);
@@ -397,7 +381,7 @@ export default function ExecutionCenterPage() {
       }
       pushToast("success", "恢复操作完成", `处理了 ${results.length} 条`);
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", friendlyError(e));
+      pushToast("error", "恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }
@@ -406,7 +390,7 @@ export default function ExecutionCenterPage() {
   const handleRecoverPurges = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverPurges(purgeRoot.trim());
+      const results = await api.recovery.recoverPurges(purgeRoot.trim());
       if (results.length === 0) {
         setRecoveryResults("无需恢复 — 没有卡住的清理操作");
       } else {
@@ -414,7 +398,7 @@ export default function ExecutionCenterPage() {
       }
       pushToast("success", "清理恢复完成", `处理了 ${results.length} 条`);
     } catch (e: unknown) {
-      pushToast("error", "恢复失败", friendlyError(e));
+      pushToast("error", "恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }

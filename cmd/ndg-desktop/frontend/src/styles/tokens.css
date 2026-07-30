@@ -1,0 +1,73 @@
+/*
+ * Design tokens: single source of truth for colors, spacing, typography,
+ * and motion. All component styles should reference these variables
+ * instead of hardcoding values.
+ */
+
+:root {
+  /* ---- Color: surfaces ---- */
+  --bg: #f5f5f7;
+  --card-bg: #ffffff;
+  --surface-secondary: #e8e8ed;
+
+  /* ---- Color: text ---- */
+  --text: #1d1d1f;
+  --text-muted: #86868b;
+
+  /* ---- Color: borders ---- */
+  --border: #d2d2d7;
+
+  /* ---- Color: brand / accent ---- */
+  --accent: #0071e3;
+  --accent-bg: rgba(0, 113, 227, 0.08);
+  --accent-bg-hover: rgba(0, 113, 227, 0.1);
+  --accent-bg-active: rgba(0, 113, 227, 0.12);
+
+  /* ---- Color: status ---- */
+  --error: #ff3b30;
+  --error-bg: rgba(255, 59, 48, 0.12);
+  --success: #248a3d;
+  --success-bg: rgba(52, 199, 89, 0.15);
+  --warning: #bf5600;
+  --warning-bg: rgba(255, 149, 0, 0.12);
+
+  /* ---- Radius ---- */
+  --radius: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+
+  /* ---- Shadow ---- */
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* ---- Spacing scale ---- */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 0.75rem;
+  --space-lg: 1rem;
+  --space-xl: 1.5rem;
+  --space-2xl: 2rem;
+
+  /* ---- Typography: families ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif, "Noto Sans CJK SC", "WenQuanYi Micro Hei";
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* ---- Typography: sizes ---- */
+  --font-size-xs: 0.72rem;
+  --font-size-sm: 0.78rem;
+  --font-size-base: 0.85rem;
+  --font-size-md: 0.9rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.15rem;
+  --font-size-2xl: 1.3rem;
+
+  /* ---- Transitions ---- */
+  --transition-fast: 0.12s ease;
+  --transition-normal: 0.2s ease;
+
+  /* ---- Z-index ---- */
+  --z-toast: 1000;
+  --z-modal: 1100;
+  --z-dropdown: 900;
+}

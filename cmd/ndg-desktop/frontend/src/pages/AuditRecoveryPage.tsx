@@ -3,16 +3,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, friendlyError, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
-import {
-  CheckRecoveryLock,
-  ListJournalEntries,
-  ListOperationLogs,
-  RecoverPurges,
-  RecoverRestores,
-  RecoverSourcePlans,
-} from "../wailsjs/go/wails/API";
+import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
 // ---- Constants ----
@@ -69,10 +62,10 @@ export default function AuditRecoveryPage() {
     setLogsLoading(true);
     setLogsError(null);
     try {
-      const list = await ListOperationLogs(planFilter);
+      const list = await api.audit.listLogs(planFilter);
       setLogs(list || []);
     } catch (e: unknown) {
-      setLogsError(friendlyError(e));
+      setLogsError((e as Error).message);
       setLogs([]);
     } finally {
       setLogsLoading(false);
@@ -84,10 +77,10 @@ export default function AuditRecoveryPage() {
     setJournalLoading(true);
     setJournalError(null);
     try {
-      const list = await ListJournalEntries(planFilter);
+      const list = await api.audit.listJournal(planFilter);
       setJournal(list || []);
     } catch (e: unknown) {
-      setJournalError(friendlyError(e));
+      setJournalError((e as Error).message);
       setJournal([]);
     } finally {
       setJournalLoading(false);
@@ -97,7 +90,7 @@ export default function AuditRecoveryPage() {
   const loadRecoveryStatus = useCallback(async () => {
     if (!hasWailsRuntime()) return;
     try {
-      const status = await CheckRecoveryLock();
+      const status = await api.recovery.checkLock();
       setRecoveryStatus(status);
     } catch {
       // Non-fatal
@@ -118,13 +111,13 @@ export default function AuditRecoveryPage() {
   const recoverSourcePlans = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverSourcePlans();
+      const results = await api.recovery.recoverSource();
       await finishRecovery(results.length === 0
         ? "普通执行：无需恢复"
         : results.map((r) => `${r.plan_id}: ${r.action}`).join("\n"));
       pushToast("success", "普通执行恢复完成", `处理 ${results.length} 个计划`);
     } catch (e: unknown) {
-      pushToast("error", "普通执行恢复失败", friendlyError(e));
+      pushToast("error", "普通执行恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }
@@ -133,7 +126,7 @@ export default function AuditRecoveryPage() {
   const recoverRestores = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverRestores({
+      const results = await api.recovery.recoverRestores({
         quarantine_root: quarantineRoot.trim(),
         source_roots: sourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
       } as wails.RecoverRestoresRequest);
@@ -142,7 +135,7 @@ export default function AuditRecoveryPage() {
         : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
       pushToast("success", "隔离还原恢复完成", `处理 ${results.length} 条记录`);
     } catch (e: unknown) {
-      pushToast("error", "隔离还原恢复失败", friendlyError(e));
+      pushToast("error", "隔离还原恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }
@@ -151,13 +144,13 @@ export default function AuditRecoveryPage() {
   const recoverPurges = async () => {
     setRecoveryLoading(true);
     try {
-      const results = await RecoverPurges(quarantineRoot.trim());
+      const results = await api.recovery.recoverPurges(quarantineRoot.trim());
       await finishRecovery(results.length === 0
         ? "永久清理：无需恢复"
         : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
       pushToast("success", "永久清理恢复完成", `处理 ${results.length} 条记录`);
     } catch (e: unknown) {
-      pushToast("error", "永久清理恢复失败", friendlyError(e));
+      pushToast("error", "永久清理恢复失败", (e as Error).message);
     } finally {
       setRecoveryLoading(false);
     }

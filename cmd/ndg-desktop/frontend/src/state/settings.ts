@@ -6,10 +6,16 @@ const STORAGE_KEY = "ndg-settings";
 export interface AppSettings {
   /** When true, file paths are masked in the UI for privacy (e.g. screenshots). */
   pathPrivacyMode: boolean;
+  /** Default full-scan mode for new scans (quick hash vs full hash). */
+  defaultFullScan: boolean;
+  /** Default worker count for new scans (empty = auto-detect). */
+  defaultWorkers: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   pathPrivacyMode: false,
+  defaultFullScan: false,
+  defaultWorkers: "",
 };
 
 export function loadSettings(): AppSettings {
@@ -21,6 +27,12 @@ export function loadSettings(): AppSettings {
     return {
       pathPrivacyMode:
         "pathPrivacyMode" in parsed && parsed.pathPrivacyMode === true,
+      defaultFullScan:
+        "defaultFullScan" in parsed && parsed.defaultFullScan === true,
+      defaultWorkers:
+        "defaultWorkers" in parsed && typeof parsed.defaultWorkers === "string"
+          ? parsed.defaultWorkers
+          : "",
     };
   } catch {
     return DEFAULT_SETTINGS;
