@@ -800,7 +800,12 @@ type ReadinessCheckDTO struct {
 	Key    string `json:"key"`
 	Label  string `json:"label"`
 	Passed bool   `json:"passed"`
+	// Reason is shown only when Passed is false — it tells the user
+	// what to do to fix the failing check.
 	Reason string `json:"reason,omitempty"`
+	// Hint is always shown (both passed and failed) as small helper
+	// text below the label, explaining what this dimension means.
+	Hint string `json:"hint,omitempty"`
 }
 
 // ProjectReadinessDTO aggregates all readiness checks. Ready is true

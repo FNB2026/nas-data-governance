@@ -1563,7 +1563,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 		return ProjectReadinessDTO{
 			Ready: false,
 			Checks: []ReadinessCheckDTO{
-				{Key: "project_open", Label: "项目已打开", Passed: false, Reason: "请先打开项目"},
+				{Key: "project_open", Label: "项目已打开", Passed: false, Reason: "请先打开项目", Hint: "需要先打开一个 NDG 项目数据库（.db 文件）才能开始扫描"},
 			},
 		}, nil
 	}
@@ -1587,6 +1587,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 			}
 			return ""
 		}(),
+		Hint: "「存储」是 NDG 对一个扫描根目录的称呼。完成至少一次扫描后，该目录就会被注册为存储",
 	})
 
 	// 2. Files discovered
@@ -1605,6 +1606,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 			}
 			return ""
 		}(),
+		Hint: "需要至少扫描出 1 个文件才能进行后续的重复分析和治理",
 	})
 
 	// 3. Read-write mode (required for new scans)
@@ -1619,6 +1621,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 			}
 			return ""
 		}(),
+		Hint: "只读模式可以查看数据但不能新建扫描或执行治理。打开项目时勾选「读写」即可",
 	})
 
 	// 4. Recovery lock inactive
@@ -1637,6 +1640,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 			}
 			return ""
 		}(),
+		Hint: "恢复锁是一种安全机制：当有执行计划异常中断时自动锁定，防止数据不一致。锁定时无法新建扫描",
 	})
 
 	// 5. Plans available (optional — for governance, not scanning)
@@ -1652,6 +1656,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 			}
 			return ""
 		}(),
+		Hint: "治理计划是系统根据扫描结果自动生成的处置建议（如隔离重复文件、合并相似目录）。此项为可选，不影响扫描",
 	})
 
 	// Ready = first 4 checks pass (plans are optional)

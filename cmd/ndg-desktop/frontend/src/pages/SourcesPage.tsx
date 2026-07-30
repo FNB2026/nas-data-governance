@@ -94,6 +94,9 @@ export default function SourcesPage() {
                     </span>
                     <div className="readiness-check-content">
                       <span className="readiness-check-label">{check.label}</span>
+                      {check.hint && (
+                        <span className="readiness-check-hint muted">{check.hint}</span>
+                      )}
                       {!check.passed && check.reason && (
                         <span className="readiness-check-reason muted">{check.reason}</span>
                       )}

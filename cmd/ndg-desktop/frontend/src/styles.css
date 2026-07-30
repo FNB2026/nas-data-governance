@@ -1925,6 +1925,12 @@ button.secondary {
   font-size: 0.8rem;
 }
 
+.readiness-check-hint {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin-top: 0.1rem;
+}
+
 .readiness-stats {
   display: flex;
   gap: 1.5rem;

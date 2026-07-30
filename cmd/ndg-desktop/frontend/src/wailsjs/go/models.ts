@@ -1585,6 +1585,7 @@ export namespace wails {
 	    label: string;
 	    passed: boolean;
 	    reason?: string;
+	    hint?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReadinessCheckDTO(source);
@@ -1596,6 +1597,7 @@ export namespace wails {
 	        this.label = source["label"];
 	        this.passed = source["passed"];
 	        this.reason = source["reason"];
+	        this.hint = source["hint"];
 	    }
 	}
 	export class ProjectReadinessDTO {
