@@ -420,7 +420,7 @@ jobs:
           echo "=== SHA256 ==="
           cat dist/*.dmg.sha256 2>/dev/null || true
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -441,17 +441,50 @@ jobs:
           # Write release notes to a temp file to handle multi-line content
           echo -e "$RELEASE_NOTES" > /tmp/release-notes.md
 
-          # Create the GitHub Release as a draft
-          gh release create "$TAG" \
-            --draft \
-            --title "NDG ${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            dist/*.dmg \
-            dist/*.dmg.sha256 \
-            dist/sbom.cyclonedx.json \
-            dist/sbom.spdx.json
+          # B8: Mark as pre-release if version contains a pre-release suffix (e.g. 0.5.0-beta.1)
+          release_flags=(--draft --verify-tag)
+          if [[ "$VERSION" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+            echo "draft-release: version '$VERSION' contains pre-release suffix, marking as pre-release"
+          fi
 
-          echo "OK — GitHub Release created (draft) for $TAG"
+          # B9: Idempotent release creation — if a draft release already exists
+          # (e.g. from a previous failed run), update it instead of failing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "draft-release: Release '$TAG' already exists, updating..."
+            gh release edit "$TAG" \
+              --title "NDG ${VERSION}" \
+              --notes-file /tmp/release-notes.md
+
+            # Re-apply draft and prerelease flags to ensure correct state
+            if [[ "$VERSION" == *-* ]]; then
+              gh release edit "$TAG" --draft --prerelease --latest=false
+            else
+              gh release edit "$TAG" --draft
+            fi
+
+            # B9: Upload assets with --clobber to overwrite any existing files
+            gh release upload "$TAG" \
+              dist/*.dmg \
+              dist/*.dmg.sha256 \
+              dist/sbom.cyclonedx.json \
+              dist/sbom.spdx.json \
+              --clobber
+
+            echo "OK — GitHub Release '$TAG' updated (existing draft)"
+          else
+            echo "draft-release: Creating new release for '$TAG'..."
+            gh release create "$TAG" \
+              "${release_flags[@]}" \
+              --title "NDG ${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              dist/*.dmg \
+              dist/*.dmg.sha256 \
+              dist/sbom.cyclonedx.json \
+              dist/sbom.spdx.json
+
+            echo "OK — GitHub Release created (draft) for $TAG"
+          fi
 
       - name: Publish release (remove draft)
         env:

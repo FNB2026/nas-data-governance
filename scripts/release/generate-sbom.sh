@@ -132,7 +132,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "generate-sbom: installing syft..."
 
-SYFT_VERSION="v1.18.2"
+SYFT_VERSION="v1.20.0"
 
 # Detect platform
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -149,22 +149,26 @@ case "$OS" in
     *) echo "generate-sbom: unsupported OS '$OS'" >&2; exit 1 ;;
 esac
 
+# B7: Syft official releases use an aggregate checksums file, not per-file .sha256.
+SYFT_ARCHIVE="$(basename "$SYFT_URL")"
+SYFT_CHECKSUMS_URL="https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_checksums.txt"
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# B3: Download syft and verify SHA256 checksum from official source.
+# B3/B7: Download syft and verify SHA256 checksum from official aggregate file.
 curl --fail --location --silent --show-error --output "$TMP_DIR/syft.tar.gz" "$SYFT_URL"
 
-# Download and verify the official SHA256 checksum
-SYFT_CHECKSUM_URL="${SYFT_URL}.sha256"
-curl --fail --location --silent --show-error --output "$TMP_DIR/syft.tar.gz.sha256" "$SYFT_CHECKSUM_URL"
+# Download the official aggregate checksums file
+curl --fail --location --silent --show-error --output "$TMP_DIR/syft_checksums.txt" "$SYFT_CHECKSUMS_URL"
 
-# The .sha256 file format is "<hash>  <filename>" — verify against our download
-EXPECTED_HASH="$(awk '{print $1}' "$TMP_DIR/syft.tar.gz.sha256")"
+# B7: Extract the hash for our specific archive from the aggregate file.
+# The file format is: "<sha256_hash>  <filename>"
+EXPECTED_HASH="$(grep "  ${SYFT_ARCHIVE}$" "$TMP_DIR/syft_checksums.txt" | awk '{print $1}')"
 ACTUAL_HASH="$(shasum -a 256 "$TMP_DIR/syft.tar.gz" | awk '{print $1}')"
 
 if [[ -z "$EXPECTED_HASH" ]]; then
-    echo "generate-sbom: FAIL — could not retrieve official SHA256 checksum for syft" >&2
+    echo "generate-sbom: FAIL — syft archive '$SYFT_ARCHIVE' not found in official checksums file" >&2
     exit 1
 fi
 

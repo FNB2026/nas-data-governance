@@ -13,6 +13,11 @@
 #   5. sign-notarize job uses release-macos environment
 #   6. Four-job needs chain is intact (verify → build-unsigned → sign-notarize → draft-release)
 #   7. Global permissions does not contain contents: write
+#   8. SBOM generation has no fail-open + has checksum verification
+#   9. Gitleaks config has no full-path allowlist for release scripts
+#  10. B7: Syft uses aggregate checksums.txt (not per-file .sha256)
+#  11. B8: Pre-release versions get --prerelease --latest=false
+#  12. B9: Release creation is idempotent (view → edit → upload --clobber)
 #
 # Usage:
 #   ./scripts/release/test-release-workflow.sh
@@ -246,6 +251,119 @@ if grep -A20 '^\[allowlist\]' "$GITLEAKS_CONFIG" | grep -q 'release\.yml'; then
     fail ".gitleaks.toml global allowlist still bypasses release.yml"
 else
     pass ".gitleaks.toml does not globally bypass release.yml"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 10: B7 — Syft uses aggregate checksums.txt (not per-file .sha256)
+# ---------------------------------------------------------------------------
+echo "--- Check 10: B7 — Syft aggregate checksums file ---"
+
+SBOM_SCRIPT="$ROOT/scripts/release/generate-sbom.sh"
+
+# Must NOT use the old per-file .sha256 URL pattern
+if grep -q 'SYFT_CHECKSUM_URL=.*\.sha256' "$SBOM_SCRIPT" 2>/dev/null || \
+   grep -q '\${SYFT_URL}\.sha256' "$SBOM_SCRIPT" 2>/dev/null; then
+    fail "generate-sbom.sh still uses per-file .sha256 URL (B7 not fixed)"
+else
+    pass "generate-sbom.sh does not use per-file .sha256 URL"
+fi
+
+# Must use aggregate checksums.txt file
+if grep -q '_checksums\.txt' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh references aggregate checksums.txt file"
+else
+    fail "generate-sbom.sh does not reference aggregate checksums.txt file"
+fi
+
+# Must extract specific archive hash from aggregate file
+if grep -q 'grep.*SYFT_ARCHIVE.*checksums' "$SBOM_SCRIPT" || \
+   grep -q 'awk.*print.*\$1.*checksums' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh extracts specific archive hash from aggregate file"
+else
+    fail "generate-sbom.sh does not extract archive hash from aggregate file"
+fi
+
+# Must fail if expected hash is empty (archive not found in checksums file)
+if grep -q 'EXPECTED_HASH.*-z' "$SBOM_SCRIPT" || \
+   grep -q 'not found in official checksums' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh fails when archive not found in checksums file"
+else
+    fail "generate-sbom.sh does not handle missing archive in checksums file"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 11: B8 — Pre-release versions get --prerelease --latest=false
+# ---------------------------------------------------------------------------
+echo "--- Check 11: B8 — Pre-release detection in release.yml ---"
+
+# Must have --prerelease flag
+if grep -q '\-\-prerelease' "$WORKFLOW"; then
+    pass "release.yml has --prerelease flag for pre-release versions"
+else
+    fail "release.yml missing --prerelease flag"
+fi
+
+# Must have --latest=false flag
+if grep -q '\-\-latest=false' "$WORKFLOW"; then
+    pass "release.yml has --latest=false for pre-release versions"
+else
+    fail "release.yml missing --latest=false flag"
+fi
+
+# Must have version pattern matching for pre-release suffix
+if grep -q 'VERSION.*==.*\*-\*' "$WORKFLOW"; then
+    pass "release.yml detects pre-release suffix via version pattern matching"
+else
+    fail "release.yml missing pre-release version pattern detection"
+fi
+
+# Must have release_flags array for dynamic flag construction
+if grep -q 'release_flags' "$WORKFLOW"; then
+    pass "release.yml uses release_flags array for conditional flags"
+else
+    fail "release.yml missing release_flags array"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 12: B9 — Release creation is idempotent (view → edit → upload --clobber)
+# ---------------------------------------------------------------------------
+echo "--- Check 12: B9 — Idempotent release creation ---"
+
+# Must check for existing release with gh release view
+if grep -q 'gh release view' "$WORKFLOW"; then
+    pass "release.yml checks for existing release (gh release view)"
+else
+    fail "release.yml missing gh release view existence check"
+fi
+
+# Must update existing release with gh release edit
+if grep -q 'gh release edit' "$WORKFLOW"; then
+    pass "release.yml updates existing release (gh release edit)"
+else
+    fail "release.yml missing gh release edit for existing release"
+fi
+
+# Must upload with --clobber to overwrite existing assets
+# --clobber may be on a separate line from gh release upload in YAML
+DRAFT_RELEASE_SECTION="$(awk '/^  draft-release:/{found=1} found{print}' "$WORKFLOW")"
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'gh release upload' && \
+   echo "$DRAFT_RELEASE_SECTION" | grep -q -- '--clobber'; then
+    pass "release.yml uploads assets with --clobber"
+else
+    fail "release.yml missing --clobber for asset upload"
+fi
+
+# Must have both create and update paths (if/else structure)
+if grep -q 'gh release create' "$WORKFLOW" && grep -q 'gh release edit' "$WORKFLOW"; then
+    pass "release.yml has both create and update paths (idempotent)"
+else
+    fail "release.yml missing either create or update path"
 fi
 
 echo ""
