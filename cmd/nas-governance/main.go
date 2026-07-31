@@ -285,7 +285,7 @@ func runVersion(args []string) error {
 		return fmt.Errorf("version does not accept arguments")
 	}
 	v := version.Get()
-	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\n", v.Version, v.Commit, v.BuildTime)
+	fmt.Printf("nas-governance %s\ncommit: %s\nbuilt: %s\nchannel: %s\n", v.Version, v.Commit, v.BuildTime, v.Channel)
 	return nil
 }
 

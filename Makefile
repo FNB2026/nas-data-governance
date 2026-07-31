@@ -1,11 +1,17 @@
 .PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# VERSION is the single source of truth, read from the VERSION file.
+# CLI builds fall back to git describe for legacy compatibility.
+VERSION_FILE := $(shell cat VERSION 2>/dev/null)
+VERSION ?= $(if $(VERSION_FILE),$(VERSION_FILE),$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+# CHANNEL is derived from the version pre-release identifier.
+# 0.5.0-beta.1 → beta, 0.5.0-alpha.1 → alpha, 0.5.0 → stable, dev → dev
+CHANNEL ?= $(shell echo $(VERSION) | sed -n 's/^[0-9][0-9.]*-\([a-z]*\)\.[0-9]*/\1/p; s/^[0-9][0-9.]*$$/stable/p; s/^dev$$/dev/p')
 DIST_DIR ?= dist
 VERSION_PKG = github.com/FNB2026/nas-data-governance/internal/version
-LDFLAGS = -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
+LDFLAGS = -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME) -X $(VERSION_PKG).Channel=$(CHANNEL)
 
 build:
 	mkdir -p bin
@@ -69,14 +75,20 @@ frontend-build:
 frontend-check: frontend-test frontend-build
 
 # ---- Desktop (Wails) targets ----
-# Requires wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# Wails CLI v2.13.0 is the fixed toolchain version. Do NOT use @latest.
+# Install: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
 DESKTOP_DIR = cmd/ndg-desktop
+WAILS_VERSION := v2.13.0
 
 desktop-dev:
 	cd $(DESKTOP_DIR) && wails dev
 
 desktop-build:
-	cd $(DESKTOP_DIR) && wails build
+	cd $(DESKTOP_DIR) && wails build \
+	  -clean \
+	  -trimpath \
+	  -platform darwin/arm64 \
+	  -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME) -X $(VERSION_PKG).Channel=$(CHANNEL)"
 
 desktop: desktop-build

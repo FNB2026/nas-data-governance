@@ -284,7 +284,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hasWailsRuntime()) {
-      setVersion({ version: "dev", commit: "n/a", build_time: "n/a" } as wails.VersionInfo);
+      setVersion({ version: "dev", commit: "n/a", build_time: "n/a", channel: "dev" } as wails.VersionInfo);
       return;
     }
     api.project.version()
