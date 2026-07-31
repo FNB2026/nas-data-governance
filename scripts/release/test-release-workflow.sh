@@ -21,7 +21,7 @@
 #  13. B10: No env: re-declaration of GITHUB_ENV variables in sign/verify steps
 #  14. B11: Release update checks isDraft/isImmutable before modifying
 #  15. B12: generate-sbom.sh does not use syft from PATH (always downloads pinned)
-#  16. B13: Uses mapfile array + case for identity matching (no grep -c double-output)
+#  16. B13/B15: Bash 3.2-compatible array collection + case for identity matching
 #  17. B14: Stable releases explicitly clear pre-release flag (--prerelease=false)
 #
 # Usage:
@@ -419,16 +419,38 @@ else
     fail "Signing identity verification does not use grep -F for exact match"
 fi
 
-# B13: Must use mapfile array (not grep -c which can double-output)
-if echo "$IDENTITY_STEP" | grep -q 'mapfile.*MATCHING_IDENTITIES'; then
-    pass "Signing identity verification uses mapfile array for identity collection"
+# B13/B15: Must use Bash 3.2-compatible while-read loop (not mapfile/readarray)
+if echo "$IDENTITY_STEP" | grep -q 'while IFS= read -r identity'; then
+    pass "Signing identity verification uses while-read loop (Bash 3.2 compatible)"
 else
-    fail "Signing identity verification missing mapfile array (B13 not fixed)"
+    fail "Signing identity verification missing while-read loop (B15 not fixed)"
+fi
+
+# B13/B15: Must initialize empty array before appending
+if echo "$IDENTITY_STEP" | grep -q 'MATCHING_IDENTITIES=()'; then
+    pass "Signing identity verification initializes empty MATCHING_IDENTITIES array"
+else
+    fail "Signing identity verification missing MATCHING_IDENTITIES=() initialization"
+fi
+
+# B13/B15: Must use Bash 3.2-compatible array append (not mapfile)
+if echo "$IDENTITY_STEP" | grep -q 'MATCHING_IDENTITIES\[\${#MATCHING_IDENTITIES\[@\]}\]'; then
+    pass "Signing identity verification uses Bash 3.2-compatible array append"
+else
+    fail "Signing identity verification missing Bash 3.2-compatible array append"
+fi
+
+# B15: Must NOT use mapfile or readarray (incompatible with macOS Bash 3.2)
+# Filter out comment lines — comments may mention mapfile/readarray in prose
+IDENTITY_CODE="$(echo "$IDENTITY_STEP" | grep -v '^[[:space:]]*#')"
+if echo "$IDENTITY_CODE" | grep -qE '(^|[[:space:]])(mapfile|readarray)([[:space:]]|$)'; then
+    fail "Signing identity verification uses mapfile/readarray, incompatible with macOS Bash 3.2"
+else
+    pass "Signing identity verification does not use mapfile/readarray (B15 compatible)"
 fi
 
 # B13: Must NOT use grep -c for counting (causes double-output on zero matches)
-# Filter out comment lines first — comments may mention "grep -c" in prose
-if echo "$IDENTITY_STEP" | grep -v '^[[:space:]]*#' | grep -q 'grep -c'; then
+if echo "$IDENTITY_CODE" | grep -q 'grep -c'; then
     fail "Signing identity verification still uses grep -c (B13 double-output bug)"
 else
     pass "Signing identity verification does not use grep -c (B13 fixed)"
@@ -564,12 +586,12 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
-# Check 16: B13 — mapfile array + case for identity matching (no grep -c)
+# Check 16: B13/B15 — Bash 3.2-compatible array collection + case matching
 # ---------------------------------------------------------------------------
-echo "--- Check 16: B13 — mapfile + case identity matching ---"
+echo "--- Check 16: B13/B15 — Bash 3.2-compatible array + case matching ---"
 
-# B13 checks are integrated into Check 13 above (IDENTITY_STEP grep patterns).
-# This section provides additional B13-specific assertions.
+# B13/B15 checks are integrated into Check 13 above (IDENTITY_STEP grep patterns).
+# This section provides additional B13/B15-specific assertions.
 
 # B13: Must have exactly 3 case branches (0, 1, *)
 # Use [[:space:]] instead of \s for BSD grep compatibility (macOS)

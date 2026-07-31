@@ -303,9 +303,13 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # B5/B10/B13: Filter ALL Developer ID Application identities by
+          # B5/B10/B13/B15: Filter ALL Developer ID Application identities by
           # APPLE_TEAM_ID using exact parenthesized match, then verify exactly
-          # one match. Uses mapfile array to avoid grep -c double-output bug.
+          # one match. Uses Bash 3.2-compatible while-read loop (no mapfile).
+          #
+          # B15: macOS GitHub Runner uses system Bash 3.2 which does not
+          # support mapfile/readarray. The while-read loop with manual array
+          # append is functionally equivalent and runs on all Bash versions.
 
           # B13: Validate APPLE_TEAM_ID format (10 alphanumeric chars)
           if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
@@ -317,7 +321,13 @@ jobs:
           # B13: Use grep -F for exact literal match on "(TEAMID)" suffix.
           # Substring grep could match a certificate whose name contains the
           # Team ID elsewhere but has a different ID in parentheses.
-          mapfile -t MATCHING_IDENTITIES < <(
+          # B15: Bash 3.2-compatible array collection (no mapfile/readarray).
+          MATCHING_IDENTITIES=()
+          while IFS= read -r identity; do
+            if [[ -n "$identity" ]]; then
+              MATCHING_IDENTITIES[${#MATCHING_IDENTITIES[@]}]="$identity"
+            fi
+          done < <(
             security find-identity -v -p codesigning 2>/dev/null \
               | awk -F '"' '/Developer ID Application/ { print $2 }' \
               | grep -F "($APPLE_TEAM_ID)" || true

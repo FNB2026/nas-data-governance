@@ -218,3 +218,9 @@ jobs:
           fi
           echo "OK — .app built successfully"
           du -sh "$APP_PATH"
+
+      # B15: Verify signing identity selection logic works on macOS system
+      # Bash 3.2 (which does not support mapfile/readarray). Uses /bin/bash
+      # explicitly to test the real system Bash, not a Homebrew version.
+      - name: Test signing identity parser on macOS Bash
+        run: /bin/bash ./scripts/release/test-signing-identity-compat.sh
