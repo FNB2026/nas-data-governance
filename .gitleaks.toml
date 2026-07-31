@@ -50,10 +50,12 @@ path = '''\.(log|yaml|yml|env|ini|cfg|conf)$'''
 tags = ["ndg", "database", "path"]
 
 # Detect macOS keychain password patterns in scripts
+# B4: Regex excludes shell variable references ($VAR, ${VAR}) — only matches
+#     hardcoded literal passwords in quotes.
 [[rules]]
 id = "keychain-password"
 description = "Hardcoded keychain password"
-regex = '''security\s+(create|unlock)-keychain\s+-p\s+["\'][^"\']+["\']'''
+regex = '''security\s+(create|unlock)-keychain\s+-p\s+["\'][^"\'$][^"\']*["\']'''
 tags = ["keychain", "password", "macos"]
 
 # ---------------------------------------------------------------------------
