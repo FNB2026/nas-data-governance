@@ -303,30 +303,45 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # B5/B10: Filter ALL Developer ID Application identities by APPLE_TEAM_ID
-          # to ensure precise matching. Do NOT just take the first identity and
-          # check it afterwards — that could select the wrong certificate.
-          SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-            | awk -F '"' '/Developer ID Application/ { print $2 }' \
-            | grep "$APPLE_TEAM_ID" \
-            || true)"
+          # B5/B10/B13: Filter ALL Developer ID Application identities by
+          # APPLE_TEAM_ID using exact parenthesized match, then verify exactly
+          # one match. Uses mapfile array to avoid grep -c double-output bug.
 
-          # Count matching identities (one per line)
-          MATCH_COUNT="$(printf '%s\n' "$SIGNING_IDENTITY" | grep -c . 2>/dev/null || echo 0)"
-
-          if [[ "$MATCH_COUNT" -eq 0 ]]; then
-            echo "FAIL — no 'Developer ID Application' certificate matching APPLE_TEAM_ID '$APPLE_TEAM_ID' found" >&2
-            echo "  Available codesigning identities:" >&2
-            security find-identity -v -p codesigning 2>&1 | sed 's/^/    /' >&2
+          # B13: Validate APPLE_TEAM_ID format (10 alphanumeric chars)
+          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "FAIL — invalid APPLE_TEAM_ID format: '$APPLE_TEAM_ID'" >&2
+            echo "  Expected 10 uppercase alphanumeric characters (e.g. ABCDE12345)" >&2
             exit 1
           fi
 
-          if [[ "$MATCH_COUNT" -gt 1 ]]; then
-            echo "FAIL — multiple Developer ID Application certificates match APPLE_TEAM_ID '$APPLE_TEAM_ID':" >&2
-            printf '%s\n' "$SIGNING_IDENTITY" | sed 's/^/    /' >&2
-            echo "  Remove duplicate certificates from the keychain." >&2
-            exit 1
-          fi
+          # B13: Use grep -F for exact literal match on "(TEAMID)" suffix.
+          # Substring grep could match a certificate whose name contains the
+          # Team ID elsewhere but has a different ID in parentheses.
+          mapfile -t MATCHING_IDENTITIES < <(
+            security find-identity -v -p codesigning 2>/dev/null \
+              | awk -F '"' '/Developer ID Application/ { print $2 }' \
+              | grep -F "($APPLE_TEAM_ID)" || true
+          )
+
+          MATCH_COUNT=${#MATCHING_IDENTITIES[@]}
+
+          case "$MATCH_COUNT" in
+            0)
+              echo "FAIL — no 'Developer ID Application' certificate matching APPLE_TEAM_ID '$APPLE_TEAM_ID' found" >&2
+              echo "  Available codesigning identities:" >&2
+              security find-identity -v -p codesigning 2>&1 | sed 's/^/    /' >&2
+              exit 1
+              ;;
+            1)
+              SIGNING_IDENTITY="${MATCHING_IDENTITIES[0]}"
+              ;;
+            *)
+              echo "FAIL — multiple ($MATCH_COUNT) Developer ID Application certificates match APPLE_TEAM_ID '$APPLE_TEAM_ID':" >&2
+              printf '%s\n' "${MATCHING_IDENTITIES[@]}" | sed 's/^/    /' >&2
+              echo "  Remove duplicate certificates from the keychain." >&2
+              exit 1
+              ;;
+          esac
 
           # Export for use by sign-macos-app.sh via $GITHUB_ENV.
           # B10: Subsequent steps use $SIGNING_IDENTITY directly from the shell
@@ -499,14 +514,32 @@ jobs:
               --title "NDG ${VERSION}" \
               --notes-file /tmp/release-notes.md
 
-            # B8/B11: Re-apply draft and prerelease flags to ensure correct state.
-            # Beta: prerelease=true, latest=false
-            # Stable: prerelease=false
+            # B8/B11/B14: Re-apply draft and prerelease flags to ensure correct state.
+            # Beta:   prerelease=true,  latest=false
+            # Stable: prerelease=false (explicitly clear any stale pre-release flag)
+            #
+            # B14: IS_PRERELEASE is checked before and after to verify the state
+            # transition is correct. A stable version must clear any pre-release
+            # flag that may have been set on a previous draft run.
+            echo "  before: isPrerelease=$IS_PRERELEASE"
             if [[ "$VERSION" == *-* ]]; then
               gh release edit "$TAG" --draft --prerelease --latest=false
             else
-              gh release edit "$TAG" --draft
+              gh release edit "$TAG" --draft --prerelease=false
             fi
+
+            # B14: Verify the final prerelease state matches expectations
+            FINAL_PRERELEASE="$(gh release view "$TAG" --json isPrerelease | jq -r '.isPrerelease')"
+            EXPECTED_PRERELEASE="false"
+            if [[ "$VERSION" == *-* ]]; then
+              EXPECTED_PRERELEASE="true"
+            fi
+            if [[ "$FINAL_PRERELEASE" != "$EXPECTED_PRERELEASE" ]]; then
+              echo "FAIL — Release prerelease state mismatch after edit:" >&2
+              echo "  Expected isPrerelease=$EXPECTED_PRERELEASE, got $FINAL_PRERELEASE" >&2
+              exit 1
+            fi
+            echo "  after:  isPrerelease=$FINAL_PRERELEASE (verified)"
 
             # B9: Upload assets with --clobber to overwrite any existing files.
             # Note: --clobber deletes the old asset before uploading the new one.

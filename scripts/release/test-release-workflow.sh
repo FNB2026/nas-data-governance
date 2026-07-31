@@ -21,6 +21,8 @@
 #  13. B10: No env: re-declaration of GITHUB_ENV variables in sign/verify steps
 #  14. B11: Release update checks isDraft/isImmutable before modifying
 #  15. B12: generate-sbom.sh does not use syft from PATH (always downloads pinned)
+#  16. B13: Uses mapfile array + case for identity matching (no grep -c double-output)
+#  17. B14: Stable releases explicitly clear pre-release flag (--prerelease=false)
 #
 # Usage:
 #   ./scripts/release/test-release-workflow.sh
@@ -408,16 +410,46 @@ else
     fail "Verify artifacts step missing empty-value check for APPLE_TEAM_ID"
 fi
 
-# B10: Signing identity verification must filter by APPLE_TEAM_ID (grep), not just take first
-IDENTITY_STEP="$(grep -A 25 'Verify signing identity matches APPLE_TEAM_ID' "$WORKFLOW")"
-if echo "$IDENTITY_STEP" | grep -q 'grep.*APPLE_TEAM_ID\|grep "\$APPLE_TEAM_ID"'; then
-    pass "Signing identity verification filters by APPLE_TEAM_ID (grep)"
+# B10/B13: Signing identity verification must filter by APPLE_TEAM_ID using
+# grep -F for exact parenthesized match (not substring grep)
+IDENTITY_STEP="$(grep -A 50 'Verify signing identity matches APPLE_TEAM_ID' "$WORKFLOW")"
+if echo "$IDENTITY_STEP" | grep -q 'grep -F.*APPLE_TEAM_ID\|grep -F "(\$APPLE_TEAM_ID)"'; then
+    pass "Signing identity verification uses grep -F for exact match"
 else
-    fail "Signing identity verification does not filter by APPLE_TEAM_ID"
+    fail "Signing identity verification does not use grep -F for exact match"
+fi
+
+# B13: Must use mapfile array (not grep -c which can double-output)
+if echo "$IDENTITY_STEP" | grep -q 'mapfile.*MATCHING_IDENTITIES'; then
+    pass "Signing identity verification uses mapfile array for identity collection"
+else
+    fail "Signing identity verification missing mapfile array (B13 not fixed)"
+fi
+
+# B13: Must NOT use grep -c for counting (causes double-output on zero matches)
+# Filter out comment lines first — comments may mention "grep -c" in prose
+if echo "$IDENTITY_STEP" | grep -v '^[[:space:]]*#' | grep -q 'grep -c'; then
+    fail "Signing identity verification still uses grep -c (B13 double-output bug)"
+else
+    pass "Signing identity verification does not use grep -c (B13 fixed)"
+fi
+
+# B13: Must use case statement for match count (not if/elif with -eq/-gt)
+if echo "$IDENTITY_STEP" | grep -q 'case.*MATCH_COUNT'; then
+    pass "Signing identity verification uses case for match count dispatch"
+else
+    fail "Signing identity verification missing case statement (B13 not fixed)"
+fi
+
+# B13: Must validate APPLE_TEAM_ID format
+if echo "$IDENTITY_STEP" | grep -q 'APPLE_TEAM_ID.*=~.*\^\[A-Z0-9\]'; then
+    pass "Signing identity verification validates APPLE_TEAM_ID format"
+else
+    fail "Signing identity verification missing APPLE_TEAM_ID format validation"
 fi
 
 # B10: Must check for multiple matches (ambiguous identity)
-if echo "$IDENTITY_STEP" | grep -q 'MATCH_COUNT.*gt 1\|multiple.*Developer ID'; then
+if echo "$IDENTITY_STEP" | grep -q 'multiple.*Developer ID\|MATCHING_IDENTITIES'; then
     pass "Signing identity verification checks for ambiguous matches"
 else
     fail "Signing identity verification missing ambiguous match check"
@@ -504,8 +536,12 @@ else
     fail "generate-sbom.sh may execute bare 'syft' from PATH"
 fi
 
-# B12 Behavioral test: simulate fake syft in PATH and verify script doesn't call it
-echo "  --- B12 behavioral: fake syft in PATH ---"
+# B12 PATH fixture check: verify that a fake syft placed in PATH would be
+# findable, confirming that the structural checks above are meaningful.
+# This is NOT a runtime behavioral test — it only confirms the fixture
+# setup works. The script itself is verified structurally to never call
+# bare 'syft', only "$TMP_DIR/syft".
+echo "  --- B12 PATH fixture setup check ---"
 FAKE_SYFT_DIR="$(mktemp -d)"
 cat > "$FAKE_SYFT_DIR/syft" <<'FAKEEOF'
 #!/usr/bin/env bash
@@ -514,18 +550,85 @@ exit 1
 FAKEEOF
 chmod +x "$FAKE_SYFT_DIR/syft"
 
-# Verify the fake syft is findable in PATH
+# Verify the fake syft is findable in PATH (confirms fixture is valid)
 PATH="$FAKE_SYFT_DIR:$PATH" command -v syft >/dev/null 2>&1
 if [ $? -eq 0 ]; then
-    # Verify generate-sbom.sh does not contain the bypass pattern
-    # (structural check already done above, but this confirms the fake is detectable)
-    pass "Fake syft is detectable in PATH (behavioral test setup OK)"
+    pass "Fake syft is detectable in PATH (fixture setup confirmed)"
 else
-    fail "Could not set up fake syft in PATH for behavioral test"
+    fail "Could not set up fake syft in PATH for fixture check"
 fi
 
 # Clean up
 /bin/rm -rf "$FAKE_SYFT_DIR"
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 16: B13 — mapfile array + case for identity matching (no grep -c)
+# ---------------------------------------------------------------------------
+echo "--- Check 16: B13 — mapfile + case identity matching ---"
+
+# B13 checks are integrated into Check 13 above (IDENTITY_STEP grep patterns).
+# This section provides additional B13-specific assertions.
+
+# B13: Must have exactly 3 case branches (0, 1, *)
+# Use [[:space:]] instead of \s for BSD grep compatibility (macOS)
+CASE_BRANCHES="$(echo "$IDENTITY_STEP" | grep -c '^[[:space:]]*[0-9*])' || true)"
+if [[ "$CASE_BRANCHES" -ge 3 ]]; then
+    pass "Signing identity case has 3 branches (0/1/*) for match dispatch"
+else
+    fail "Signing identity case missing branches (expected 3, found $CASE_BRANCHES)"
+fi
+
+# B13: Zero-match branch must exit 1 (fail closed)
+if echo "$IDENTITY_STEP" | grep -A5 '0)' | grep -q 'exit 1'; then
+    pass "Zero-match case branch exits 1 (fail closed)"
+else
+    fail "Zero-match case branch missing exit 1"
+fi
+
+# B13: Multiple-match branch must exit 1 (fail closed)
+if echo "$IDENTITY_STEP" | grep -A5 '\*)' | grep -q 'exit 1'; then
+    pass "Multiple-match case branch exits 1 (fail closed)"
+else
+    fail "Multiple-match case branch missing exit 1"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 17: B14 — Stable releases explicitly clear pre-release flag
+# ---------------------------------------------------------------------------
+echo "--- Check 17: B14 — Stable release clears pre-release flag ---"
+
+# B14: Stable path must have --prerelease=false (not just --draft)
+if echo "$DRAFT_RELEASE_SECTION" | grep -q -- '--prerelease=false'; then
+    pass "Stable release path has --prerelease=false (explicitly clears pre-release)"
+else
+    fail "Stable release path missing --prerelease=false (B14 not fixed)"
+fi
+
+# B14: Must verify final prerelease state after edit
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'FINAL_PRERELEASE\|prerelease state mismatch'; then
+    pass "Release update verifies final prerelease state after edit"
+else
+    fail "Release update missing final prerelease state verification"
+fi
+
+# B14: Must have EXPECTED_PRERELEASE logic
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'EXPECTED_PRERELEASE'; then
+    pass "Release update has EXPECTED_PRERELEASE logic for state assertion"
+else
+    fail "Release update missing EXPECTED_PRERELEASE logic"
+fi
+
+# B14: Must log before/after prerelease state
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'before:.*isPrerelease' && \
+   echo "$DRAFT_RELEASE_SECTION" | grep -q 'after:.*isPrerelease'; then
+    pass "Release update logs before/after prerelease state"
+else
+    fail "Release update missing before/after prerelease state logging"
+fi
 
 echo ""
 
