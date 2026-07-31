@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -81,10 +81,30 @@ frontend-check: frontend-test frontend-build
 DESKTOP_DIR = cmd/ndg-desktop
 WAILS_VERSION := v2.13.0
 
-desktop-dev:
+# wails-check verifies that the Wails CLI in PATH matches the pinned version.
+# All desktop targets depend on this to prevent version drift.
+wails-check:
+	@command -v wails >/dev/null 2>&1 || { \
+		echo "wails-check: wails CLI not found in PATH" >&2; \
+		echo "  Install: go install github.com/wailsapp/wails/v2/cmd/wails@$(WAILS_VERSION)" >&2; \
+		exit 1; \
+	}
+	@actual="$$(wails version 2>/dev/null | head -1 | tr -d '[:space:]')"; \
+	if [ "$$actual" != "$(WAILS_VERSION)" ]; then \
+		echo "wails-check: installed wails version is '$$actual', expected '$(WAILS_VERSION)'" >&2; \
+		echo "  Install: go install github.com/wailsapp/wails/v2/cmd/wails@$(WAILS_VERSION)" >&2; \
+		exit 1; \
+	fi
+	@echo "wails-check: OK — $(WAILS_VERSION)"
+
+# version-check runs the release consistency script (allows untagged builds).
+version-check:
+	./scripts/release/check-version-consistency.sh --allow-untagged
+
+desktop-dev: wails-check
 	cd $(DESKTOP_DIR) && wails dev
 
-desktop-build:
+desktop-build: wails-check
 	cd $(DESKTOP_DIR) && wails build \
 	  -clean \
 	  -trimpath \

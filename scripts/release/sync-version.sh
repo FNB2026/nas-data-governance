@@ -1,29 +1,41 @@
 #!/usr/bin/env bash
-# sync-version.sh — Synchronize the semantic version from VERSION to all
-# build manifests (wails.json, package.json, package-lock.json) and macOS
-# Bundle metadata (Info.plist, Info.dev.plist).
+# sync-version.sh — Synchronize the semantic version from VERSION and the
+# bundle build number from BUNDLE_BUILD_NUMBER to all build manifests
+# (wails.json, package.json, package-lock.json) and macOS Bundle metadata
+# (Info.plist, Info.dev.plist).
 #
-# The VERSION file is the single source of truth. This script does NOT
-# create Git tags; it only updates files to match VERSION.
+# VERSION is the single source of truth for SemVer.
+# BUNDLE_BUILD_NUMBER is the single source of truth for CFBundleVersion,
+# and must be monotonically increasing across all public builds.
+#
+# This script does NOT create Git tags; it only updates files.
 #
 # Usage:
 #   ./scripts/release/sync-version.sh
 #
 # Apple Bundle version mapping:
-#   0.5.0-beta.1 → CFBundleShortVersionString=0.5.0, CFBundleVersion=1
-#   0.5.0-beta.2 → CFBundleShortVersionString=0.5.0, CFBundleVersion=2
-#   0.5.0        → CFBundleShortVersionString=0.5.0, CFBundleVersion=3
+#   VERSION=0.5.0-beta.1  BUNDLE_BUILD_NUMBER=1  → Short=0.5.0, Build=1
+#   VERSION=0.5.0-beta.2  BUNDLE_BUILD_NUMBER=2  → Short=0.5.0, Build=2
+#   VERSION=0.5.0-rc.1    BUNDLE_BUILD_NUMBER=3  → Short=0.5.0, Build=3
+#   VERSION=0.5.0         BUNDLE_BUILD_NUMBER=4  → Short=0.5.0, Build=4
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VERSION_FILE="$ROOT/VERSION"
+BUILD_NUMBER_FILE="$ROOT/BUNDLE_BUILD_NUMBER"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
     echo "sync-version: VERSION file not found at $VERSION_FILE" >&2
     exit 1
 fi
 
+if [[ ! -f "$BUILD_NUMBER_FILE" ]]; then
+    echo "sync-version: BUNDLE_BUILD_NUMBER file not found at $BUILD_NUMBER_FILE" >&2
+    exit 1
+fi
+
 VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+BUILD_NUMBER="$(tr -d '[:space:]' < "$BUILD_NUMBER_FILE")"
 
 # Validate SemVer: MAJOR.MINOR.PATCH with optional -alpha.N, -beta.N, -rc.N
 if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; then
@@ -32,31 +44,28 @@ if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]
     exit 1
 fi
 
+# Validate BUNDLE_BUILD_NUMBER: must be a positive integer
+if ! echo "$BUILD_NUMBER" | grep -qE '^[0-9]+$'; then
+    echo "sync-version: invalid BUNDLE_BUILD_NUMBER '$BUILD_NUMBER'" >&2
+    echo "  expected: a positive integer (e.g. 1, 2, 3, ...)" >&2
+    exit 1
+fi
+
 echo "sync-version: VERSION = $VERSION"
+echo "sync-version: BUNDLE_BUILD_NUMBER = $BUILD_NUMBER"
 
 # --- Derive macOS Bundle version components ---
 
 # CFBundleShortVersionString: strip pre-release suffix (0.5.0-beta.1 → 0.5.0)
 SHORT_VERSION="${VERSION%%-*}"
 
-# CFBundleVersion: extract the numeric build number from pre-release suffix.
-# -beta.1 → 1, -beta.2 → 2, -rc.1 → 1
-# For stable releases (no suffix), use a monotonically increasing number.
-# Since we cannot know the previous build number here, stable releases
-# require manual CFBundleVersion increment. We use the pre-release number
-# if present, or fall back to 1 for stable.
-BUILD_NUMBER="1"
-if [[ "$VERSION" == *-* ]]; then
-    BUILD_NUMBER="${VERSION##*.}"
-fi
-
+# CFBundleVersion: read from BUNDLE_BUILD_NUMBER (monotonically increasing)
 echo "sync-version: CFBundleShortVersionString = $SHORT_VERSION"
 echo "sync-version: CFBundleVersion = $BUILD_NUMBER"
 
 # --- Update wails.json ---
 WAILS_JSON="$ROOT/cmd/ndg-desktop/wails.json"
 if [[ -f "$WAILS_JSON" ]]; then
-    # Use sed to update productVersion in wails.json
     sed -i.bak \
         "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"$VERSION\"/" \
         "$WAILS_JSON"
@@ -81,9 +90,6 @@ fi
 # --- Update package-lock.json ---
 LOCK_JSON="$ROOT/cmd/ndg-desktop/frontend/package-lock.json"
 if [[ -f "$LOCK_JSON" ]]; then
-    # Update both the root "version" and packages[""].version fields.
-    # The root version is the 3rd line typically; packages[""] is deeper.
-    # We use a targeted sed that matches the exact pattern.
     sed -i.bak \
         -e "3s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" \
         -e "/\"name\": \"ndg-desktop-frontend\"/{n;s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/}" \
@@ -101,7 +107,6 @@ update_plist() {
         echo "sync-version: WARNING — $plist not found, skipping" >&2
         return
     fi
-    # CFBundleShortVersionString
     sed -i.bak \
         -e "/<key>CFBundleShortVersionString<\/key>/{n;s/<string>[^<]*<\/string>/<string>$SHORT_VERSION<\/string>/}" \
         -e "/<key>CFBundleVersion<\/key>/{n;s/<string>[^<]*<\/string>/<string>$BUILD_NUMBER<\/string>/}" \
