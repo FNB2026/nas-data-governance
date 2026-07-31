@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        NDG 数据治理工作台 — Hardened Runtime Entitlements (Minimal)
+
+        This app is distributed via DMG outside the Mac App Store.
+        App Sandbox is NOT enabled (sandbox is only required for MAS).
+        Without App Sandbox, network and file access work without
+        sandbox entitlements — only Hardened Runtime cs.* entitlements
+        are needed.
+
+        Only the entitlements proven necessary for Wails v2 (WKWebView /
+        WebKit) are enabled. If future testing reveals Hardened Runtime
+        blocks, add exceptions one at a time with documented justification.
+    -->
+
+    <!-- Allow JIT compilation (WebKit rendering engine requires this) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Allow unsigned executable memory (WebKit JavaScript engine) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>
