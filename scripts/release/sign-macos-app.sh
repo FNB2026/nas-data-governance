@@ -64,10 +64,10 @@ if [[ "$AD_HOC" == "true" ]]; then
     echo "sign-macos: using ad-hoc signing (local testing only, NOT for distribution)"
 elif [[ -z "$SIGNING_IDENTITY" ]]; then
     # Auto-detect Developer ID Application certificate
+    # Parse: '  1) ABCDE12345 "Developer ID Application: Your Name (TEAMID)"'
+    # Extract the quoted string using awk with double-quote delimiter.
     SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-        | grep 'Developer ID Application' \
-        | head -1 \
-        | sed 's/.*\) "\(.*\)"$/\1/' \
+        | awk -F '"' '/Developer ID Application/ { print $2; exit }' \
         || echo "")"
 
     if [[ -z "$SIGNING_IDENTITY" ]]; then

@@ -98,6 +98,9 @@ jobs:
       - name: Run version mapping tests
         run: ./scripts/release/test-version-mapping.sh
 
+      - name: Run macOS release script tests
+        run: ./scripts/release/test-macos-scripts.sh
+
       - name: Run go vet
         run: go vet ./...
 

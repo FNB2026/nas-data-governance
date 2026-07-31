@@ -150,13 +150,19 @@ desktop-notarize: desktop-dmg
 # desktop-verify: Verify all macOS release artifacts.
 # Checks .app signature, Hardened Runtime, entitlements, DMG signature,
 # notarization staple, Gatekeeper assessment, and checksums.
+# Use APP_ONLY=true to skip DMG checks (e.g. after ad-hoc sign).
 desktop-verify:
-	./scripts/release/verify-macos-release.sh
+	@if [[ "$(APP_ONLY)" == "true" ]]; then \
+		./scripts/release/verify-macos-release.sh --app-only; \
+	else \
+		./scripts/release/verify-macos-release.sh; \
+	fi
 
 # desktop-release: Full macOS release pipeline.
-# Build → Sign → DMG → Notarize → Staple → Verify.
+# Version-check → Build → Sign → DMG → Notarize → Staple → Verify.
+# version-check is a mandatory gate before any production release.
 # This is the one-command release path for production builds.
-desktop-release: desktop-notarize
+desktop-release: version-check desktop-notarize
 	./scripts/release/verify-macos-release.sh
 	@echo ""
 	@echo "==> macOS release artifacts in $(DIST_DIR)/:"

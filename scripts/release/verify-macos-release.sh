@@ -6,12 +6,12 @@
 #   1. Verify .app code signature (codesign --verify)
 #   2. Verify .app Hardened Runtime (codesign -d)
 #   3. Verify .app entitlements (codesign -d --entitlements)
-#   4. Verify DMG signature (codesign --verify)
-#   5. Verify DMG notarization staple (xcrun stapler validate)
-#   6. Verify DMG Gatekeeper assessment (spctl --assess)
-#   7. Verify DMG integrity (hdiutil verify)
-#   8. Verify SHA256 checksum file
-#   9. Print a summary of all verification results
+#   4. Verify .app Bundle Identifier (codesign -dvv, parse by '=')
+#   5. Verify .app Team Identifier (codesign -dvv, parse by '=')
+#   6. Verify DMG signature (codesign --verify)
+#   7. Verify DMG notarization staple (xcrun stapler validate)
+#   8. Verify DMG Gatekeeper assessment (spctl --assess)
+#   9. Verify DMG integrity + SHA256 checksum
 #
 # Usage:
 #   ./scripts/release/verify-macos-release.sh
@@ -87,6 +87,7 @@ fi
 # 2. Hardened Runtime check
 echo ""
 echo "  [2/9] Hardened Runtime enabled..."
+# codesign -dvv output: CodeDirectory v=xxxx ... flags=0x10000(runtime) ...
 FLAGS="$(codesign -dvv "$APP_PATH" 2>&1 | grep 'CodeDirectory' || true)"
 if echo "$FLAGS" | grep -q 'runtime'; then
     pass "Hardened Runtime is enabled"
@@ -110,25 +111,29 @@ else
     fail "Unsigned executable memory entitlement missing"
 fi
 
-# 4. Team Identifier check (skip for ad-hoc)
+# 4. Bundle Identifier check
+# codesign -dvv output: Identifier=com.fnb.ndg
+# Parse by '=' delimiter, NOT by space (there are no spaces).
 echo ""
-echo "  [4/9] Team Identifier..."
-TEAM_ID="$(codesign -dvv "$APP_PATH" 2>&1 | grep 'TeamIdentifier' | awk '{print $2}' || true)"
+echo "  [4/9] Bundle Identifier..."
+BUNDLE_ID="$(codesign -dvv "$APP_PATH" 2>&1 | grep '^Identifier' | head -1 | cut -d= -f2 || true)"
+if [[ "$BUNDLE_ID" == "com.fnb.ndg" ]]; then
+    pass "Bundle Identifier = $BUNDLE_ID"
+else
+    fail "Bundle Identifier = '$BUNDLE_ID' (expected 'com.fnb.ndg')"
+fi
+
+# 5. Team Identifier check (skip for ad-hoc)
+# codesign -dvv output: TeamIdentifier=ABCDE12345
+# Parse by '=' delimiter, NOT by space.
+echo ""
+echo "  [5/9] Team Identifier..."
+TEAM_ID="$(codesign -dvv "$APP_PATH" 2>&1 | grep '^TeamIdentifier' | head -1 | cut -d= -f2 || true)"
 if [[ -n "$TEAM_ID" && "$TEAM_ID" != "not set" ]]; then
     pass "Team Identifier = $TEAM_ID"
 else
     echo "  Team Identifier not set (ad-hoc signature)"
     skip "Team Identifier (ad-hoc mode)"
-fi
-
-# 5. Bundle identifier check
-echo ""
-echo "  [5/9] Bundle Identifier..."
-BUNDLE_ID="$(codesign -dvv "$APP_PATH" 2>&1 | grep 'Identifier' | head -1 | awk '{print $2}' || true)"
-if [[ "$BUNDLE_ID" == "com.fnb.ndg" ]]; then
-    pass "Bundle Identifier = $BUNDLE_ID"
-else
-    fail "Bundle Identifier = '$BUNDLE_ID' (expected 'com.fnb.ndg')"
 fi
 
 # ========== DMG Verification ==========
@@ -181,6 +186,9 @@ else
         fi
 
         # SHA256 checksum file
+        # The checksum file is generated:
+        # - After notarization + staple (production path, by notarize-macos-app.sh)
+        # - After DMG creation (ad-hoc path, by create-dmg.sh)
         SHA256_FILE="${DMG_PATH}.sha256"
         if [[ -f "$SHA256_FILE" ]]; then
             EXPECTED="$(cut -d' ' -f1 < "$SHA256_FILE")"
@@ -191,7 +199,7 @@ else
                 fail "SHA256 mismatch: expected=$EXPECTED actual=$ACTUAL"
             fi
         else
-            skip "SHA256 checksum file not found (optional)"
+            skip "SHA256 checksum file not found (run notarize-macos-app.sh or create-dmg.sh --ad-hoc)"
         fi
     fi
 fi
