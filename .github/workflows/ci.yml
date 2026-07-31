@@ -111,9 +111,9 @@ jobs:
 
       - name: Run golangci-lint
         run: |
-          # Install golangci-lint v1.63.0 (pinned version)
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" v1.63.0
+          # Install golangci-lint v2.12.2 (supports Go 1.26, pinned version)
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
           golangci-lint run --timeout=5m ./...
 
       - name: Run tests with race detector and coverage

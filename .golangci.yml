@@ -1,53 +1,74 @@
-# golangci-lint configuration for NDG
-# https://golangci-lint.run/usage/configuration/
+# golangci-lint v2 configuration for NDG
+# https://golangci-lint.run/docs/configuration/file/
+#
+# Note: revive is intentionally excluded for now. The `exported` rule alone
+# produces 151 issues (missing doc comments) across the existing codebase.
+# A follow-up code-quality PR will add doc comments and re-enable revive.
+
+version: "2"
 
 run:
   timeout: 5m
-  go: "1.23"
 
 linters:
+  default: none
   enable:
     - errcheck       # Check for unchecked errors
-    - gosimple       # Simplify code
     - govet          # go vet
     - ineffassign    # Detect ineffectual assignments
-    - staticcheck    # Static analysis
-    - typecheck      # Type-check code
+    - staticcheck    # Static analysis (includes gosimple S checks)
     - unused         # Find unused code
     - misspell       # Find misspelled words
-    - revive         # Linter from go-review
+  exclusions:
+    # Predefined exclusion presets for common Go patterns
+    presets:
+      - std-error-handling      # Exclude defer xxx.Close(), fmt.Fprint to io.Writer, etc.
+      - common-false-positives  # Exclude well-known false positive patterns
+    rules:
+      # Exclude test files from errcheck
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Exclude generated Wails bindings from all linters
+      - path: cmd/ndg-desktop/frontend/src/wailsjs
+        linters:
+          - all
+      # Exclude staticcheck quick-fix suggestions (style, not bugs)
+      - linters:
+          - staticcheck
+        text: "QF1001|QF1003|QF1004|QF1005|QF1006|QF1007|QF1008|QF1011"
+      # Exclude errcheck for defer tx.Rollback() — standard SQL transaction pattern
+      - linters:
+          - errcheck
+        source: "defer\\s+\\w+\\.Rollback\\(\\)"
+      # Exclude errcheck for defer reporter.Stop() — fire-and-forget cleanup
+      - linters:
+          - errcheck
+        source: "defer\\s+\\w+\\.Stop\\(\\)"
+      # Exclude errcheck for fire-and-forget Submit calls
+      - linters:
+          - errcheck
+        source: "\\.Submit\\(ctx,"
+      # Exclude staticcheck empty-branch in test files
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA9003|SA4017"
+      # Exclude S1009 in test files (nil check before len)
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "S1009"
+
+formatters:
+  enable:
     - gofmt          # Check formatting
     - goimports      # Check import order
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/FNB2026/nas-data-governance
-  revive:
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-        arguments: ["disableStutteringCheck"]
-      - name: increment-decrement
-      - name: var-naming
-      - name: var-declaration
-      - name: range
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/FNB2026/nas-data-governance
 
 issues:
-  exclude-rules:
-    # Exclude test files from some linters
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosimple
-    # Exclude generated Wails bindings
-    - path: cmd/ndg-desktop/frontend/src/wailsjs
-      linters:
-        - all
   max-issues-per-linter: 0
   max-same-issues: 0

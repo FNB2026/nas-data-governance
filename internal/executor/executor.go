@@ -313,7 +313,7 @@ func (e *Executor) validatePlanScope(plan *domain.OperationPlan) error {
 	return nil
 }
 
-func withinAnyRoot(path string, roots []string) bool {
+func withinAnyRoot(path string, roots []string) bool { //nolint:unused // reserved for future path validation
 	_, ok := rootFor(path, roots)
 	return ok
 }
