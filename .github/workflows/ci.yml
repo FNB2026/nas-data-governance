@@ -92,6 +92,12 @@ jobs:
       - name: Check public repository boundary
         run: make public-check
 
+      - name: Check version consistency
+        run: make version-check
+
+      - name: Run version mapping tests
+        run: ./scripts/release/test-version-mapping.sh
+
       - name: Run go vet
         run: go vet ./...
 

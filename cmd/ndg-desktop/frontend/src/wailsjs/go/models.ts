@@ -1886,6 +1886,26 @@ export namespace wails {
 	        this.reason = source["reason"];
 	    }
 	}
+	export class ScanCheckpointDTO {
+	    available: boolean;
+	    last_scanned_path?: string;
+	    scanned_count: number;
+	    status: string;
+	    started_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScanCheckpointDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.last_scanned_path = source["last_scanned_path"];
+	        this.scanned_count = source["scanned_count"];
+	        this.status = source["status"];
+	        this.started_at = source["started_at"];
+	    }
+	}
 	export class ScanJobProgress {
 	    job_id: string;
 	    state: string;
@@ -1916,26 +1936,6 @@ export namespace wails {
 	        this.created_at = source["created_at"];
 	        this.started_at = source["started_at"];
 	        this.completed_at = source["completed_at"];
-	    }
-	}
-	export class ScanCheckpointDTO {
-	    available: boolean;
-	    last_scanned_path?: string;
-	    scanned_count: number;
-	    status: string;
-	    started_at?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ScanCheckpointDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.available = source["available"];
-	        this.last_scanned_path = source["last_scanned_path"];
-	        this.scanned_count = source["scanned_count"];
-	        this.status = source["status"];
-	        this.started_at = source["started_at"];
 	    }
 	}
 	export class StartScanRequest {
@@ -1992,6 +1992,7 @@ export namespace wails {
 	    version: string;
 	    commit: string;
 	    build_time: string;
+	    channel: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
@@ -2002,6 +2003,7 @@ export namespace wails {
 	        this.version = source["version"];
 	        this.commit = source["commit"];
 	        this.build_time = source["build_time"];
+	        this.channel = source["channel"];
 	    }
 	}
 

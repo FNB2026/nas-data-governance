@@ -38,6 +38,7 @@ type VersionInfo struct {
 	Version   string `json:"version"`
 	Commit    string `json:"commit"`
 	BuildTime string `json:"build_time"`
+	Channel   string `json:"channel"`
 }
 
 // ProjectInfo describes the currently open project.
@@ -159,6 +160,7 @@ func (a *API) GetVersion() VersionInfo {
 		Version:   v.Version,
 		Commit:    v.Commit,
 		BuildTime: v.BuildTime,
+		Channel:   v.Channel,
 	}
 }
 

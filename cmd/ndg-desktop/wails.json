@@ -1,8 +1,8 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "ndg-desktop",
-  "outputfilename": "ndg-desktop",
-  "frontend:install": "npm install",
+  "name": "NDG",
+  "outputfilename": "NDG",
+  "frontend:install": "npm ci",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
@@ -13,8 +13,8 @@
   "info": {
     "companyName": "NDG",
     "productName": "NDG 数据治理工作台",
-    "productVersion": "1.0.0",
+    "productVersion": "0.5.0-beta.1",
     "copyright": "Copyright © 2026 NDG",
-    "comments": "NAS Data Governance Desktop Workbench"
+    "comments": "Local-first NAS data governance workbench"
   }
 }

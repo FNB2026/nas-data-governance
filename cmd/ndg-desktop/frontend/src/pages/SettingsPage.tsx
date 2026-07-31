@@ -39,6 +39,10 @@ export default function SettingsPage() {
                 <td>构建时间</td>
                 <td className="mono">{version.build_time}</td>
               </tr>
+              <tr>
+                <td>发布通道</td>
+                <td className="mono">{version.channel || "—"}</td>
+              </tr>
             </tbody>
           </table>
         ) : (
