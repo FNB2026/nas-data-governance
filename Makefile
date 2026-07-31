@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -112,3 +112,52 @@ desktop-build: wails-check
 	  -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME) -X $(VERSION_PKG).Channel=$(CHANNEL)"
 
 desktop: desktop-build
+
+# ---- macOS distribution targets ----
+# These targets handle signing, notarization, and DMG creation.
+# They require a macOS host with Developer ID certificates.
+# For local testing without Developer ID, use: make desktop-sign AD_HOC=true
+
+# desktop-sign: Sign the .app bundle with Hardened Runtime + entitlements.
+# Pass AD_HOC=true for local testing (no Developer ID required).
+desktop-sign: desktop-build
+	@if [[ "$(AD_HOC)" == "true" ]]; then \
+		./scripts/release/sign-macos-app.sh --ad-hoc; \
+	else \
+		./scripts/release/sign-macos-app.sh; \
+	fi
+
+# desktop-dmg: Create a distributable DMG from the signed .app.
+# Depends on desktop-sign to ensure the .app is signed first.
+desktop-dmg: desktop-sign
+	@if [[ "$(AD_HOC)" == "true" ]]; then \
+		./scripts/release/create-dmg.sh --ad-hoc; \
+	else \
+		./scripts/release/create-dmg.sh; \
+	fi
+
+# desktop-notarize: Submit the signed DMG to Apple for notarization,
+# wait for approval, then staple the ticket.
+# Requires notarization credentials (see notarize-macos-app.sh --help).
+# NOTARY_PROFILE env var or --keychain-profile arg is the recommended method.
+desktop-notarize: desktop-dmg
+	@if [[ -n "$(NOTARY_PROFILE)" ]]; then \
+		./scripts/release/notarize-macos-app.sh --keychain-profile "$(NOTARY_PROFILE)"; \
+	else \
+		./scripts/release/notarize-macos-app.sh; \
+	fi
+
+# desktop-verify: Verify all macOS release artifacts.
+# Checks .app signature, Hardened Runtime, entitlements, DMG signature,
+# notarization staple, Gatekeeper assessment, and checksums.
+desktop-verify:
+	./scripts/release/verify-macos-release.sh
+
+# desktop-release: Full macOS release pipeline.
+# Build → Sign → DMG → Notarize → Staple → Verify.
+# This is the one-command release path for production builds.
+desktop-release: desktop-notarize
+	./scripts/release/verify-macos-release.sh
+	@echo ""
+	@echo "==> macOS release artifacts in $(DIST_DIR)/:"
+	@ls -lh $(DIST_DIR)/*.dmg* 2>/dev/null || echo "  (no DMG artifacts found)"
