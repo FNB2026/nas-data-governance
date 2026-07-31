@@ -17,13 +17,14 @@ id = "apple-developer-id-certificate"
 description = "Apple Developer ID certificate reference"
 regex = '''Developer\s+ID\s+Application\s*[:\-]\s*[A-Za-z0-9\s]+\([A-Z0-9]{10}\)'''
 tags = ["apple", "certificate", "developer-id"]
-# B4: Rule-specific allowlist — only allow known mock patterns in specific
-# release scripts and test fixtures. Full-path allowlists that bypass ALL
-# rules for sensitive files are a security blind spot and have been removed.
-allowlist = [
-  { path = '''scripts/release/sign-macos-app\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
-  { path = '''scripts/release/test-macos-scripts\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
-  { path = '''scripts/release/test-release-workflow\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
+
+# B4: Rule-specific allowlist — only allow the exact mock pattern used in
+# test scripts and help text. No path-based bypass; release scripts remain
+# under full Gitleaks scan. Only the literal mock string is allowed.
+[rules.allowlist]
+description = "Allow mock Developer ID certificate pattern in tests"
+regexes = [
+  '''Developer ID Application: Your Name \(TEAMID\)''',
 ]
 
 # Detect App Store Connect API key references
@@ -32,11 +33,12 @@ id = "app-store-connect-api-key"
 description = "App Store Connect API key"
 regex = '''AuthKey_[A-Z0-9]{10}\.p8'''
 tags = ["apple", "api-key", "app-store-connect"]
-# B4: Rule-specific allowlist — only mock patterns in specific scripts.
-allowlist = [
-  { path = '''scripts/release/notarize-macos-app\.sh''', regex = '''AuthKey_KEYID\.p8''' },
-  { path = '''scripts/release/test-macos-scripts\.sh''', regex = '''AuthKey_KEYID\.p8''' },
-  { path = '''scripts/release/test-release-workflow\.sh''', regex = '''AuthKey_KEYID\.p8''' },
+
+# B4: Rule-specific allowlist — only allow the exact mock pattern.
+[rules.allowlist]
+description = "Allow mock API key pattern in tests"
+regexes = [
+  '''AuthKey_KEYID\.p8''',
 ]
 
 # Detect NDG database file paths in non-source files (should not be in logs/configs)
@@ -55,9 +57,12 @@ regex = '''security\s+(create|unlock)-keychain\s+-p\s+["\'][^"\']+["\']'''
 tags = ["keychain", "password", "macos"]
 
 # ---------------------------------------------------------------------------
-# Allowlist — patterns that should NOT be flagged
+# Global Allowlist — patterns that should NOT be flagged by ANY rule
 # B4: Removed full-path allowlist that bypassed all rules for sensitive files.
 #     Only regex-based allowlist for known mock/example values remains.
+#     Release scripts (sign-macos-app.sh, notarize-macos-app.sh, create-dmg.sh,
+#     verify-macos-release.sh) and release.yml are NOT path-allowlisted and
+#     remain under full default + custom Gitleaks scan.
 # ---------------------------------------------------------------------------
 
 [allowlist]
