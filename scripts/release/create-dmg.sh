@@ -67,6 +67,9 @@ echo "create-dmg: VERSION = $VERSION"
 echo "create-dmg: DMG = $DMG_OUTPUT"
 
 # --- Determine signing identity ---
+# Fail closed: if --ad-hoc is NOT explicitly passed and no Developer ID
+# certificate is found, the script exits with an error. This prevents
+# accidentally producing an unsigned DMG that looks like a success.
 if [[ "$AD_HOC" == "false" ]]; then
     if [[ -z "$SIGNING_IDENTITY" ]]; then
         # Parse: '  1) ABCDE12345 "Developer ID Application: Your Name (TEAMID)"'
@@ -77,10 +80,10 @@ if [[ "$AD_HOC" == "false" ]]; then
     fi
 
     if [[ -z "$SIGNING_IDENTITY" ]]; then
-        echo "create-dmg: WARNING — no Developer ID Application certificate found" >&2
-        echo "  DMG will be created but NOT signed. Notarization will fail." >&2
-        echo "  Use --ad-hoc to suppress this warning for local testing." >&2
-        AD_HOC=true
+        echo "create-dmg: FAIL — no Developer ID Application certificate found" >&2
+        echo "  Production DMG requires a Developer ID to sign and notarize." >&2
+        echo "  Use --ad-hoc explicitly for local-only testing (NOT for distribution)." >&2
+        exit 1
     fi
 fi
 

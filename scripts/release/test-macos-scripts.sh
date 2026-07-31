@@ -181,6 +181,22 @@ else
     fail "notarize-macos-app.sh missing exit 1 on post-staple verify failure"
 fi
 
+# Check create-dmg.sh fails closed (no auto-downgrade to ad-hoc)
+if grep -A3 'no Developer ID Application certificate found' "$ROOT/scripts/release/create-dmg.sh" | grep -q 'exit 1'; then
+    pass "create-dmg.sh fails closed when no Developer ID (no auto-downgrade)"
+else
+    fail "create-dmg.sh auto-downgrades to ad-hoc instead of failing"
+fi
+
+# Verify AD_HOC=true is NOT set automatically (outside of --ad-hoc arg parsing)
+# The only legitimate AD_HOC=true is in the --ad-hoc) case statement line.
+AUTO_DOWNGRADE_LINES="$(grep -n 'AD_HOC=true' "$ROOT/scripts/release/create-dmg.sh" | grep -v 'AD_HOC=false' | grep -v 'AD_HOC="${AD_HOC' | grep -v '\-\-ad-hoc)' || true)"
+if [[ -n "$AUTO_DOWNGRADE_LINES" ]]; then
+    fail "create-dmg.sh sets AD_HOC=true automatically outside arg parsing: $AUTO_DOWNGRADE_LINES"
+else
+    pass "create-dmg.sh does not auto-set AD_HOC=true (only via --ad-hoc arg)"
+fi
+
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -213,13 +229,25 @@ else
     fail "notarize-macos-app.sh does not generate SHA256 after staple"
 fi
 
-# Verify SHA256 generation comes AFTER staple in notarize script
-STAPLE_LINE="$(grep -n 'stapler staple' "$ROOT/scripts/release/notarize-macos-app.sh" | head -1 | cut -d: -f1)"
-SHA256_LINE="$(grep -n 'shasum' "$ROOT/scripts/release/notarize-macos-app.sh" | head -1 | cut -d: -f1)"
-if [[ -n "$STAPLE_LINE" && -n "$SHA256_LINE" && "$SHA256_LINE" -gt "$STAPLE_LINE" ]]; then
-    pass "SHA256 generation line ($SHA256_LINE) is after staple line ($STAPLE_LINE)"
+# Verify SHA256 generation comes AFTER the actual staple command (not a comment)
+STAPLE_LINE="$(
+    grep -nE '^[[:space:]]*xcrun[[:space:]]+stapler[[:space:]]+staple[[:space:]]' \
+        "$ROOT/scripts/release/notarize-macos-app.sh" |
+    head -1 |
+    cut -d: -f1
+)"
+SHA256_LINE="$(
+    grep -nE '^[[:space:]]*SHA256=.*shasum[[:space:]]+-a[[:space:]]+256' \
+        "$ROOT/scripts/release/notarize-macos-app.sh" |
+    head -1 |
+    cut -d: -f1
+)"
+if [[ -z "$STAPLE_LINE" || -z "$SHA256_LINE" ]]; then
+    fail "actual staple or SHA256 command not found (staple=$STAPLE_LINE sha256=$SHA256_LINE)"
+elif (( SHA256_LINE > STAPLE_LINE )); then
+    pass "final SHA256 is generated after actual staple command (staple=$STAPLE_LINE sha256=$SHA256_LINE)"
 else
-    fail "SHA256 generation is not after staple (staple=$STAPLE_LINE sha256=$SHA256_LINE)"
+    fail "SHA256 is generated before or at staple (staple=$STAPLE_LINE sha256=$SHA256_LINE)"
 fi
 
 echo ""
@@ -273,9 +301,16 @@ else
     pass "files entitlements correctly absent (no App Sandbox)"
 fi
 
-# Validate plist syntax
-if plutil -lint "$ENTITLEMENTS" >/dev/null 2>&1; then
-    pass "entitlements plist is valid XML"
+# Validate plist syntax using Python plistlib (cross-platform, works on Ubuntu CI)
+# plutil is macOS-only and unavailable on Linux runners.
+if python3 - "$ENTITLEMENTS" <<'PY'
+import plistlib
+import sys
+with open(sys.argv[1], "rb") as f:
+    plistlib.load(f)
+PY
+then
+    pass "entitlements plist is valid (python3 plistlib)"
 else
     fail "entitlements plist is invalid XML"
 fi
