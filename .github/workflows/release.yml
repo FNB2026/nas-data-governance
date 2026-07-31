@@ -330,7 +330,7 @@ jobs:
 
           # Export for use by sign-macos-app.sh via $GITHUB_ENV.
           # B10: Subsequent steps use $SIGNING_IDENTITY directly from the shell
-          # environment — do NOT re-declare via env: ${{ env.* }}, which can
+          # environment — do NOT re-declare via env: context, which can
           # resolve to empty and override the $GITHUB_ENV value.
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
           echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
@@ -339,7 +339,7 @@ jobs:
       - name: Sign .app with Developer ID
         run: |
           # B10: SIGNING_IDENTITY is set via $GITHUB_ENV in the previous step.
-          # Do NOT re-declare via env: ${{ env.* }} — that can resolve to empty
+          # Do NOT re-declare via env: context — that can resolve to empty
           # and override the $GITHUB_ENV value, causing sign-macos-app.sh to
           # auto-detect and potentially use the wrong certificate.
           if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
@@ -372,7 +372,7 @@ jobs:
       - name: Verify release artifacts with Team ID assertion
         run: |
           # B10: APPLE_TEAM_ID is set via $GITHUB_ENV in the identity verification
-          # step. Do NOT re-declare via env: ${{ env.* }} — that can resolve to
+          # step. Do NOT re-declare via env: context — that can resolve to
           # empty and cause the TeamIdentifier assertion to be silently skipped.
           if [[ -z "${APPLE_TEAM_ID:-}" ]]; then
             echo "FAIL — APPLE_TEAM_ID is empty (GITHUB_ENV propagation failed)" >&2
