@@ -160,7 +160,8 @@ jobs:
           fi
 
           tar -xzf "/tmp/${ARCHIVE}" -C /tmp actionlint
-          /tmp/actionlint -color .github/workflows/
+          # actionlint requires file paths, not directories
+          /tmp/actionlint -color .github/workflows/*.yml
 
   # ===========================================================================
   # Desktop Build — Regression check that the macOS .app builds successfully.
