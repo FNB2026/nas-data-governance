@@ -33,6 +33,56 @@ done
 
 mkdir -p "$OUTPUT_DIR"
 
+# ---------------------------------------------------------------------------
+# B3: Validate SBOM JSON output — both files must be valid JSON with
+# required top-level fields (CycloneDX: components; SPDX: packages).
+# ---------------------------------------------------------------------------
+validate_sbom_output() {
+    local dir="$1"
+    local cyclonedx_file="$dir/sbom.cyclonedx.json"
+    local spdx_file="$dir/sbom.spdx.json"
+
+    # Check files exist
+    if [[ ! -f "$cyclonedx_file" ]]; then
+        echo "generate-sbom: FAIL — CycloneDX SBOM file not found: $cyclonedx_file" >&2
+        exit 1
+    fi
+    if [[ ! -f "$spdx_file" ]]; then
+        echo "generate-sbom: FAIL — SPDX SBOM file not found: $spdx_file" >&2
+        exit 1
+    fi
+
+    # Validate JSON syntax (jq will fail on malformed JSON)
+    if ! jq . "$cyclonedx_file" >/dev/null 2>&1; then
+        echo "generate-sbom: FAIL — CycloneDX SBOM is not valid JSON: $cyclonedx_file" >&2
+        exit 1
+    fi
+    if ! jq . "$spdx_file" >/dev/null 2>&1; then
+        echo "generate-sbom: FAIL — SPDX SBOM is not valid JSON: $spdx_file" >&2
+        exit 1
+    fi
+
+    # Validate CycloneDX has non-empty components array
+    local cyclonedx_components
+    cyclonedx_components="$(jq '.components | length' "$cyclonedx_file" 2>/dev/null || echo "0")"
+    if [[ "$cyclonedx_components" == "0" || "$cyclonedx_components" == "null" ]]; then
+        echo "generate-sbom: FAIL — CycloneDX SBOM has no components" >&2
+        exit 1
+    fi
+
+    # Validate SPDX has non-empty packages array
+    local spdx_packages
+    spdx_packages="$(jq '.packages | length' "$spdx_file" 2>/dev/null || echo "0")"
+    if [[ "$spdx_packages" == "0" || "$spdx_packages" == "null" ]]; then
+        echo "generate-sbom: FAIL — SPDX SBOM has no packages" >&2
+        exit 1
+    fi
+
+    echo "generate-sbom: OK — SBOM validation passed"
+    echo "  CycloneDX components: $cyclonedx_components"
+    echo "  SPDX packages:        $spdx_packages"
+}
+
 echo "generate-sbom: generating SBOM for NDG..."
 
 # ---------------------------------------------------------------------------
@@ -41,29 +91,39 @@ echo "generate-sbom: generating SBOM for NDG..."
 if command -v syft >/dev/null 2>&1; then
     echo "generate-sbom: using syft (found in PATH)"
 
+    # B3: No fail-open — syft errors must propagate.
     # Generate CycloneDX format
-    syft dir "$ROOT" \
+    if ! syft dir "$ROOT" \
         --output cyclonedx-json="$OUTPUT_DIR/sbom.cyclonedx.json" \
         --exclude '**/.git/**' \
         --exclude '**/node_modules/**' \
         --exclude '**/build/**' \
-        --exclude '**/dist/**' 2>&1 || true
+        --exclude '**/dist/**'; then
+        echo "generate-sbom: FAIL — syft failed to generate CycloneDX SBOM" >&2
+        exit 1
+    fi
 
     # Generate SPDX format
-    syft dir "$ROOT" \
+    if ! syft dir "$ROOT" \
         --output spdx-json="$OUTPUT_DIR/sbom.spdx.json" \
         --exclude '**/.git/**' \
         --exclude '**/node_modules/**' \
         --exclude '**/build/**' \
-        --exclude '**/dist/**' 2>&1 || true
+        --exclude '**/dist/**'; then
+        echo "generate-sbom: FAIL — syft failed to generate SPDX SBOM" >&2
+        exit 1
+    fi
 
     if [[ -f "$OUTPUT_DIR/sbom.cyclonedx.json" && -f "$OUTPUT_DIR/sbom.spdx.json" ]]; then
+        # B3: Validate JSON output before declaring success
+        validate_sbom_output "$OUTPUT_DIR"
         echo "generate-sbom: OK — SBOM generated via syft"
         echo "  CycloneDX: $OUTPUT_DIR/sbom.cyclonedx.json"
         echo "  SPDX:      $OUTPUT_DIR/sbom.spdx.json"
         exit 0
     fi
-    echo "generate-sbom: syft scan incomplete, falling back to manual generation..."
+    echo "generate-sbom: FAIL — syft scan did not produce expected output files" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -73,7 +133,6 @@ fi
 echo "generate-sbom: installing syft..."
 
 SYFT_VERSION="v1.18.2"
-SYFT_URL="https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
 
 # Detect platform
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -93,38 +152,60 @@ esac
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# B3: Download syft and verify SHA256 checksum from official source.
 curl --fail --location --silent --show-error --output "$TMP_DIR/syft.tar.gz" "$SYFT_URL"
+
+# Download and verify the official SHA256 checksum
+SYFT_CHECKSUM_URL="${SYFT_URL}.sha256"
+curl --fail --location --silent --show-error --output "$TMP_DIR/syft.tar.gz.sha256" "$SYFT_CHECKSUM_URL"
+
+# The .sha256 file format is "<hash>  <filename>" — verify against our download
+EXPECTED_HASH="$(awk '{print $1}' "$TMP_DIR/syft.tar.gz.sha256")"
+ACTUAL_HASH="$(shasum -a 256 "$TMP_DIR/syft.tar.gz" | awk '{print $1}')"
+
+if [[ -z "$EXPECTED_HASH" ]]; then
+    echo "generate-sbom: FAIL — could not retrieve official SHA256 checksum for syft" >&2
+    exit 1
+fi
+
+if [[ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]]; then
+    echo "generate-sbom: FAIL — syft checksum mismatch" >&2
+    echo "  Expected: $EXPECTED_HASH" >&2
+    echo "  Actual:   $ACTUAL_HASH" >&2
+    exit 1
+fi
+echo "generate-sbom: OK — syft checksum verified"
+
 tar -xzf "$TMP_DIR/syft.tar.gz" -C "$TMP_DIR" syft
 chmod +x "$TMP_DIR/syft"
 
 echo "generate-sbom: running syft..."
 
+# B3: No fail-open — syft errors must propagate.
 # Generate CycloneDX format
-"$TMP_DIR/syft" dir "$ROOT" \
+if ! "$TMP_DIR/syft" dir "$ROOT" \
     --output cyclonedx-json="$OUTPUT_DIR/sbom.cyclonedx.json" \
     --exclude '**/.git/**' \
     --exclude '**/node_modules/**' \
     --exclude '**/build/**' \
-    --exclude '**/dist/**'
+    --exclude '**/dist/**'; then
+    echo "generate-sbom: FAIL — syft failed to generate CycloneDX SBOM" >&2
+    exit 1
+fi
 
 # Generate SPDX format
-"$TMP_DIR/syft" dir "$ROOT" \
+if ! "$TMP_DIR/syft" dir "$ROOT" \
     --output spdx-json="$OUTPUT_DIR/sbom.spdx.json" \
     --exclude '**/.git/**' \
     --exclude '**/node_modules/**' \
     --exclude '**/build/**' \
-    --exclude '**/dist/**'
-
-# Verify outputs
-if [[ ! -f "$OUTPUT_DIR/sbom.cyclonedx.json" ]]; then
-    echo "generate-sbom: FAIL — CycloneDX SBOM was not generated" >&2
+    --exclude '**/dist/**'; then
+    echo "generate-sbom: FAIL — syft failed to generate SPDX SBOM" >&2
     exit 1
 fi
 
-if [[ ! -f "$OUTPUT_DIR/sbom.spdx.json" ]]; then
-    echo "generate-sbom: FAIL — SPDX SBOM was not generated" >&2
-    exit 1
-fi
+# B3: Validate JSON output structure before declaring success
+validate_sbom_output "$OUTPUT_DIR"
 
 echo "generate-sbom: OK — SBOM generated"
 echo "  CycloneDX: $OUTPUT_DIR/sbom.cyclonedx.json"

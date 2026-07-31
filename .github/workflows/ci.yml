@@ -106,6 +106,9 @@ jobs:
       - name: Run macOS release script tests
         run: ./scripts/release/test-macos-scripts.sh
 
+      - name: Run release workflow structure tests
+        run: ./scripts/release/test-release-workflow.sh
+
       - name: Run go vet
         run: go vet ./...
 
@@ -124,7 +127,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: coverage.out
@@ -132,6 +135,32 @@ jobs:
 
       - name: Build CLI
         run: make build
+
+      - name: Run actionlint (workflow linter)
+        run: |
+          # B6: Install actionlint v1.7.7 (pinned version) with SHA256 verification.
+          ACTIONLINT_VERSION="1.7.7"
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ARCHIVE}"
+          CHECKSUMS_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+
+          curl --fail --location --silent --show-error --output "/tmp/${ARCHIVE}" "$URL"
+          curl --fail --location --silent --show-error --output "/tmp/actionlint_checksums.txt" "$CHECKSUMS_URL"
+
+          # Verify SHA256 against official checksums file
+          EXPECTED_HASH="$(grep "${ARCHIVE}" /tmp/actionlint_checksums.txt | awk '{print $1}')"
+          ACTUAL_HASH="$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')"
+          if [[ -z "$EXPECTED_HASH" ]]; then
+            echo "FAIL — actionlint checksum not found in official checksums file" >&2
+            exit 1
+          fi
+          if [[ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]]; then
+            echo "FAIL — actionlint checksum mismatch: expected=$EXPECTED_HASH actual=$ACTUAL_HASH" >&2
+            exit 1
+          fi
+
+          tar -xzf "/tmp/${ARCHIVE}" -C /tmp actionlint
+          /tmp/actionlint -color .github/workflows/
 
   # ===========================================================================
   # Desktop Build — Regression check that the macOS .app builds successfully.

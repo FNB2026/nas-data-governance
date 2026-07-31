@@ -29,6 +29,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_PATH="${APP_PATH:-}"
 DMG_PATH="${DMG_PATH:-}"
 APP_ONLY=false
+EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --app) APP_PATH="$2"; shift 2 ;;
         --dmg) DMG_PATH="$2"; shift 2 ;;
         --app-only) APP_ONLY=true; shift ;;
+        --expected-team-id) EXPECTED_TEAM_ID="$2"; shift 2 ;;
         *) echo "verify: unknown argument '$1'" >&2; exit 1 ;;
     esac
 done
@@ -123,17 +125,32 @@ else
     fail "Bundle Identifier = '$BUNDLE_ID' (expected 'com.fnb.ndg')"
 fi
 
-# 5. Team Identifier check (skip for ad-hoc)
+# 5. Team Identifier check
 # codesign -dvv output: TeamIdentifier=ABCDE12345
 # Parse by '=' delimiter, NOT by space.
+# B5: When --expected-team-id is provided, assert the actual TeamIdentifier
+#     matches. This ensures the app was signed with the expected certificate.
 echo ""
 echo "  [5/9] Team Identifier..."
 TEAM_ID="$(codesign -dvv "$APP_PATH" 2>&1 | grep '^TeamIdentifier' | head -1 | cut -d= -f2 || true)"
 if [[ -n "$TEAM_ID" && "$TEAM_ID" != "not set" ]]; then
     pass "Team Identifier = $TEAM_ID"
+
+    # B5: Assert TeamIdentifier matches expected value if provided
+    if [[ -n "$EXPECTED_TEAM_ID" ]]; then
+        if [[ "$TEAM_ID" == "$EXPECTED_TEAM_ID" ]]; then
+            pass "Team Identifier matches expected value '$EXPECTED_TEAM_ID'"
+        else
+            fail "Team Identifier mismatch: expected '$EXPECTED_TEAM_ID', got '$TEAM_ID'"
+        fi
+    fi
 else
     echo "  Team Identifier not set (ad-hoc signature)"
-    skip "Team Identifier (ad-hoc mode)"
+    if [[ -n "$EXPECTED_TEAM_ID" ]]; then
+        fail "Expected Team ID '$EXPECTED_TEAM_ID' but signature is ad-hoc (no Team Identifier)"
+    else
+        skip "Team Identifier (ad-hoc mode)"
+    fi
 fi
 
 # ========== DMG Verification ==========

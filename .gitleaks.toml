@@ -17,6 +17,14 @@ id = "apple-developer-id-certificate"
 description = "Apple Developer ID certificate reference"
 regex = '''Developer\s+ID\s+Application\s*[:\-]\s*[A-Za-z0-9\s]+\([A-Z0-9]{10}\)'''
 tags = ["apple", "certificate", "developer-id"]
+# B4: Rule-specific allowlist — only allow known mock patterns in specific
+# release scripts and test fixtures. Full-path allowlists that bypass ALL
+# rules for sensitive files are a security blind spot and have been removed.
+allowlist = [
+  { path = '''scripts/release/sign-macos-app\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
+  { path = '''scripts/release/test-macos-scripts\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
+  { path = '''scripts/release/test-release-workflow\.sh''', regex = '''Developer ID Application: Your Name \(TEAMID\)''' },
+]
 
 # Detect App Store Connect API key references
 [[rules]]
@@ -24,6 +32,12 @@ id = "app-store-connect-api-key"
 description = "App Store Connect API key"
 regex = '''AuthKey_[A-Z0-9]{10}\.p8'''
 tags = ["apple", "api-key", "app-store-connect"]
+# B4: Rule-specific allowlist — only mock patterns in specific scripts.
+allowlist = [
+  { path = '''scripts/release/notarize-macos-app\.sh''', regex = '''AuthKey_KEYID\.p8''' },
+  { path = '''scripts/release/test-macos-scripts\.sh''', regex = '''AuthKey_KEYID\.p8''' },
+  { path = '''scripts/release/test-release-workflow\.sh''', regex = '''AuthKey_KEYID\.p8''' },
+]
 
 # Detect NDG database file paths in non-source files (should not be in logs/configs)
 [[rules]]
@@ -41,24 +55,15 @@ regex = '''security\s+(create|unlock)-keychain\s+-p\s+["\'][^"\']+["\']'''
 tags = ["keychain", "password", "macos"]
 
 # ---------------------------------------------------------------------------
-# Allowlist — paths and patterns that should NOT be flagged
+# Allowlist — patterns that should NOT be flagged
+# B4: Removed full-path allowlist that bypassed all rules for sensitive files.
+#     Only regex-based allowlist for known mock/example values remains.
 # ---------------------------------------------------------------------------
 
 [allowlist]
-description = "Allowed paths and patterns"
+description = "Allowed patterns (mock/example values only)"
 
-# Allow release scripts to reference certificate patterns in help text
-paths = [
-  '''scripts/release/sign-macos-app\.sh''',
-  '''scripts/release/notarize-macos-app\.sh''',
-  '''scripts/release/create-dmg\.sh''',
-  '''scripts/release/verify-macos-release\.sh''',
-  '''scripts/release/test-macos-scripts\.sh''',
-  '''\.github/workflows/release\.yml''',
-  '''docs/release/.*''',
-]
-
-# Allow example/mock values in test scripts
+# Allow example/mock values used in test scripts and help text
 regexes = [
   '''Developer ID Application: Your Name \(TEAMID\)''',
   '''ABCDE12345''',

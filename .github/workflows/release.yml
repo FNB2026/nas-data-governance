@@ -24,8 +24,10 @@ on:
     tags:
       - 'v*'
 
+# B2: Least-privilege — global default is read-only.
+# Only draft-release needs contents:write to create GitHub Releases.
 permissions:
-  contents: write  # Required for creating GitHub Releases
+  contents: read
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
@@ -91,6 +93,9 @@ jobs:
       - name: Run macOS release script tests
         run: ./scripts/release/test-macos-scripts.sh
 
+      - name: Run release workflow structure tests
+        run: ./scripts/release/test-release-workflow.sh
+
       - name: Run go vet
         run: go vet ./...
 
@@ -103,6 +108,7 @@ jobs:
   # ===========================================================================
   # Job 2: Build Unsigned — Build the .app on macOS Apple Silicon.
   # No signing is performed here; signing requires secrets in the next job.
+  # B1: .app is tar'd before upload to preserve Unix permissions (755).
   # ===========================================================================
   build-unsigned:
     name: Build Unsigned .app
@@ -158,27 +164,43 @@ jobs:
             -platform darwin/arm64 \
             -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME} -X ${VERSION_PKG}.Channel=${CHANNEL}"
 
-      - name: Verify .app was created
+      - name: Verify .app was created and executable
         run: |
           APP_PATH="cmd/ndg-desktop/build/bin/NDG.app"
           if [[ ! -d "$APP_PATH" ]]; then
             echo "FAIL — .app not found at $APP_PATH" >&2
             exit 1
           fi
-          echo "OK — .app built at $APP_PATH"
+          # Verify the main executable has correct permissions
+          EXEC="$APP_PATH/Contents/MacOS/NDG"
+          if [[ ! -x "$EXEC" ]]; then
+            echo "FAIL — executable bit missing on $EXEC" >&2
+            exit 1
+          fi
+          echo "OK — .app built at $APP_PATH (executable verified)"
           du -sh "$APP_PATH"
 
-      - name: Upload .app artifact
-        uses: actions/upload-artifact@v4
+      - name: Tar .app to preserve permissions
+        run: |
+          # B1: GitHub Actions artifacts normalize file permissions to 644.
+          # Tar the .app bundle to preserve the 755 executable bit.
+          tar -C cmd/ndg-desktop/build/bin \
+            -czf unsigned-app.tar.gz NDG.app
+          ls -lh unsigned-app.tar.gz
+
+      - name: Upload .app tarball artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: unsigned-app
-          path: cmd/ndg-desktop/build/bin/NDG.app
+          name: unsigned-app-tar
+          path: unsigned-app.tar.gz
           retention-days: 7
 
   # ===========================================================================
   # Job 3: Sign & Notarize — Sign with Developer ID, create DMG, notarize,
   # staple, and generate final SHA256.
   # Uses the "release-macos" environment with required reviewers (R-09).
+  # B5: APPLE_TEAM_ID is used to verify the signing identity and final
+  #     TeamIdentifier in the artifact.
   # ===========================================================================
   sign-notarize:
     name: Sign & Notarize
@@ -222,11 +244,24 @@ jobs:
           fi
           echo "sign-notarize: OK — all required secrets present"
 
-      - name: Download .app artifact
-        uses: actions/download-artifact@v4
+      - name: Download .app tarball artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: unsigned-app
-          path: cmd/ndg-desktop/build/bin/
+          name: unsigned-app-tar
+          path: .
+
+      - name: Untar .app and verify executable permission
+        run: |
+          # B1: Untar the .app bundle and verify permissions were preserved.
+          tar -xzf unsigned-app.tar.gz -C cmd/ndg-desktop/build/bin/
+          rm -f unsigned-app.tar.gz
+
+          EXEC="cmd/ndg-desktop/build/bin/NDG.app/Contents/MacOS/NDG"
+          if [[ ! -x "$EXEC" ]]; then
+            echo "sign-notarize: FAIL — executable bit missing on $EXEC after untar" >&2
+            exit 1
+          fi
+          echo "sign-notarize: OK — .app untarred, executable bit verified (755)"
 
       - name: Import Developer ID certificate
         env:
@@ -264,7 +299,35 @@ jobs:
 
           echo "OK — Developer ID certificate imported"
 
+      - name: Verify signing identity matches APPLE_TEAM_ID
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # B5: Extract the unique Developer ID Application identity and verify
+          # it contains the expected APPLE_TEAM_ID. This ensures the correct
+          # certificate is used for signing, not just the first one found.
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+            | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "FAIL — no 'Developer ID Application' certificate found in keychain" >&2
+            exit 1
+          fi
+
+          if [[ "$SIGNING_IDENTITY" != *"$APPLE_TEAM_ID"* ]]; then
+            echo "FAIL — signing identity '$SIGNING_IDENTITY' does not contain APPLE_TEAM_ID '$APPLE_TEAM_ID'" >&2
+            echo "  This means the imported certificate belongs to a different team." >&2
+            exit 1
+          fi
+
+          # Export for use by sign-macos-app.sh
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+          echo "OK — signing identity verified: $SIGNING_IDENTITY"
+
       - name: Sign .app with Developer ID
+        env:
+          SIGNING_IDENTITY: ${{ env.SIGNING_IDENTITY }}
         run: |
           ./scripts/release/sign-macos-app.sh
 
@@ -289,12 +352,15 @@ jobs:
           # Clean up the API key file
           rm -f "$API_KEY_PATH"
 
-      - name: Verify release artifacts
+      - name: Verify release artifacts with Team ID assertion
+        env:
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: |
-          ./scripts/release/verify-macos-release.sh
+          # B5: Pass APPLE_TEAM_ID to verify script for TeamIdentifier assertion.
+          ./scripts/release/verify-macos-release.sh --expected-team-id "$APPLE_TEAM_ID"
 
       - name: Upload signed DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signed-dmg
           path: |
@@ -304,12 +370,15 @@ jobs:
 
   # ===========================================================================
   # Job 4: Draft Release — Create GitHub Release with artifacts + SBOM.
+  # B2: This is the only job that needs contents:write.
   # ===========================================================================
   draft-release:
     name: Draft GitHub Release
     runs-on: ubuntu-latest
     needs: sign-notarize
     timeout-minutes: 15
+    permissions:
+      contents: write  # Required for creating GitHub Releases
 
     steps:
       - name: Checkout repository
@@ -331,7 +400,7 @@ jobs:
           cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
 
       - name: Download signed DMG artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: signed-dmg
           path: dist/
@@ -340,7 +409,7 @@ jobs:
         working-directory: cmd/ndg-desktop/frontend
         run: npm ci
 
-      - name: Generate SBOM (CycloneDX)
+      - name: Generate SBOM (CycloneDX + SPDX)
         run: ./scripts/release/generate-sbom.sh
 
       - name: Display artifacts
