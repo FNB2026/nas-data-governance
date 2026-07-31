@@ -303,32 +303,49 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # B5: Extract the unique Developer ID Application identity and verify
-          # it contains the expected APPLE_TEAM_ID. This ensures the correct
-          # certificate is used for signing, not just the first one found.
+          # B5/B10: Filter ALL Developer ID Application identities by APPLE_TEAM_ID
+          # to ensure precise matching. Do NOT just take the first identity and
+          # check it afterwards — that could select the wrong certificate.
           SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-            | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+            | awk -F '"' '/Developer ID Application/ { print $2 }' \
+            | grep "$APPLE_TEAM_ID" \
+            || true)"
 
-          if [[ -z "$SIGNING_IDENTITY" ]]; then
-            echo "FAIL — no 'Developer ID Application' certificate found in keychain" >&2
+          # Count matching identities (one per line)
+          MATCH_COUNT="$(printf '%s\n' "$SIGNING_IDENTITY" | grep -c . 2>/dev/null || echo 0)"
+
+          if [[ "$MATCH_COUNT" -eq 0 ]]; then
+            echo "FAIL — no 'Developer ID Application' certificate matching APPLE_TEAM_ID '$APPLE_TEAM_ID' found" >&2
+            echo "  Available codesigning identities:" >&2
+            security find-identity -v -p codesigning 2>&1 | sed 's/^/    /' >&2
             exit 1
           fi
 
-          if [[ "$SIGNING_IDENTITY" != *"$APPLE_TEAM_ID"* ]]; then
-            echo "FAIL — signing identity '$SIGNING_IDENTITY' does not contain APPLE_TEAM_ID '$APPLE_TEAM_ID'" >&2
-            echo "  This means the imported certificate belongs to a different team." >&2
+          if [[ "$MATCH_COUNT" -gt 1 ]]; then
+            echo "FAIL — multiple Developer ID Application certificates match APPLE_TEAM_ID '$APPLE_TEAM_ID':" >&2
+            printf '%s\n' "$SIGNING_IDENTITY" | sed 's/^/    /' >&2
+            echo "  Remove duplicate certificates from the keychain." >&2
             exit 1
           fi
 
-          # Export for use by sign-macos-app.sh
+          # Export for use by sign-macos-app.sh via $GITHUB_ENV.
+          # B10: Subsequent steps use $SIGNING_IDENTITY directly from the shell
+          # environment — do NOT re-declare via env: ${{ env.* }}, which can
+          # resolve to empty and override the $GITHUB_ENV value.
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
           echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
           echo "OK — signing identity verified: $SIGNING_IDENTITY"
 
       - name: Sign .app with Developer ID
-        env:
-          SIGNING_IDENTITY: ${{ env.SIGNING_IDENTITY }}
         run: |
+          # B10: SIGNING_IDENTITY is set via $GITHUB_ENV in the previous step.
+          # Do NOT re-declare via env: ${{ env.* }} — that can resolve to empty
+          # and override the $GITHUB_ENV value, causing sign-macos-app.sh to
+          # auto-detect and potentially use the wrong certificate.
+          if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
+            echo "FAIL — SIGNING_IDENTITY is empty (GITHUB_ENV propagation failed)" >&2
+            exit 1
+          fi
           ./scripts/release/sign-macos-app.sh
 
       - name: Create signed DMG
@@ -353,9 +370,14 @@ jobs:
           rm -f "$API_KEY_PATH"
 
       - name: Verify release artifacts with Team ID assertion
-        env:
-          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: |
+          # B10: APPLE_TEAM_ID is set via $GITHUB_ENV in the identity verification
+          # step. Do NOT re-declare via env: ${{ env.* }} — that can resolve to
+          # empty and cause the TeamIdentifier assertion to be silently skipped.
+          if [[ -z "${APPLE_TEAM_ID:-}" ]]; then
+            echo "FAIL — APPLE_TEAM_ID is empty (GITHUB_ENV propagation failed)" >&2
+            exit 1
+          fi
           # B5: Pass APPLE_TEAM_ID to verify script for TeamIdentifier assertion.
           ./scripts/release/verify-macos-release.sh --expected-team-id "$APPLE_TEAM_ID"
 
@@ -448,22 +470,48 @@ jobs:
             echo "draft-release: version '$VERSION' contains pre-release suffix, marking as pre-release"
           fi
 
-          # B9: Idempotent release creation — if a draft release already exists
+          # B9/B11: Idempotent release creation — if a draft release already exists
           # (e.g. from a previous failed run), update it instead of failing.
+          # B11: Only update if the release is still a draft and not immutable.
+          # Published or immutable releases must NOT be modified — fail closed.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "draft-release: Release '$TAG' already exists, updating..."
+            echo "draft-release: Release '$TAG' already exists, checking state..."
+
+            # B11: Query release state to ensure it's safe to update.
+            # isDraft must be true; isImmutable must be false.
+            RELEASE_JSON="$(gh release view "$TAG" --json isDraft,isPrerelease,isImmutable)"
+            IS_DRAFT="$(echo "$RELEASE_JSON" | jq -r '.isDraft')"
+            IS_PRERELEASE="$(echo "$RELEASE_JSON" | jq -r '.isPrerelease')"
+            IS_IMMUTABLE="$(echo "$RELEASE_JSON" | jq -r '.isImmutable')"
+
+            echo "  isDraft=$IS_DRAFT isPrerelease=$IS_PRERELEASE isImmutable=$IS_IMMUTABLE"
+
+            if [[ "$IS_DRAFT" != "true" || "$IS_IMMUTABLE" == "true" ]]; then
+              echo "FAIL — Release '$TAG' is already published or immutable, refusing to modify" >&2
+              echo "  isDraft=$IS_DRAFT isImmutable=$IS_IMMUTABLE" >&2
+              echo "  A published release cannot be overwritten. Delete it manually if a rerun is needed." >&2
+              exit 1
+            fi
+
+            echo "draft-release: Release '$TAG' is a mutable draft, updating..."
+
             gh release edit "$TAG" \
               --title "NDG ${VERSION}" \
               --notes-file /tmp/release-notes.md
 
-            # Re-apply draft and prerelease flags to ensure correct state
+            # B8/B11: Re-apply draft and prerelease flags to ensure correct state.
+            # Beta: prerelease=true, latest=false
+            # Stable: prerelease=false
             if [[ "$VERSION" == *-* ]]; then
               gh release edit "$TAG" --draft --prerelease --latest=false
             else
               gh release edit "$TAG" --draft
             fi
 
-            # B9: Upload assets with --clobber to overwrite any existing files
+            # B9: Upload assets with --clobber to overwrite any existing files.
+            # Note: --clobber deletes the old asset before uploading the new one.
+            # If upload fails, the old asset is lost — but this is acceptable
+            # because the release is still a draft (not yet published).
             gh release upload "$TAG" \
               dist/*.dmg \
               dist/*.dmg.sha256 \

@@ -8,7 +8,11 @@
 # Prerequisites:
 #   - Go (for cyclonedx-gomod)
 #   - Node.js (for npm)
-#   - syft (installed automatically if not present)
+#   - curl, shasum, jq (for syft download and verification)
+#
+# B12: This script ALWAYS downloads and verifies a pinned syft version.
+# It does NOT use any syft found in PATH, to ensure supply-chain integrity
+# and reproducible SBOM generation.
 #
 # Usage:
 #   ./scripts/release/generate-sbom.sh
@@ -86,51 +90,11 @@ validate_sbom_output() {
 echo "generate-sbom: generating SBOM for NDG..."
 
 # ---------------------------------------------------------------------------
-# Method 1: Use syft if available (covers both Go and npm in one scan)
+# B12: Always download and verify a pinned syft version.
+# Do NOT use any syft found in PATH — that bypasses version pinning and
+# SHA256 verification, breaking supply-chain integrity and reproducibility.
 # ---------------------------------------------------------------------------
-if command -v syft >/dev/null 2>&1; then
-    echo "generate-sbom: using syft (found in PATH)"
-
-    # B3: No fail-open — syft errors must propagate.
-    # Generate CycloneDX format
-    if ! syft dir "$ROOT" \
-        --output cyclonedx-json="$OUTPUT_DIR/sbom.cyclonedx.json" \
-        --exclude '**/.git/**' \
-        --exclude '**/node_modules/**' \
-        --exclude '**/build/**' \
-        --exclude '**/dist/**'; then
-        echo "generate-sbom: FAIL — syft failed to generate CycloneDX SBOM" >&2
-        exit 1
-    fi
-
-    # Generate SPDX format
-    if ! syft dir "$ROOT" \
-        --output spdx-json="$OUTPUT_DIR/sbom.spdx.json" \
-        --exclude '**/.git/**' \
-        --exclude '**/node_modules/**' \
-        --exclude '**/build/**' \
-        --exclude '**/dist/**'; then
-        echo "generate-sbom: FAIL — syft failed to generate SPDX SBOM" >&2
-        exit 1
-    fi
-
-    if [[ -f "$OUTPUT_DIR/sbom.cyclonedx.json" && -f "$OUTPUT_DIR/sbom.spdx.json" ]]; then
-        # B3: Validate JSON output before declaring success
-        validate_sbom_output "$OUTPUT_DIR"
-        echo "generate-sbom: OK — SBOM generated via syft"
-        echo "  CycloneDX: $OUTPUT_DIR/sbom.cyclonedx.json"
-        echo "  SPDX:      $OUTPUT_DIR/sbom.spdx.json"
-        exit 0
-    fi
-    echo "generate-sbom: FAIL — syft scan did not produce expected output files" >&2
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Method 2: Manual generation using Go tools + npm
-# Install syft via curl if not present (for CI environments)
-# ---------------------------------------------------------------------------
-echo "generate-sbom: installing syft..."
+echo "generate-sbom: downloading pinned syft v1.20.0..."
 
 SYFT_VERSION="v1.20.0"
 
