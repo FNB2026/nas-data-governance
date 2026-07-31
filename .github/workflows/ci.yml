@@ -51,6 +51,11 @@ jobs:
       - name: Test and build frontend
         run: make frontend-check
 
+      - name: Run npm audit (high and critical)
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm audit --audit-level=high
+        continue-on-error: true  # Report but don't block (beta phase)
+
       - name: Verify formatting of changed Go files
         shell: bash
         run: |
@@ -104,8 +109,81 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run tests with race detector
-        run: go test -race -count=1 ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.63
+          args: --timeout=5m
+
+      - name: Run tests with race detector and coverage
+        run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Display coverage summary
+        run: |
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 14
 
       - name: Build CLI
         run: make build
+
+  # ===========================================================================
+  # Desktop Build — Regression check that the macOS .app builds successfully.
+  # Runs on macOS Apple Silicon to verify the Wails build pipeline.
+  # (Release gates M-01: CI wails build regression, M-02: macOS runner)
+  # ===========================================================================
+  desktop-build:
+    name: Desktop Build (macOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
+      - name: Install Wails CLI v2.13.0
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - name: Verify Wails version
+        run: |
+          actual="$(wails version 2>/dev/null | head -1 | tr -d '[:space:]')"
+          if [ "$actual" != "v2.13.0" ]; then
+            echo "FAIL — wails version is '$actual', expected 'v2.13.0'" >&2
+            exit 1
+          fi
+          echo "OK — wails v2.13.0"
+
+      - name: Install frontend dependencies
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Build .app
+        run: make desktop-build
+
+      - name: Verify .app was created
+        run: |
+          APP_PATH="cmd/ndg-desktop/build/bin/NDG.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "FAIL — .app not found at $APP_PATH" >&2
+            exit 1
+          fi
+          echo "OK — .app built successfully"
+          du -sh "$APP_PATH"
