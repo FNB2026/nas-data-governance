@@ -1,6 +1,6 @@
 # NDG CLI 开发与调试指南
 
-本文档面向开发者，提供 NAS Data Governance CLI 工具的命令行操作参考。普通用户请参阅 [用户指南](../user-guide/NDG-用户指南.md)。
+本文档面向开发者，提供 NDG CLI 的命令行操作参考。普通用户请参阅 [用户指南](../user-guide/NDG-用户指南.md)。
 
 ## 构建
 
@@ -102,7 +102,7 @@ make build
 cmd/nas-governance/       CLI 入口（含 quarantine/restore/purge 生命周期）
 cmd/ndg-desktop/          Wails 桌面应用入口
 internal/domain/          核心对象与安全约束
-internal/scanner/         只读文件系统扫描（context-aware BFS、增量哈希复用、断点续扫）
+internal/scanner/         只读文件系统扫描（确定性字典序前序 DFS、增量哈希复用、断点续扫）
 internal/fingerprint/     快速指纹与完整哈希
 internal/index/           JSONL 索引适配器
 internal/format/          基于 magic bytes 的格式检测与只读元数据提取
@@ -117,11 +117,12 @@ internal/merge/           目录合并建议
 internal/planner/         草案计划与可解释保留评分
 internal/learning/        L2 统计学习、L3 行业资料学习、L4 决策反馈学习
 internal/store/           SQLite 持久化层（项目自身数据库）
-internal/executor/        安全执行器（stale 复核、隔离、跨卷复制-校验-删除源、回滚、执行日志）
-internal/purge/           恢复与永久清除草案计划（只建议，不写文件）
+internal/executor/        安全执行、受管隔离、恢复、永久清理、Journal 与崩溃回滚
+internal/purge/           永久清除草案计划（仅建议，不写文件）
 internal/runner/          worker pool（semaphore 并发控制）
 internal/drill/           NAS 故障演练（隔离只读场景）
 internal/report/          完全重复报告
+internal/query/           重复组查询与分页 DTO
 internal/app/             应用服务层（扫描编排、检查点）
 internal/adapters/wails/  Wails 绑定层与 DTO
 internal/version/         版本信息
@@ -154,6 +155,6 @@ npm run dev
 
 - 已有：只读扫描（含增量、断点续扫、哈希有限重试与失败补扫）、JSONL/SQLite 索引、目录语境、格式分析、资产关系、目录合并建议、草案计划、安全执行器（含执行日志与崩溃恢复）、受管隔离/恢复/延时清除/永久清除、L1-L4 规则学习、人工复核 CLI。
 - 执行前置条件：计划须处于 `APPROVED`；非 dry-run 必须提供 SQLite `--db`；每个写操作必须位于显式配置的 `SourceRoots` 内；源根目录与隔离根目录必须是互不重叠的真实目录且不能是符号链接。
-- 并发与可观测性：`scan`/`analyze` 支持 `--workers N`和可选 `--progress-out`；进度快照仅有阶段、计数、失败数和复用数，权限为 `0600`。扫描每 1,000 个文件更新聚合检查点。
+- 并发与可观测性：`scan`/`analyze` 支持 `--workers N`和可选 `--progress-out`；进度快照仅有阶段、已处理数、已发现数和哈希失败数，权限为 `0600`。扫描每 1,000 个文件更新聚合检查点。
 - 永久清除边界：仅从受管隔离区逐项执行；默认 30 天冷静期；保护项进入 HOLD；无 `--all`；审批摘要须在执行时再次提供。
 - 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；直接对源目录执行 PURGE；跨备份域自动去重。
