@@ -1,0 +1,588 @@
+name: Release
+
+# Triggered by version tags (v0.5.0-beta.1, v0.5.0, etc.)
+# Creates a GitHub Release with signed/notarized macOS DMG + SBOM.
+#
+# Job pipeline:
+#   1. verify        — Run all checks (tests, vet, public-check, version-check)
+#   2. build-unsigned — Build the .app on macOS Apple Silicon (no signing)
+#   3. sign-notarize — Sign with Developer ID, notarize, staple, create DMG
+#   4. draft-release — Create GitHub Release with artifacts + SBOM
+#
+# Prerequisites (manual operations, see release-gates-v0.5.md R-09):
+#   - GitHub Environment "release-macos" with required reviewers
+#   - Repository secrets configured in the release-macos environment:
+#     * DEVELOPER_ID_CERTIFICATE_P12  — base64-encoded .p12 certificate
+#     * DEVELOPER_ID_CERTIFICATE_PASSWORD — password for the .p12
+#     * APPLE_TEAM_ID                 — Apple Developer Team ID
+#     * APP_STORE_CONNECT_API_KEY_ID  — App Store Connect API key ID
+#     * APP_STORE_CONNECT_API_KEY     — base64-encoded .p8 private key
+#     * APP_STORE_CONNECT_ISSUER_ID   — App Store Connect issuer ID
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# B2: Least-privilege — global default is read-only.
+# Only draft-release needs contents:write to create GitHub Releases.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel a release in progress
+
+jobs:
+  # ===========================================================================
+  # Job 1: Verify — Run all checks before any release artifact is built.
+  # ===========================================================================
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Install frontend dependencies
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Test and build frontend
+        run: make frontend-check
+
+      - name: Check public repository boundary
+        run: make public-check
+
+      - name: Verify tag matches VERSION file
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="$(cat VERSION)"
+          if [[ "$TAG" != "v$VERSION" ]]; then
+            echo "verify: FAIL — tag '$TAG' does not match VERSION file 'v$VERSION'" >&2
+            exit 1
+          fi
+          echo "verify: OK — tag '$TAG' matches VERSION '$VERSION'"
+
+      - name: Check version consistency
+        run: make version-check
+
+      - name: Run version mapping tests
+        run: ./scripts/release/test-version-mapping.sh
+
+      - name: Run macOS release script tests
+        run: ./scripts/release/test-macos-scripts.sh
+
+      - name: Run release workflow structure tests
+        run: ./scripts/release/test-release-workflow.sh
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -race -count=1 ./...
+
+      - name: Build CLI
+        run: make build
+
+  # ===========================================================================
+  # Job 2: Build Unsigned — Build the .app on macOS Apple Silicon.
+  # No signing is performed here; signing requires secrets in the next job.
+  # B1: .app is tar'd before upload to preserve Unix permissions (755).
+  # ===========================================================================
+  build-unsigned:
+    name: Build Unsigned .app
+    runs-on: macos-14  # Apple Silicon (M1)
+    needs: verify
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
+      - name: Install Wails CLI v2.13.0
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - name: Verify Wails version
+        run: |
+          actual="$(wails version 2>/dev/null | head -1 | tr -d '[:space:]')"
+          if [ "$actual" != "v2.13.0" ]; then
+            echo "FAIL — wails version is '$actual', expected 'v2.13.0'" >&2
+            exit 1
+          fi
+          echo "OK — wails v2.13.0"
+
+      - name: Install frontend dependencies
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Build .app with version injection
+        run: |
+          VERSION="$(cat VERSION)"
+          COMMIT="${{ github.sha }}"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          CHANNEL="$(echo "$VERSION" | sed -n 's/^[0-9][0-9.]*-\([a-z]*\)\.[0-9]*/\1/p; s/^[0-9][0-9.]*$/stable/p; s/^dev$/dev/p')"
+          VERSION_PKG="github.com/FNB2026/nas-data-governance/internal/version"
+
+          cd cmd/ndg-desktop
+          wails build \
+            -clean \
+            -trimpath \
+            -platform darwin/arm64 \
+            -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME} -X ${VERSION_PKG}.Channel=${CHANNEL}"
+
+      - name: Verify .app was created and executable
+        run: |
+          APP_PATH="cmd/ndg-desktop/build/bin/NDG.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "FAIL — .app not found at $APP_PATH" >&2
+            exit 1
+          fi
+          # Verify the main executable has correct permissions
+          EXEC="$APP_PATH/Contents/MacOS/NDG"
+          if [[ ! -x "$EXEC" ]]; then
+            echo "FAIL — executable bit missing on $EXEC" >&2
+            exit 1
+          fi
+          echo "OK — .app built at $APP_PATH (executable verified)"
+          du -sh "$APP_PATH"
+
+      - name: Tar .app to preserve permissions
+        run: |
+          # B1: GitHub Actions artifacts normalize file permissions to 644.
+          # Tar the .app bundle to preserve the 755 executable bit.
+          tar -C cmd/ndg-desktop/build/bin \
+            -czf unsigned-app.tar.gz NDG.app
+          ls -lh unsigned-app.tar.gz
+
+      - name: Upload .app tarball artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-app-tar
+          path: unsigned-app.tar.gz
+          retention-days: 7
+
+  # ===========================================================================
+  # Job 3: Sign & Notarize — Sign with Developer ID, create DMG, notarize,
+  # staple, and generate final SHA256.
+  # Uses the "release-macos" environment with required reviewers (R-09).
+  # B5: APPLE_TEAM_ID is used to verify the signing identity and final
+  #     TeamIdentifier in the artifact.
+  # ===========================================================================
+  sign-notarize:
+    name: Sign & Notarize
+    runs-on: macos-14  # Apple Silicon (M1)
+    needs: build-unsigned
+    environment: release-macos  # Required reviewer gate (R-09)
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Verify required secrets
+        env:
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          # Check all required secrets via environment variables (not direct
+          # interpolation) to prevent credential leakage in error messages.
+          missing=()
+          [[ -z "$DEVELOPER_ID_CERTIFICATE_P12" ]] && missing+=("DEVELOPER_ID_CERTIFICATE_P12")
+          [[ -z "$DEVELOPER_ID_CERTIFICATE_PASSWORD" ]] && missing+=("DEVELOPER_ID_CERTIFICATE_PASSWORD")
+          [[ -z "$APPLE_TEAM_ID" ]] && missing+=("APPLE_TEAM_ID")
+          [[ -z "$APP_STORE_CONNECT_API_KEY_ID" ]] && missing+=("APP_STORE_CONNECT_API_KEY_ID")
+          [[ -z "$APP_STORE_CONNECT_API_KEY" ]] && missing+=("APP_STORE_CONNECT_API_KEY")
+          [[ -z "$APP_STORE_CONNECT_ISSUER_ID" ]] && missing+=("APP_STORE_CONNECT_ISSUER_ID")
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "sign-notarize: FAIL — missing required secrets:" >&2
+            for s in "${missing[@]}"; do
+              echo "  - $s" >&2
+            done
+            echo "" >&2
+            echo "  Configure these secrets in the 'release-macos' environment:" >&2
+            echo "  GitHub repo → Settings → Environments → release-macos → Add secret" >&2
+            exit 1
+          fi
+          echo "sign-notarize: OK — all required secrets present"
+
+      - name: Download .app tarball artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-app-tar
+          path: .
+
+      - name: Untar .app and verify executable permission
+        run: |
+          # B1: Untar the .app bundle and verify permissions were preserved.
+          tar -xzf unsigned-app.tar.gz -C cmd/ndg-desktop/build/bin/
+          rm -f unsigned-app.tar.gz
+
+          EXEC="cmd/ndg-desktop/build/bin/NDG.app/Contents/MacOS/NDG"
+          if [[ ! -x "$EXEC" ]]; then
+            echo "sign-notarize: FAIL — executable bit missing on $EXEC after untar" >&2
+            exit 1
+          fi
+          echo "sign-notarize: OK — .app untarred, executable bit verified (755)"
+
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain for code signing
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Decode and import the .p12 certificate
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          echo "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t agg \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the key without prompting
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          # Add the keychain to the search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          # Clean up the .p12 file
+          rm -f "$CERT_PATH"
+
+          echo "OK — Developer ID certificate imported"
+
+      - name: Verify signing identity matches APPLE_TEAM_ID
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # B5/B10/B13/B15: Filter ALL Developer ID Application identities by
+          # APPLE_TEAM_ID using exact parenthesized match, then verify exactly
+          # one match. Uses Bash 3.2-compatible while-read loop (no mapfile).
+          #
+          # B15: macOS GitHub Runner uses system Bash 3.2 which does not
+          # support mapfile/readarray. The while-read loop with manual array
+          # append is functionally equivalent and runs on all Bash versions.
+
+          # B13: Validate APPLE_TEAM_ID format (10 alphanumeric chars)
+          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "FAIL — invalid APPLE_TEAM_ID format: '$APPLE_TEAM_ID'" >&2
+            echo "  Expected 10 uppercase alphanumeric characters (e.g. ABCDE12345)" >&2
+            exit 1
+          fi
+
+          # B13: Use grep -F for exact literal match on "(TEAMID)" suffix.
+          # Substring grep could match a certificate whose name contains the
+          # Team ID elsewhere but has a different ID in parentheses.
+          # B15: Bash 3.2-compatible array collection (no mapfile/readarray).
+          MATCHING_IDENTITIES=()
+          while IFS= read -r identity; do
+            if [[ -n "$identity" ]]; then
+              MATCHING_IDENTITIES[${#MATCHING_IDENTITIES[@]}]="$identity"
+            fi
+          done < <(
+            security find-identity -v -p codesigning 2>/dev/null \
+              | awk -F '"' '/Developer ID Application/ { print $2 }' \
+              | grep -F "($APPLE_TEAM_ID)" || true
+          )
+
+          MATCH_COUNT=${#MATCHING_IDENTITIES[@]}
+
+          case "$MATCH_COUNT" in
+            0)
+              echo "FAIL — no 'Developer ID Application' certificate matching APPLE_TEAM_ID '$APPLE_TEAM_ID' found" >&2
+              echo "  Available codesigning identities:" >&2
+              security find-identity -v -p codesigning 2>&1 | sed 's/^/    /' >&2
+              exit 1
+              ;;
+            1)
+              SIGNING_IDENTITY="${MATCHING_IDENTITIES[0]}"
+              ;;
+            *)
+              echo "FAIL — multiple ($MATCH_COUNT) Developer ID Application certificates match APPLE_TEAM_ID '$APPLE_TEAM_ID':" >&2
+              printf '%s\n' "${MATCHING_IDENTITIES[@]}" | sed 's/^/    /' >&2
+              echo "  Remove duplicate certificates from the keychain." >&2
+              exit 1
+              ;;
+          esac
+
+          # Export for use by sign-macos-app.sh via $GITHUB_ENV.
+          # B10: Subsequent steps use $SIGNING_IDENTITY directly from the shell
+          # environment — do NOT re-declare via env: context, which can
+          # resolve to empty and override the $GITHUB_ENV value.
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+          echo "OK — signing identity verified: $SIGNING_IDENTITY"
+
+      - name: Sign .app with Developer ID
+        run: |
+          # B10: SIGNING_IDENTITY is set via $GITHUB_ENV in the previous step.
+          # Do NOT re-declare via env: context — that can resolve to empty
+          # and override the $GITHUB_ENV value, causing sign-macos-app.sh to
+          # auto-detect and potentially use the wrong certificate.
+          if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
+            echo "FAIL — SIGNING_IDENTITY is empty (GITHUB_ENV propagation failed)" >&2
+            exit 1
+          fi
+          ./scripts/release/sign-macos-app.sh
+
+      - name: Create signed DMG
+        run: |
+          ./scripts/release/create-dmg.sh
+
+      - name: Notarize and staple DMG
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$API_KEY_PATH"
+
+          ./scripts/release/notarize-macos-app.sh \
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+            --key "$API_KEY_PATH" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+          # Clean up the API key file
+          rm -f "$API_KEY_PATH"
+
+      - name: Verify release artifacts with Team ID assertion
+        run: |
+          # B10: APPLE_TEAM_ID is set via $GITHUB_ENV in the identity verification
+          # step. Do NOT re-declare via env: context — that can resolve to
+          # empty and cause the TeamIdentifier assertion to be silently skipped.
+          if [[ -z "${APPLE_TEAM_ID:-}" ]]; then
+            echo "FAIL — APPLE_TEAM_ID is empty (GITHUB_ENV propagation failed)" >&2
+            exit 1
+          fi
+          # B5: Pass APPLE_TEAM_ID to verify script for TeamIdentifier assertion.
+          ./scripts/release/verify-macos-release.sh --expected-team-id "$APPLE_TEAM_ID"
+
+      - name: Upload signed DMG artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-dmg
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          retention-days: 30
+
+  # ===========================================================================
+  # Job 4: Draft Release — Create GitHub Release with artifacts + SBOM.
+  # B2: This is the only job that needs contents:write.
+  # ===========================================================================
+  draft-release:
+    name: Draft GitHub Release
+    runs-on: ubuntu-latest
+    needs: sign-notarize
+    timeout-minutes: 15
+    permissions:
+      contents: write  # Required for creating GitHub Releases
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
+      - name: Download signed DMG artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-dmg
+          path: dist/
+
+      - name: Install frontend dependencies (for SBOM)
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Generate SBOM (CycloneDX + SPDX)
+        run: ./scripts/release/generate-sbom.sh
+
+      - name: Display artifacts
+        run: |
+          echo "=== Release Artifacts ==="
+          ls -lh dist/*.dmg dist/*.dmg.sha256 dist/sbom.* 2>/dev/null || true
+          echo ""
+          echo "=== SHA256 ==="
+          cat dist/*.dmg.sha256 2>/dev/null || true
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="$(cat VERSION)"
+
+          # Extract release notes from CHANGELOG.md (section matching the version)
+          # Falls back to auto-generated notes if no matching section found.
+          RELEASE_NOTES=$(awk -v ver="## ${VERSION}" '
+            /^## / { if (found) exit; if ($0 == ver) found=1; next }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [[ -z "$RELEASE_NOTES" ]]; then
+            RELEASE_NOTES="## NDG ${VERSION}\n\nRelease notes will be added manually."
+          fi
+
+          # Write release notes to a temp file to handle multi-line content
+          echo -e "$RELEASE_NOTES" > /tmp/release-notes.md
+
+          # B8: Mark as pre-release if version contains a pre-release suffix (e.g. 0.5.0-beta.1)
+          release_flags=(--draft --verify-tag)
+          if [[ "$VERSION" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+            echo "draft-release: version '$VERSION' contains pre-release suffix, marking as pre-release"
+          fi
+
+          # B9/B11: Idempotent release creation — if a draft release already exists
+          # (e.g. from a previous failed run), update it instead of failing.
+          # B11: Only update if the release is still a draft and not immutable.
+          # Published or immutable releases must NOT be modified — fail closed.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "draft-release: Release '$TAG' already exists, checking state..."
+
+            # B11: Query release state to ensure it's safe to update.
+            # isDraft must be true; isImmutable must be false.
+            RELEASE_JSON="$(gh release view "$TAG" --json isDraft,isPrerelease,isImmutable)"
+            IS_DRAFT="$(echo "$RELEASE_JSON" | jq -r '.isDraft')"
+            IS_PRERELEASE="$(echo "$RELEASE_JSON" | jq -r '.isPrerelease')"
+            IS_IMMUTABLE="$(echo "$RELEASE_JSON" | jq -r '.isImmutable')"
+
+            echo "  isDraft=$IS_DRAFT isPrerelease=$IS_PRERELEASE isImmutable=$IS_IMMUTABLE"
+
+            if [[ "$IS_DRAFT" != "true" || "$IS_IMMUTABLE" == "true" ]]; then
+              echo "FAIL — Release '$TAG' is already published or immutable, refusing to modify" >&2
+              echo "  isDraft=$IS_DRAFT isImmutable=$IS_IMMUTABLE" >&2
+              echo "  A published release cannot be overwritten. Delete it manually if a rerun is needed." >&2
+              exit 1
+            fi
+
+            echo "draft-release: Release '$TAG' is a mutable draft, updating..."
+
+            gh release edit "$TAG" \
+              --title "NDG ${VERSION}" \
+              --notes-file /tmp/release-notes.md
+
+            # B8/B11/B14: Re-apply draft and prerelease flags to ensure correct state.
+            # Beta:   prerelease=true,  latest=false
+            # Stable: prerelease=false (explicitly clear any stale pre-release flag)
+            #
+            # B14: IS_PRERELEASE is checked before and after to verify the state
+            # transition is correct. A stable version must clear any pre-release
+            # flag that may have been set on a previous draft run.
+            echo "  before: isPrerelease=$IS_PRERELEASE"
+            if [[ "$VERSION" == *-* ]]; then
+              gh release edit "$TAG" --draft --prerelease --latest=false
+            else
+              gh release edit "$TAG" --draft --prerelease=false
+            fi
+
+            # B14: Verify the final prerelease state matches expectations
+            FINAL_PRERELEASE="$(gh release view "$TAG" --json isPrerelease | jq -r '.isPrerelease')"
+            EXPECTED_PRERELEASE="false"
+            if [[ "$VERSION" == *-* ]]; then
+              EXPECTED_PRERELEASE="true"
+            fi
+            if [[ "$FINAL_PRERELEASE" != "$EXPECTED_PRERELEASE" ]]; then
+              echo "FAIL — Release prerelease state mismatch after edit:" >&2
+              echo "  Expected isPrerelease=$EXPECTED_PRERELEASE, got $FINAL_PRERELEASE" >&2
+              exit 1
+            fi
+            echo "  after:  isPrerelease=$FINAL_PRERELEASE (verified)"
+
+            # B9: Upload assets with --clobber to overwrite any existing files.
+            # Note: --clobber deletes the old asset before uploading the new one.
+            # If upload fails, the old asset is lost — but this is acceptable
+            # because the release is still a draft (not yet published).
+            gh release upload "$TAG" \
+              dist/*.dmg \
+              dist/*.dmg.sha256 \
+              dist/sbom.cyclonedx.json \
+              dist/sbom.spdx.json \
+              --clobber
+
+            echo "OK — GitHub Release '$TAG' updated (existing draft)"
+          else
+            echo "draft-release: Creating new release for '$TAG'..."
+            gh release create "$TAG" \
+              "${release_flags[@]}" \
+              --title "NDG ${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              dist/*.dmg \
+              dist/*.dmg.sha256 \
+              dist/sbom.cyclonedx.json \
+              dist/sbom.spdx.json
+
+            echo "OK — GitHub Release created (draft) for $TAG"
+          fi
+
+      - name: Publish release (remove draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # The release is created as draft for safety.
+          # Uncomment the following line to auto-publish:
+          # gh release edit "$TAG" --draft=false
+          echo "Release $TAG is ready as draft. Publish manually after review."

@@ -1,10 +1,11 @@
 package planner
 
 import (
-	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func group(paths ...string) []domain.DuplicateGroup {

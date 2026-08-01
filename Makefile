@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -167,3 +167,9 @@ desktop-release: version-check desktop-notarize
 	@echo ""
 	@echo "==> macOS release artifacts in $(DIST_DIR)/:"
 	@ls -lh $(DIST_DIR)/*.dmg* 2>/dev/null || echo "  (no DMG artifacts found)"
+
+# ---- SBOM generation ----
+# Generates Software Bill of Materials in CycloneDX and SPDX formats.
+# Uses syft (installed automatically if not present).
+sbom:
+	./scripts/release/generate-sbom.sh --output $(DIST_DIR)

@@ -36,7 +36,12 @@ jobs:
           curl --fail --location --silent --show-error --output "$archive" "$url"
           echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  $archive" | sha256sum --check --strict
           tar -xzf "$archive" gitleaks
-          ./gitleaks git --no-banner --redact --log-opts="--all"
+          # Use custom .gitleaks.toml if present, otherwise default rules
+          if [[ -f .gitleaks.toml ]]; then
+            ./gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="--all"
+          else
+            ./gitleaks git --no-banner --redact --log-opts="--all"
+          fi
 
   govulncheck:
     name: Govulncheck

@@ -1,8 +1,9 @@
 package dircontext
 
 import (
-	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"testing"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func TestClassifyProtectsSensitiveBeforeTemporary(t *testing.T) {

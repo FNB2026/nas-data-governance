@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FNB2026/nas-data-governance/internal/domain"
 	_ "modernc.org/sqlite"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func newTestStore(t *testing.T) *SQLiteStore {

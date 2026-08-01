@@ -968,7 +968,7 @@ func readPlans(path string) ([]domain.OperationPlan, error) {
 // persistAudit writes each audit step as an operation_log row. Failures are
 // reported to stderr but do not stop execution — the audit JSON file is the
 // primary record, and the database is a secondary index for querying.
-func persistAudit(ctx context.Context, st *store.SQLiteStore, result executor.Result) {
+func persistAudit(ctx context.Context, st *store.SQLiteStore, result executor.Result) { //nolint:unused // reserved for future audit persistence
 	if len(result.Steps) == 0 && result.Err != nil {
 		_ = st.AppendLog(ctx, result.PlanID, "pipeline_error", map[string]any{
 			"status": "failed", "final_state": string(result.FinalState), "error_type": result.ErrorType,

@@ -1,0 +1,80 @@
+# Custom Gitleaks configuration for NDG
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "NDG Custom Gitleaks Config"
+
+[extend]
+# Extend the default ruleset
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Project-specific rules
+# ---------------------------------------------------------------------------
+
+# Detect Apple Developer ID certificate references in non-release scripts
+[[rules]]
+id = "apple-developer-id-certificate"
+description = "Apple Developer ID certificate reference"
+regex = '''Developer\s+ID\s+Application\s*[:\-]\s*[A-Za-z0-9\s]+\([A-Z0-9]{10}\)'''
+tags = ["apple", "certificate", "developer-id"]
+
+# B4: Rule-specific allowlist — only allow the exact mock pattern used in
+# test scripts and help text. No path-based bypass; release scripts remain
+# under full Gitleaks scan. Only the literal mock string is allowed.
+[rules.allowlist]
+description = "Allow mock Developer ID certificate pattern in tests"
+regexes = [
+  '''Developer ID Application: Your Name \(TEAMID\)''',
+]
+
+# Detect App Store Connect API key references
+[[rules]]
+id = "app-store-connect-api-key"
+description = "App Store Connect API key"
+regex = '''AuthKey_[A-Z0-9]{10}\.p8'''
+tags = ["apple", "api-key", "app-store-connect"]
+
+# B4: Rule-specific allowlist — only allow the exact mock pattern.
+[rules.allowlist]
+description = "Allow mock API key pattern in tests"
+regexes = [
+  '''AuthKey_KEYID\.p8''',
+]
+
+# Detect NDG database file paths in non-source files (should not be in logs/configs)
+[[rules]]
+id = "ndg-database-path-in-logs"
+description = "NDG database file path in log or config files"
+regex = '''governance\.db'''
+path = '''\.(log|yaml|yml|env|ini|cfg|conf)$'''
+tags = ["ndg", "database", "path"]
+
+# Detect macOS keychain password patterns in scripts
+# B4: Regex excludes shell variable references ($VAR, ${VAR}) — only matches
+#     hardcoded literal passwords in quotes.
+[[rules]]
+id = "keychain-password"
+description = "Hardcoded keychain password"
+regex = '''security\s+(create|unlock)-keychain\s+-p\s+["\'][^"\'$][^"\']*["\']'''
+tags = ["keychain", "password", "macos"]
+
+# ---------------------------------------------------------------------------
+# Global Allowlist — patterns that should NOT be flagged by ANY rule
+# B4: Removed full-path allowlist that bypassed all rules for sensitive files.
+#     Only regex-based allowlist for known mock/example values remains.
+#     Release scripts (sign-macos-app.sh, notarize-macos-app.sh, create-dmg.sh,
+#     verify-macos-release.sh) and release.yml are NOT path-allowlisted and
+#     remain under full default + custom Gitleaks scan.
+# ---------------------------------------------------------------------------
+
+[allowlist]
+description = "Allowed patterns (mock/example values only)"
+
+# Allow example/mock values used in test scripts and help text
+regexes = [
+  '''Developer ID Application: Your Name \(TEAMID\)''',
+  '''ABCDE12345''',
+  '''GFHIJ67890''',
+  '''KLMNO11111''',
+  '''AuthKey_KEYID\.p8''',
+]

@@ -51,6 +51,11 @@ jobs:
       - name: Test and build frontend
         run: make frontend-check
 
+      - name: Run npm audit (high and critical)
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm audit --audit-level=high
+        continue-on-error: true  # Report but don't block (beta phase)
+
       - name: Verify formatting of changed Go files
         shell: bash
         run: |
@@ -101,11 +106,121 @@ jobs:
       - name: Run macOS release script tests
         run: ./scripts/release/test-macos-scripts.sh
 
+      - name: Run release workflow structure tests
+        run: ./scripts/release/test-release-workflow.sh
+
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run tests with race detector
-        run: go test -race -count=1 ./...
+      - name: Run golangci-lint
+        run: |
+          # Install golangci-lint v2.12.2 (supports Go 1.26, pinned version)
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          golangci-lint run --timeout=5m ./...
+
+      - name: Run tests with race detector and coverage
+        run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Display coverage summary
+        run: |
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 14
 
       - name: Build CLI
         run: make build
+
+      - name: Run actionlint (workflow linter)
+        run: |
+          # B6: Install actionlint v1.7.7 (pinned version) with SHA256 verification.
+          ACTIONLINT_VERSION="1.7.7"
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ARCHIVE}"
+          CHECKSUMS_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+
+          curl --fail --location --silent --show-error --output "/tmp/${ARCHIVE}" "$URL"
+          curl --fail --location --silent --show-error --output "/tmp/actionlint_checksums.txt" "$CHECKSUMS_URL"
+
+          # Verify SHA256 against official checksums file
+          EXPECTED_HASH="$(grep "${ARCHIVE}" /tmp/actionlint_checksums.txt | awk '{print $1}')"
+          ACTUAL_HASH="$(sha256sum "/tmp/${ARCHIVE}" | awk '{print $1}')"
+          if [[ -z "$EXPECTED_HASH" ]]; then
+            echo "FAIL — actionlint checksum not found in official checksums file" >&2
+            exit 1
+          fi
+          if [[ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]]; then
+            echo "FAIL — actionlint checksum mismatch: expected=$EXPECTED_HASH actual=$ACTUAL_HASH" >&2
+            exit 1
+          fi
+
+          tar -xzf "/tmp/${ARCHIVE}" -C /tmp actionlint
+          # actionlint requires file paths, not directories
+          /tmp/actionlint -color .github/workflows/*.yml
+
+  # ===========================================================================
+  # Desktop Build — Regression check that the macOS .app builds successfully.
+  # Runs on macOS Apple Silicon to verify the Wails build pipeline.
+  # (Release gates M-01: CI wails build regression, M-02: macOS runner)
+  # ===========================================================================
+  desktop-build:
+    name: Desktop Build (macOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
+
+      - name: Install Wails CLI v2.13.0
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - name: Verify Wails version
+        run: |
+          actual="$(wails version 2>/dev/null | head -1 | tr -d '[:space:]')"
+          if [ "$actual" != "v2.13.0" ]; then
+            echo "FAIL — wails version is '$actual', expected 'v2.13.0'" >&2
+            exit 1
+          fi
+          echo "OK — wails v2.13.0"
+
+      - name: Install frontend dependencies
+        working-directory: cmd/ndg-desktop/frontend
+        run: npm ci
+
+      - name: Build .app
+        run: make desktop-build
+
+      - name: Verify .app was created
+        run: |
+          APP_PATH="cmd/ndg-desktop/build/bin/NDG.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "FAIL — .app not found at $APP_PATH" >&2
+            exit 1
+          fi
+          echo "OK — .app built successfully"
+          du -sh "$APP_PATH"
+
+      # B15: Verify signing identity selection logic works on macOS system
+      # Bash 3.2 (which does not support mapfile/readarray). Uses /bin/bash
+      # explicitly to test the real system Bash, not a Homebrew version.
+      - name: Test signing identity parser on macOS Bash
+        run: /bin/bash ./scripts/release/test-signing-identity-compat.sh
