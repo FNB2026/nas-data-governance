@@ -2,7 +2,7 @@
 
 ## Scope
 
-NAS Data Governance scans and may eventually modify large local file collections. Security reports are especially important when they involve:
+NDG 数据治理工作台 scans and may eventually modify large local file collections. Security reports are especially important when they involve:
 
 - source-root boundary bypasses;
 - symbolic-link, mount-point, path traversal, or race-condition issues;
