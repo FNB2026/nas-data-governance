@@ -36,7 +36,9 @@
 
 辱骂、骚扰或其他不可接受的行为请通过以下私密渠道报告：
 
-- **电子邮件**：76875998+FNB2026@users.noreply.github.com
+- **GitHub 私密联系**：在仓库维护者的 GitHub 个人主页（[@FNB2026](https://github.com/FNB2026)）发送私密消息，或通过仓库的 [Security Advisory](https://github.com/FNB2026/nas-data-governance/security/advisories/new) 提交注明"行为准则事件"的私密报告
+
+> 行为准则事件与安全漏洞是不同类别的问题。如果你报告的是安全漏洞，请直接使用 Security Advisory 并按 [SECURITY.md](SECURITY.md) 的流程处理。
 
 ### 处理流程
 
