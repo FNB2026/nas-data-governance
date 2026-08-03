@@ -1,169 +1,157 @@
-# NAS Data Governance
+# NDG 数据治理工作台
 
-面向个人、家庭和组织数字资产的本地化数据治理与归档工程基座。
+<img src="docs/assets/ndg-logo.jpg" alt="NDG" width="128" height="128">
 
-本仓库实现安全索引、目录语境、去重计划与受限的安全执行流水线：只读扫描、元数据采集、分层哈希、完全重复报告、可解释的目录角色、草案计划、审批与执行。M7 增加受管隔离、恢复、保留期候选和最终永久清除；任何文件写入只能通过显式批准的计划和配置了根目录的独立执行器发生。
+面向个人、家庭和组织 NAS 数字资产的本地数据治理与归档工具。在你的 Mac 上安全扫描、识别重复文件、生成可审计的治理计划，全程只读分析，仅在明确批准后才执行可恢复的文件操作。
 
-方法论与安全边界见脱敏后的 [NAS 数据治理与安全归档白皮书](docs/whitepaper.md)。桌面端当前实施基线见 [NDG 桌面端前端架构与后端协同推进方案](docs/desktop-frontend-architecture.md)。公开范围、禁止提交的资料及发布检查清单见 [开源边界](docs/open-source-boundary.md)。
+> **发布候选状态**：当前代码版本为 0.5.0-beta.1。核心扫描、复核、隔离与恢复流程已实现并通过自动化测试，当前仍处于发布前验收阶段。首个公开签名 DMG 尚未完成 Developer ID 签名、公证和实机安装验收。普通用户请等待 GitHub Releases 中发布经过验证的 Beta 安装包。
 
-## 许可
+## 产品界面
 
-- 软件代码、构建文件和实现类 schema： [Apache License 2.0](LICENSE)。
-- 原创文档与白皮书： [CC BY 4.0](LICENSE-DOCS.md)。
-- 第三方组件：按 [第三方声明](THIRD_PARTY_NOTICES.md) 及随发布包提供的上游许可文本执行。
+**数据源与扫描就绪状态：**
 
-用于内部研究的原始 DOCX、XMind、真实目录树和扫描资料不属于公开仓库，也不受上述文档许可授权。
+![NDG 数据源概览](docs/assets/ndg-overview.png)
 
-## 快速开始：安全体验
+**重复文件结果与目录语境保护：**
 
-以下命令只读取样本数据并生成项目私有产物，不执行移动、隔离、重命名或删除动作。首次使用请只针对复制出来的合成测试目录。
+![NDG 重复结果](docs/assets/ndg-duplicates.png)
+
+> 以上截图使用合成数据制作，已开启路径脱敏。完整界面说明请参阅 [用户指南](docs/user-guide/NDG-用户指南.md)。
+
+## 核心能力
+
+- **只读扫描**：九阶段扫描流程，支持增量哈希复用和断点续扫，扫描全程不修改任何源文件
+- **分层哈希去重**：快速采样哈希筛选候选，完整 SHA-256 确认，识别硬链接和文件关系
+- **目录语境保护**：自动推断 10 种目录角色，敏感/备份/原始素材等受保护目录的文件不会被自动清理
+- **可审计治理计划**：草案→审批→新鲜度检查→执行→验证的完整生命周期，每一步都可追溯
+- **隔离而非删除**：普通治理"删除"实际是移动到隔离区，可恢复；永久清理是独立的三步流程
+- **崩溃恢复**：执行日志持久化，崩溃后保守回滚，拒绝歧义状态下的自动决策
+- **完全本地运行**：不主动连接互联网服务，不包含遥测、云上传或外部 AI 调用
+
+## 为什么内容相同不等于可以删除
+
+即使两个文件内容完全一致，如果它们位于不同职责的目录（如一个是原始素材，一个是临时缓存），自动删除可能导致工作流断裂或数据丢失。
+
+NDG 的核心原则是：**内容相同不等于可删除**。系统根据目录语境、文件格式、保护规则和保留评分生成建议，但对受保护文件、跨角色副本和高风险操作始终标记为需要人工复核。
+
+## 安全工作流
+
+```
+扫描（只读） → 分析 → 生成草案(DRAFT) → 审批(APPROVED) → 新鲜度检查 → 执行(隔离) → 验证
+                                    │                                          │
+                                    └── 新鲜度失败 → 退回草案                     └── 回滚(可恢复)
+```
+
+- 扫描、分析、规划全程只读，唯一可写层（执行器）严格隔离
+- 不跟随符号链接、不跨挂载点、不越过任务根目录
+- 执行前校验文件大小/时间/inode/设备/哈希五维一致性
+- 文件移动遵循"先复制 → SHA-256 验证 → 删除源"管道
+- 受保护目录的文件隔离后自动进入 HOLD 状态，永不自动清除
+
+## 下载与安装
+
+### 系统要求
+
+- macOS 13.0 或更高版本
+- Apple Silicon
+- 需要读取权限访问待扫描的 NAS 或本地目录
+
+> 当前版本仅提供 Apple Silicon 构建。Intel Mac 支持将在后续版本中评估。
+
+### 安装步骤
+
+首个公开 Beta 发布后，可从 [GitHub Releases](https://github.com/FNB2026/nas-data-governance/releases) 下载签名并公证的 DMG。
+
+1. 下载 `NDG-<版本号>-macos.dmg`
+2. 双击打开 DMG，将 NDG 应用拖入"应用程序"文件夹
+3. 如果 macOS Gatekeeper 提示"无法验证开发者"，请停止打开，核对下载来源和 SHA-256 校验和，并通过项目 Issue 报告
+
+> 官方公开 DMG 应通过 Apple Developer ID 签名和 Apple 公证，正常情况下不需要点击"仍要打开"。
+
+## 三步快速开始
+
+首个公开 Beta 发布后：
+
+1. **下载 DMG** — 从 GitHub Releases 下载并安装 NDG
+2. **选择待扫描目录** — 打开 NDG，新建项目，选择 NAS 挂载目录或本地文件夹
+3. **开始扫描** — 点击开始扫描，完成后在"重复结果"页面查看重复文件组
+
+详细操作说明请参阅 [用户指南](docs/user-guide/NDG-用户指南.md)。
+
+## 隐私与本地运行
+
+NDG 不主动连接互联网服务：当前不包含遥测、云上传、远程 API 或外部 AI 调用。当用户选择已挂载的 NAS 目录时，文件访问由 macOS 通过 SMB、NFS 等已配置的文件系统连接完成。NDG 不会把扫描结果发送到 NDG、FNB 或其他第三方服务器。
+
+- **无遥测**：不收集任何使用统计、崩溃报告或性能数据
+- **无第三方云上传**：不会将你的文件、文件名、路径、哈希值或元数据发送到 NDG、FNB 或其他第三方云服务
+- 用户主动选择的 NAS 扫描源、目标目录和隔离目录会按操作要求，通过 macOS 文件系统进行读取或写入
+- 哈希计算、重复检测、治理分析和决策逻辑由 Mac 本地进程完成
+- 项目数据库和应用设置保存在 Mac 应用支持目录，隔离文件保存在用户指定的隔离根目录（可能位于本地磁盘、外接存储或 NAS）
+
+完整隐私声明见 [用户指南第 9 章](docs/user-guide/NDG-用户指南.md#9-隐私安全与数据不上传声明)。
+
+## 用户指南与支持入口
+
+| 需求 | 入口 |
+|---|---|
+| 完整使用说明 | [用户指南](docs/user-guide/NDG-用户指南.md) |
+| 使用问题和缺陷报告 | [GitHub Issues](https://github.com/FNB2026/nas-data-governance/issues)（请使用合成数据，勿上传真实路径） |
+| 安全漏洞报告 | [安全政策](SECURITY.md)（请使用 GitHub Security Advisory 私密报告） |
+| 贡献代码 | [贡献指南](CONTRIBUTING.md) |
+| 行为准则 | [行为准则](CODE_OF_CONDUCT.md) |
+| CLI 开发与调试 | [CLI 开发与调试指南](docs/development/CLI-开发与调试指南.md) |
+
+## 开发与构建
+
+### 环境要求
+
+- Go 1.26+（以 go.mod 中声明的 Go 版本为准）
+- Node.js 22+
+- Wails CLI v2.13.0
+
+### 构建
 
 ```bash
+# 克隆仓库
+git clone https://github.com/FNB2026/nas-data-governance.git
+cd nas-data-governance
+
+# 运行测试
 make test
+make vet
+go test -race -count=1 ./...
+
+# 构建 CLI
 make build
-./bin/nas-governance scan --root /path/to/read-only-sample --out ./var/index.jsonl --db ./var/governance.db --workers 4
-./bin/nas-governance retry-hashes --root /path/to/read-only-sample --failures ./var/index.jsonl.hash-failures.jsonl --index ./var/index.jsonl --out ./var/index-recovered.jsonl
-./bin/nas-governance import-index --index ./var/index.jsonl --db ./var/governance.db --batch-size 5000
-./bin/nas-governance analyze --index ./var/index.jsonl --out ./var/formats.json --db ./var/governance.db --workers 4 --batch-size 500
-# 中断后复用已落库记录；规则升级后可只重新分析旧 unknown
-./bin/nas-governance analyze --index ./var/index.jsonl --out ./var/formats.json --db ./var/governance.db --workers 4 --resume --refresh-unknown
-./bin/nas-governance analyze --index ./var/index.jsonl --out ./var/formats.json --db ./var/governance.db --workers 8 --resume --refresh-metadata
-./bin/nas-governance diagnose-formats --db ./var/governance.db --out ./var/format-review-private.json
-# 长任务可选写入 owner-only 聚合进度，不含路径/文件名/哈希
-./bin/nas-governance scan --root /path/to/read-only-mount --out ./var/index.jsonl --db ./var/governance.db --progress-out ./var/scan-progress.json
-./bin/nas-governance diagnose-governance --db ./var/governance.db --out ./var/governance-review-private.json
-./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --legacy-log ./var/private-scan.log --out ./var/path-compat-private.json
-./bin/nas-governance diagnose-paths --root /path/to/read-only-sample --failures-manifest ./var/index.jsonl.hash-failures.jsonl --out ./var/path-compat-private.json
-./bin/nas-governance diagnose-merges --index ./var/index.jsonl --out ./var/merge-review-private.json
-./bin/nas-governance group --index ./var/index.jsonl
-./bin/nas-governance relations --index ./var/index.jsonl
-./bin/nas-governance merge --index ./var/index.jsonl
-./bin/nas-governance plan --index ./var/index.jsonl --out ./var/plan.json
-./bin/nas-governance review plans --plan ./var/plan.json
-./bin/nas-governance review rules --db ./var/governance.db
-./bin/nas-governance version
+
+# 构建桌面应用
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+make desktop-build
+
+# 公共仓库边界检查（确保无敏感文件进入版本库）
+make public-check
+
+# 版本一致性检查
+make version-check
 ```
 
-## 高级风险操作
+### 技术栈
 
-文件写操作不属于快速开始。执行前必须同时满足：已有独立备份；先在复制的测试目录验证；隔离区位于所有源根目录之外；人工逐项批准计划；持久化 SQLite Journal 可用。首次使用不推荐 `approve --all`；永久清除不提供 `--all`。
+- 后端：Go（Wails v2 桌面框架）
+- 前端：React + TypeScript
+- 数据库：SQLite（WAL 模式，0600 权限）
+- CI/CD：GitHub Actions（golangci-lint、actionlint、Gitleaks、Govulncheck）
 
-先批准明确选中的计划，并执行完全只读的预检：
+## 开源许可
 
-```bash
-./bin/nas-governance approve --plan ./var/plan.json --out ./var/approved.json --plan-id PLAN_ID
-./bin/nas-governance execute --dry-run --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --out ./var/audit-dry-run.json
-```
-
-人工复核 dry-run 审计结果后，真实执行必须提供 `--db`。Journal 初始化或动作完成记录失败时，执行器会在下一次文件写入前停止并回滚已完成动作：
-
-```bash
-./bin/nas-governance execute --plan ./var/approved.json --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data --retention 720h --db ./var/governance.db --out ./var/audit.json
-./bin/nas-governance recover --db ./var/governance.db
-```
-
-### M7 分级删除生命周期
-
-`execute` 成功隔离的文件会进入 `quarantine_items` 私有台账，默认保留 30 天。受保护目录角色自动进入 `HOLD`。隔离项可通过独立的草案、审批、dry-run、执行链路恢复：
-
-```bash
-./bin/nas-governance quarantine list --db ./var/governance.db --out ./var/quarantine-private.json
-./bin/nas-governance quarantine restore-plan --db ./var/governance.db --item-id ITEM_ID --out ./var/restore-plan.json
-./bin/nas-governance quarantine restore-approve --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST
-./bin/nas-governance quarantine restore-execute --dry-run --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data
-./bin/nas-governance quarantine restore-execute --db ./var/governance.db --plan-id RESTORE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine --source-root /path/to/copied-test-data
-```
-
-保留期届满只产生 `DRAFT` 永久清除候选，不会自动删除。永久清除必须逐项二次审批，并在执行时再次提交相同摘要：
-
-```bash
-./bin/nas-governance purge plan --db ./var/governance.db --out ./var/purge-plan.json
-./bin/nas-governance purge approve --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST
-./bin/nas-governance purge execute --dry-run --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine
-./bin/nas-governance purge execute --db ./var/governance.db --plan-id PURGE_PLAN_ID --digest APPROVAL_DIGEST --quarantine /path/outside/source/quarantine
-./bin/nas-governance purge recover --db ./var/governance.db --quarantine /path/outside/source/quarantine
-```
-
-永久清除仅允许处理受管隔离项，不允许直接删除源目录文件。它表示文件从当前文件系统命名空间不可恢复地移除，不等同于 NAS 快照、备份、写时复制或 SSD 介质上的物理安全擦除。
-
-## 支持平台
-
-发布包覆盖 `darwin/arm64`、`darwin/amd64`、`linux/arm64` 和 `linux/amd64`。其他平台可从源码构建，但不属于首个公开版本的发布矩阵。
-
-扫描默认不跟随符号链接，不跨挂载点，不读取文件内容之外的外部服务，不上传任何数据。哈希采用两阶段策略：第一阶段对所有新文件或变更文件计算快速指纹（quick hash）；第二阶段按 size+quick_hash 分组，仅对成员数大于 1 的候选组计算完整 SHA-256。增量扫描复用 size+mtime+inode 三元组匹配的既有哈希，断点续扫通过 `scan_checkpoints` 表记录进度，已删除文件标记为 missing 而非物理删除。
-
-哈希读取默认最多尝试 3 次。仍失败的文件会保留在索引中（哈希字段为空），并写入默认权限为 `0600` 的 `<index>.hash-failures.jsonl` 私有清单；普通日志只报告数量，不输出路径或文件名。`retry-hashes` 会再次核对任务根目录、符号链接、挂载点以及 size+mtime+inode stale 状态，只读取通过检查的目标，并生成新的补录索引和剩余失败清单。它拒绝原地覆盖源索引，也不直接修改数据库；复核新索引后，再单独运行 `import-index` 幂等补录。
-
-`import-index` 先完整校验 JSONL，再分批幂等导入 SQLite 并重建目录语境。该命令只读取本地索引，不访问 NAS，适合在扫描已完成但数据库持久化失败时恢复。
-
-`analyze --resume` 以 SQLite 中已持久化的格式记录为检查点，跳过已完成项的 NAS 读取；`--refresh-unknown` 仅重新分析旧版本未识别项，`--refresh-metadata` 仅重新分析当前解析器能补齐的媒体元数据缺口。结果按 `--batch-size` 分批事务落库，进度日志只输出聚合数量。中断时保留已落库进度，不覆盖完整报告。
-
-`diagnose-formats` 只读项目 SQLite，生成默认 `0600` 的私有人工复核报告：列出大型 unknown、扩展名/文件头冲突和按格式聚合的元数据缺口。终端只显示数量，路径仅保留在私有报告中；诊断不会自动重命名文件。
-
-对真实基线的后续治理仍与执行分离：
-
-```bash
-# 登记 critical HOLD；普通 approve（包括 --all）会拒绝 critical
-./bin/nas-governance next-steps hold-critical --plan ./var/plan.json --out ./var/critical-hold-register.json
-# 将大媒体分为在线保护/项目归档复核/冷存储复核，仅产生 DRAFT
-./bin/nas-governance next-steps media-tiering --review ./var/governance-review-private.json --out ./var/media-tiering-draft.json
-```
-
-`diagnose-governance` 也只读项目 SQLite：对完全重复组生成仅 DRAFT 的复核计划，对零字节文件区分占位标记/失败产物/潜在临时产物/无法解释空文件，并聚合大容量媒体的格式、编码、时长、尺寸、目录职责及版本/派生/侧车关系。该命令不写审批状态，不保存可执行任务，不调用执行器；任何非 DRAFT 结果都会被拒绝写入。
-
-`diagnose-paths` 可读取私有历史扫描日志或扫描产生的 `0600` 哈希失败清单，在显式任务根目录内检查原路径、NFC/NFD 文件名变体以及“目录项可见但无法只读打开”的状态。它只会为可访问性诊断尝试只读 Open 后立即关闭，不读取文件内容；不跟随符号链接、不跨挂载点、不越过任务根目录，结果固定为不可执行的 `0600` 私有报告。规范化特征只作为相关性证据，不能触发自动重命名或归因客户端/服务端根因。
-
-`diagnose-merges` 只读取索引并解释合并门控：兄弟目录总对数、有限后缀归一后的名称相似对，以及文件名 Jaccard 0.10/0.25/0.50 分档。生产 `merge` 阈值仍为 0.5；诊断中的近似目录对不会生成审批或执行任务。
-
-媒体元数据仍坚持只读、不解码：WAV/AIFF/FLAC 从有界文件头计算时长与编码；MP4/MOV/M4V 按 atom 边界读取 `moov`，支持尾部 `moov`；AVI 读取 `avih`；MPEG 仅提取可验证的帧尺寸，不使用不可靠码率估算时长。
-
-资产组超过 10,000 个成员时会按更深相对路径拆分，无法继续分辨时才使用稳定分片，所有拆分结果都标记为人工复核。XMP、CPR、SESX、PSD 及 PEAK/PKF/PEK/CFA/MPGINDEX 等项目源文件与侧车依赖默认受保护；“可再生成缓存”只是分类，不授予删除权限。
-
-## 仓库结构
-
-```text
-cmd/nas-governance/       CLI 入口（含 quarantine/restore/purge 生命周期）
-internal/domain/          核心对象与安全约束
-internal/scanner/         只读文件系统扫描（context-aware BFS、增量哈希复用、断点续扫）
-internal/fingerprint/     快速指纹与完整哈希
-internal/index/           JSONL 索引适配器
-internal/format/          基于 magic bytes 的格式检测与只读元数据提取
-internal/formatdiag/      私有大型 unknown、扩展名冲突与元数据缺口诊断
-internal/governancediag/  私有重复/零字节/大媒体 DRAFT 治理复核
-internal/pathdiag/        私有 CJK/特殊字符路径兼容性诊断
-internal/filepolicy/      项目源文件、侧车和可再生缓存的保护策略
-internal/dircontext/      目录角色分类、上级目录链与业务锚点
-internal/relations/       版本与派生关系识别
-internal/assets/          资产组识别
-internal/merge/           目录合并建议
-internal/planner/         草案计划与可解释保留评分
-internal/learning/        L2 统计学习、L3 行业资料学习、L4 决策反馈学习
-internal/store/           SQLite 持久化层（项目自身数据库）
-internal/executor/        安全执行器（stale 复核、隔离、跨卷复制-校验-删除源、回滚、执行日志）
-internal/purge/           恢复与永久清除草案计划（只建议，不写文件）
-internal/runner/          worker pool（semaphore 并发控制）
-internal/drill/           NAS 故障演练（隔离只读场景）
-internal/report/          完全重复报告
-knowledge/cards/          白皮书知识卡
-knowledge/maps/           概念关系与开发路线
-schemas/                  SQLite 目标模式与规则示例
-docs/adr/                 架构决策记录
-```
-
-## 当前边界
-
-- 已有：只读扫描（含增量、断点续扫、哈希有限重试与失败补扫）、JSONL/SQLite 索引、目录语境、格式分析、资产关系、目录合并建议、草案计划、安全执行器（含执行日志与崩溃恢复）、M7 受管隔离/恢复/延时清除/永久清除、L1–L4 规则学习、人工复核 CLI。`scan --db` 可直接写入后续 `analyze --db` 所需的文件和目录语境记录。
-- 执行前置条件：计划须处于 `APPROVED`；非 dry-run 必须提供 SQLite `--db`；每个写操作必须位于显式配置的 `SourceRoots` 内；源根目录与隔离根目录必须是互不重叠的真实目录且不能是符号链接；执行失败不会把路径写入普通日志；执行动作通过 `execution_journal` 表同步落盘，Journal 失败即停止，崩溃后 `recover` 可回滚未完成的动作。
-- 并发与可观测性：`scan`/`analyze` 支持 `--workers N`和可选 `--progress-out`；进度快照仅有阶段、计数、失败数和复用数，权限为 `0600`。扫描每 1,000 个文件更新聚合检查点；中断后安全重遍历并复用哈希，不使用可能跳过 BFS 后代目录的路径游标。
-- 外部 AI 继续关闭；L2/L3/L4 学习只生成 `status=draft` 规则草案，priority≤60（K-008），不覆盖已审批规则。
-- 永久清除边界：仅从受管隔离区逐项执行；默认 30 天冷静期；保护项进入 HOLD；无 `--all`；审批摘要须在执行时再次提供；提交前可回滚，提交后仅允许审计对账。
-- 禁止：扫描阶段直接产生破坏性文件操作；AI 独立决定删除；直接对源目录执行 PURGE；跨备份域自动去重。
-
-详见 [知识地图](knowledge/maps/knowledge-map.md) 与 [开发路线](knowledge/maps/roadmap.md)。
+- 软件代码、构建文件和实现类 schema：[Apache License 2.0](LICENSE)
+- 原创文档与白皮书：[CC BY 4.0](LICENSE-DOCS.md)
+- 第三方组件：按 [第三方声明](THIRD_PARTY_NOTICES.md) 及随发布包提供的上游许可文本执行
+- "NDG" 名称、Logo 和品牌素材不随上述许可自动授权；如需在分发或衍生项目中使用品牌素材，请先通过 Issue 联系维护者
 
 ## 参与和支持
 
-- 提交改动前请阅读 [贡献指南](CONTRIBUTING.md) 和 [工程护栏](AGENTS.md)。
-- 普通使用问题和已脱敏的缺陷请按 [支持说明](SUPPORT.md) 处理。
-- 安全问题必须遵循 [安全政策](SECURITY.md)，不要在公开 Issue 中提交真实路径、文件名、数据库、索引或日志。
-- 本地及 CI 的公开边界检查：`make public-check`。
+- 提交改动前请阅读 [贡献指南](CONTRIBUTING.md) 和 [工程护栏](AGENTS.md)
+- 普通使用问题和已脱敏的缺陷请按 [支持说明](SUPPORT.md) 处理
+- 安全问题必须遵循 [安全政策](SECURITY.md)，不要在公开 Issue 中提交真实路径、文件名、数据库、索引或日志
+- 本地及 CI 的公开边界检查：`make public-check`
