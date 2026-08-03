@@ -34,19 +34,21 @@
 
 ## 执行
 
-辱骂、骚扰或其他不可接受的行为请通过以下私密渠道报告：
+辱骂、骚扰或其他不可接受的行为，请通过以下渠道报告：
 
-- **GitHub 私密联系**：在仓库维护者的 GitHub 个人主页（[@FNB2026](https://github.com/FNB2026)）发送私密消息，或通过仓库的 [Security Advisory](https://github.com/FNB2026/nas-data-governance/security/advisories/new) 提交注明"行为准则事件"的私密报告
+- **GitHub 平台违规行为**（骚扰、攻击、不当内容等）：使用相关用户主页、Issue、Pull Request、Discussion 或评论页面中的 **Report abuse / Report content** 功能，向 [GitHub Support](https://support.github.com) 报告。这是当前主要的可执行举报渠道
+- **项目专用举报邮箱**：将在项目具备多维护者条件后建立并在此更新。在此之前，涉及项目内部行为准则的事件请优先通过上述 GitHub 平台渠道报告
 
-> 行为准则事件与安全漏洞是不同类别的问题。如果你报告的是安全漏洞，请直接使用 Security Advisory 并按 [SECURITY.md](SECURITY.md) 的流程处理。
+> **安全漏洞不属于行为准则事件。** 如果你报告的是软件安全漏洞，请使用仓库 [Security Advisory](https://github.com/FNB2026/nas-data-governance/security/advisories/new) 并按照 [SECURITY.md](SECURITY.md) 的流程处理。Security Advisory 专用于安全漏洞工作流，不用于普通行为准则投诉。
 
 ### 处理流程
 
-- 首次确认收到报告的目标期限：**72 小时内**
-- 报告由仓库维护者负责审查和处理
-- 涉及维护者本人的投诉，将由 GitHub 平台的安全团队或中立第三方协助审查，以避免利益冲突
-- 所有投诉都将得到公正和保密的调查，报告者身份仅在必要范围内披露
-- 报告者的隐私将受到保护，未经同意不会公开报告内容或报告者信息
+- 项目维护者将在收到 GitHub 平台转交的报告后的 **72 小时内**确认收件
+- 报告将按照最小知悉原则进行保密处理
+- 未经报告者同意，不会公开报告内容或报告者身份，但法律要求或为防止紧迫伤害所必需的情况除外
+- 涉及仓库维护者本人的投诉，报告者可直接使用 GitHub 的 Report abuse 渠道向 GitHub Trust & Safety 团队报告，不必先向项目维护者报告
+- 对于同时违反 GitHub 服务条款或社区准则的行为，报告者可直接使用 GitHub 的滥用举报渠道，不必先向项目维护者报告
+- 行为准则事件与软件安全漏洞属于不同类别，分别使用上述对应渠道
 
 所有社区领导者都有义务尊重隐私和安全报告者的隐私。
 
