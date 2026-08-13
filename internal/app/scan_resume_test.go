@@ -101,6 +101,93 @@ func TestScanResumeFromAbortedCheckpoint(t *testing.T) {
 	}
 }
 
+func TestScanResumeKeepsDurablePrefixActive(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "source")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(ctx, filepath.Join(tmp, "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	storageID := "resume-prefix-active"
+	svc := NewScanServiceWithHashFunc(st,
+		func(string, int64) (string, error) { return "quick", nil },
+		func(string, int64) (string, error) { return "full", nil })
+	if _, err := svc.Scan(ctx, ScanInput{Root: root, StorageID: storageID, Workers: 1, HashAttempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	cpID, err := st.StartCheckpoint(ctx, storageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary := filepath.Join(root, "b.txt")
+	if err := st.UpdateCheckpoint(ctx, cpID, boundary, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, cpID, "paused_network"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Scan(ctx, ScanInput{Root: root, StorageID: storageID, Resume: true, Workers: 1, HashAttempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	metas, err := st.ListFileMetadata(ctx, storageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 3 {
+		t.Fatalf("active files after resume = %d, want 3", len(metas))
+	}
+}
+
+func TestNetworkHashDisappearancePausesWithoutAdvancingCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "source")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cached-entry.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, filepath.Join(tmp, "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	svc := NewScanServiceWithHashFunc(st,
+		func(string, int64) (string, error) { return "", os.ErrNotExist },
+		func(string, int64) (string, error) { return "", os.ErrNotExist })
+	result, err := svc.Scan(ctx, ScanInput{
+		Root:          root,
+		StorageID:     "network-hash-disappeared",
+		NetworkSource: true,
+		Workers:       1,
+		HashAttempts:  1,
+	})
+	if !errors.Is(err, ErrNetworkSourceUnavailable) {
+		t.Fatalf("scan error = %v, want ErrNetworkSourceUnavailable", err)
+	}
+	if result == nil || result.CoverageState != "partial" {
+		t.Fatalf("result = %#v, want partial coverage", result)
+	}
+	cp, err := st.LastCheckpoint(ctx, "network-hash-disappeared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.Status != "paused_network" || cp.ScannedCount != 0 || cp.LastScannedPath != "" {
+		t.Fatalf("unsafe checkpoint advance: %#v", cp)
+	}
+}
+
 // TestScanResumeIgnoresCompletedCheckpoint verifies that a 'completed'
 // checkpoint is NOT resumable. After a successful scan, Resume=true should
 // start a fresh checkpoint with empty ResumedFrom.
@@ -248,7 +335,9 @@ func (c *countingScanStore) snapshot() []checkpointUpdateRecord {
 // used int(count) (the session-local counter that resets to 0 on each Scan
 // call), which caused the stored count to regress to ~1000 on every resume
 // instead of growing. The fix uses result.ResumedCount + int(count), so the
-// count grows: 100 → 1100 → 2100.
+// count never regresses. A cancellation inside a directory deliberately keeps
+// the prior durable boundary (100); the next complete directory advances it
+// to 2101 only after all records have been persisted.
 //
 // The test creates 2101 files and uses a cancelling hash function to
 // interrupt the first resume after exactly 1000 hashes, then lets the second
@@ -304,7 +393,7 @@ func TestScanResumeCumulativeCountNoRegression(t *testing.T) {
 	// Wrap the store to capture UpdateCheckpoint calls.
 	cs := &countingScanStore{ScanStore: st}
 
-	// --- Step 2: resume scan #1 — should accumulate from 100 ---
+	// --- Step 2: resume scan #1 — cancellation inside the root directory ---
 	// Use a hash function that cancels the context after 1000 calls,
 	// interrupting the scan after the 1000-file checkpoint boundary.
 	scan1Ctx, scan1Cancel := context.WithCancel(ctx)
@@ -326,30 +415,26 @@ func TestScanResumeCumulativeCountNoRegression(t *testing.T) {
 	}
 
 	updates1 := cs.snapshot()
-	// At the 1000-file boundary, UpdateCheckpoint must have been called
-	// with 100 + 1000 = 1100, NOT just 1000 (which would be a regression).
-	found1100 := false
+	// An in-directory cancellation must not advance the durable boundary:
+	// discovery alone is insufficient until the directory prefix is persisted.
 	for _, u := range updates1 {
-		if u.scannedCount == 1100 {
-			found1100 = true
-		}
 		// No UpdateCheckpoint call should have a count below the
 		// ResumedCount (100). If it does, the fix is not applied.
 		if u.scannedCount < 100 {
 			t.Errorf("UpdateCheckpoint count %d < ResumedCount 100 (regression): %+v", u.scannedCount, u)
 		}
 	}
-	if !found1100 {
-		t.Errorf("expected UpdateCheckpoint with count 1100 (100 resumed + 1000 new), got: %+v", updates1)
+	if len(updates1) != 0 {
+		t.Errorf("unsafe checkpoint advance during incomplete directory: %+v", updates1)
 	}
 
-	// The checkpoint in the store should now have count=1100.
+	// The checkpoint remains at the prior safe boundary.
 	cp1, err := st.LastCheckpoint(ctx, storageID)
 	if err != nil {
 		t.Fatalf("LastCheckpoint after scan #1: %v", err)
 	}
-	if cp1.ScannedCount != 1100 {
-		t.Errorf("checkpoint count after scan #1 = %d, want 1100", cp1.ScannedCount)
+	if cp1.ScannedCount != 100 {
+		t.Errorf("checkpoint count after scan #1 = %d, want 100", cp1.ScannedCount)
 	}
 
 	// --- Step 3: resume scan #2 — should accumulate from 1100 ---
@@ -366,26 +451,24 @@ func TestScanResumeCumulativeCountNoRegression(t *testing.T) {
 		t.Fatalf("resume scan #2: %v", err)
 	}
 
-	// ResumedCount must be 1100 (from the checkpoint left by scan #1).
-	if result2.ResumedCount != 1100 {
-		t.Errorf("scan #2 ResumedCount = %d, want 1100", result2.ResumedCount)
+	// ResumedCount remains the last durable boundary from before cancellation.
+	if result2.ResumedCount != 100 {
+		t.Errorf("scan #2 ResumedCount = %d, want 100", result2.ResumedCount)
 	}
 
 	updates2 := cs2.snapshot()
-	// At the 1000-file boundary, UpdateCheckpoint must have been called
-	// with 1100 + 1000 = 2100, NOT just 1000.
-	found2100 := false
+	foundFinal := false
 	for _, u := range updates2 {
-		if u.scannedCount == 2100 {
-			found2100 = true
+		if u.scannedCount == totalFiles {
+			foundFinal = true
 		}
 		// No UpdateCheckpoint call should have a count below the
 		// ResumedCount (1100). If it does, the fix is not applied.
-		if u.scannedCount < 1100 {
-			t.Errorf("UpdateCheckpoint count %d < ResumedCount 1100 (regression): %+v", u.scannedCount, u)
+		if u.scannedCount < 100 {
+			t.Errorf("UpdateCheckpoint count %d < ResumedCount 100 (regression): %+v", u.scannedCount, u)
 		}
 	}
-	if !found2100 {
-		t.Errorf("expected UpdateCheckpoint with count 2100 (1100 resumed + 1000 new), got: %+v", updates2)
+	if !foundFinal {
+		t.Errorf("expected final directory checkpoint with count %d, got: %+v", totalFiles, updates2)
 	}
 }

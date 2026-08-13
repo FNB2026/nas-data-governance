@@ -350,6 +350,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             );
           } else if (p.state === "CANCELLED") {
             pushToast("warning", "扫描已取消");
+          } else if (p.state === "PAUSED_NETWORK") {
+            void loadStorages();
+            pushToast(
+              "warning",
+              "网络源已断开，扫描已安全暂停",
+              "已保存目录检查点；恢复 Tailscale 或 NAS 连接后可点击“继续扫描”",
+            );
           }
           return; // Don't schedule next poll for terminal states
         }

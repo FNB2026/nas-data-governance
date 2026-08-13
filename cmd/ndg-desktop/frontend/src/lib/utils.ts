@@ -1,6 +1,6 @@
 // Shared constants and utility functions for the NDG desktop frontend.
 
-export const TERMINAL_STATES = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+export const TERMINAL_STATES = new Set(["PAUSED_NETWORK", "COMPLETED", "FAILED", "CANCELLED"]);
 
 export const STAGE_LABELS: Record<string, string> = {
   DISCOVERING: "发现文件",
@@ -18,6 +18,7 @@ export const STATE_LABELS: Record<string, string> = {
   QUEUED: "排队中",
   RUNNING: "运行中",
   CANCEL_REQUESTED: "取消中",
+  PAUSED_NETWORK: "网络中断，已暂停",
   COMPLETED: "已完成",
   FAILED: "已失败",
   CANCELLED: "已取消",
@@ -28,6 +29,7 @@ export const EVENT_LABELS: Record<string, string> = {
   "job:stage": "阶段切换",
   "job:progress": "进度更新",
   "job:warning": "警告",
+  "job:paused_network": "网络中断暂停",
   "job:completed": "完成",
   "job:failed": "失败",
   "job:cancelled": "取消",

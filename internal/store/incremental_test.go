@@ -277,6 +277,29 @@ func TestCheckpointAbort(t *testing.T) {
 	}
 }
 
+func TestCheckpointNetworkPauseIsResumable(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	seedStorage(t, st, "network-paused")
+	id, err := st.StartCheckpoint(ctx, "network-paused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateCheckpoint(ctx, id, "/private/path-omitted", 42); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CompleteCheckpoint(ctx, id, "paused_network"); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := st.LastCheckpoint(ctx, "network-paused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.ID != id || cp.Status != "paused_network" || cp.ScannedCount != 42 {
+		t.Fatalf("checkpoint = %#v", cp)
+	}
+}
+
 // TestLastCheckpointAbortedSupersededByLaterCompleted verifies that an
 // aborted checkpoint is no longer resumable once a later (higher-id)
 // completed checkpoint exists for the same storage. This guards against

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -548,6 +549,38 @@ func TestStartScanRequiresRoot(t *testing.T) {
 	}
 	if _, err := api.StartScan(StartScanRequest{}); err == nil {
 		t.Fatal("expected error for empty root")
+	}
+}
+
+func TestPreflightSourceIsReadOnlyAndPrivacySafe(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.txt"), []byte("sample"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := NewAPI()
+	profile, err := api.PreflightSource(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Status != "online" || profile.RecommendedWorkers < 1 {
+		t.Fatalf("profile = %#v", profile)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "sample.txt" {
+		t.Fatalf("preflight changed source: entries=%v err=%v", entries, err)
+	}
+}
+
+func TestScanWorkersForNetworkProfileIsBounded(t *testing.T) {
+	profile := scanner.SourceProfile{Network: true, RecommendedWorkers: 1}
+	if got := scanWorkersForProfile(0, profile); got != 1 {
+		t.Fatalf("default network workers = %d, want 1", got)
+	}
+	if got := scanWorkersForProfile(64, profile); got != 4 {
+		t.Fatalf("bounded network workers = %d, want 4", got)
+	}
+	if got := scanWorkersForProfile(2, profile); got != 2 {
+		t.Fatalf("explicit safe workers = %d, want 2", got)
 	}
 }
 

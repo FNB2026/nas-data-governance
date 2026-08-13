@@ -56,6 +56,7 @@ const STATE_FILTER_OPTIONS = [
   { value: "QUEUED", label: "排队中" },
   { value: "RUNNING", label: "运行中" },
   { value: "CANCEL_REQUESTED", label: "取消中" },
+  { value: "PAUSED_NETWORK", label: "网络中断，已暂停" },
   { value: "COMPLETED", label: "已完成" },
   { value: "FAILED", label: "已失败" },
   { value: "CANCELLED", label: "已取消" },
@@ -85,8 +86,8 @@ interface ProgressDisplay {
 function computeProgress(stage: string, state: string, progress: wails.ScanJobProgress): ProgressDisplay {
   if (state === "COMPLETED") return { mode: "terminal", percent: 100 };
 
-  // For FAILED/CANCELLED, show the last known progress rather than 0%.
-  if (state === "FAILED" || state === "CANCELLED") {
+  // For interrupted terminal states, show the last known progress rather than 0%.
+  if (state === "FAILED" || state === "CANCELLED" || state === "PAUSED_NETWORK") {
     if (progress.discovered > 0 && progress.processed > 0) {
       return {
         mode: "terminal",
@@ -403,15 +404,15 @@ export default function ScanPanel({
             </button>
           )}
 
-          {/* Retry button for failed/cancelled scans */}
-          {!scanActive && canScan && canRetryScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED") && (
+          {/* Retry/resume actions for interrupted scans */}
+          {!scanActive && canScan && canRetryScan && (scanProgress.state === "FAILED" || scanProgress.state === "CANCELLED" || scanProgress.state === "PAUSED_NETWORK") && (
             <>
               <button
                 className="btn-sm"
                 disabled={scanStarting}
                 onClick={onRetryScan}
               >
-                {scanStarting ? "启动中…" : "重试扫描"}
+                {scanStarting ? "启动中…" : scanProgress.state === "PAUSED_NETWORK" ? "重新扫描" : "重试扫描"}
               </button>
               {canResumeScan && (
                 <button

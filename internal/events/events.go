@@ -34,6 +34,9 @@ const (
 	EventFailed EventType = "job:failed"
 	// EventCancelled is emitted when a cancellation request was honored.
 	EventCancelled EventType = "job:cancelled"
+	// EventPausedNetwork is emitted when a remote source becomes unavailable
+	// after a durable resume checkpoint has been preserved.
+	EventPausedNetwork EventType = "job:paused_network"
 )
 
 // Event is one structured milestone record for a job. The Sequence field

@@ -142,6 +142,7 @@ func (m *JobManager) Create(ctx context.Context, projectID string, jobType JobTy
 // On return:
 //   - nil error           → COMPLETED + job:completed event
 //   - ErrCancellationRequested → CANCELLED + job:cancelled event
+//   - ErrNetworkPaused    → PAUSED_NETWORK + job:paused_network event
 //   - any other error     → FAILED + job:failed event
 //
 // This method blocks until the job function returns. For async
@@ -193,6 +194,9 @@ func (m *JobManager) Run(ctx context.Context, jobID string, fn JobFunc) error {
 		if errors.Is(jobErr, ErrCancellationRequested) || errors.Is(jobErr, context.Canceled) {
 			finalState = StateCancelled
 			eventType = events.EventCancelled
+		} else if errors.Is(jobErr, ErrNetworkPaused) {
+			finalState = StatePausedNetwork
+			eventType = events.EventPausedNetwork
 		} else {
 			finalState = StateFailed
 			eventType = events.EventFailed

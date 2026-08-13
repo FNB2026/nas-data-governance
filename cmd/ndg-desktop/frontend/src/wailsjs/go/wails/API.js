@@ -162,6 +162,10 @@ export function PickDirectory(arg1) {
   return window['go']['wails']['API']['PickDirectory'](arg1);
 }
 
+export function PreflightSource(arg1) {
+  return window['go']['wails']['API']['PreflightSource'](arg1);
+}
+
 export function RecoverPurges(arg1) {
   return window['go']['wails']['API']['RecoverPurges'](arg1);
 }

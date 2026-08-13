@@ -93,6 +93,7 @@ describe("stateLabel", () => {
   it("returns Chinese label for known state", () => {
     expect(stateLabel("COMPLETED")).toBe("已完成");
     expect(stateLabel("RUNNING")).toBe("运行中");
+    expect(stateLabel("PAUSED_NETWORK")).toBe("网络中断，已暂停");
   });
 
   it("returns raw value for unknown state", () => {
@@ -142,6 +143,7 @@ describe("TERMINAL_STATES", () => {
     expect(TERMINAL_STATES.has("COMPLETED")).toBe(true);
     expect(TERMINAL_STATES.has("FAILED")).toBe(true);
     expect(TERMINAL_STATES.has("CANCELLED")).toBe(true);
+    expect(TERMINAL_STATES.has("PAUSED_NETWORK")).toBe(true);
   });
 
   it("does not include running or queued", () => {

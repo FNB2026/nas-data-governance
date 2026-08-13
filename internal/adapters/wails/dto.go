@@ -100,6 +100,17 @@ type StartScanResponse struct {
 	JobID string `json:"job_id"`
 }
 
+// SourcePreflightDTO is a privacy-safe, read-only source capability summary.
+// It deliberately excludes paths, hosts, accounts, and share names.
+type SourcePreflightDTO struct {
+	Status                   string `json:"status"`
+	FilesystemType           string `json:"filesystem_type"`
+	Network                  bool   `json:"network"`
+	PhysicalIdentityReliable bool   `json:"physical_identity_reliable"`
+	LatencyMS                int64  `json:"latency_ms"`
+	RecommendedWorkers       int    `json:"recommended_workers"`
+}
+
 // ScanJobProgress is the progress DTO returned by GetScanProgress.
 // All fields are privacy-safe aggregate counters (ADR-0006 §10).
 type ScanJobProgress struct {

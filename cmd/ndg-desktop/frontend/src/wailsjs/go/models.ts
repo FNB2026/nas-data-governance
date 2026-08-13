@@ -1938,6 +1938,28 @@ export namespace wails {
 	        this.completed_at = source["completed_at"];
 	    }
 	}
+	export class SourcePreflightDTO {
+	    status: string;
+	    filesystem_type: string;
+	    network: boolean;
+	    physical_identity_reliable: boolean;
+	    latency_ms: number;
+	    recommended_workers: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SourcePreflightDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.filesystem_type = source["filesystem_type"];
+	        this.network = source["network"];
+	        this.physical_identity_reliable = source["physical_identity_reliable"];
+	        this.latency_ms = source["latency_ms"];
+	        this.recommended_workers = source["recommended_workers"];
+	    }
+	}
 	export class StartScanRequest {
 	    root: string;
 	    storage_id: string;
@@ -2008,4 +2030,3 @@ export namespace wails {
 	}
 
 }
-

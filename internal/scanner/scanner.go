@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -31,6 +32,20 @@ type Options struct {
 	// resume never misses a file. Scan enforces this ordering via a
 	// deterministic pre-order DFS (see dirSortKey).
 	ResumePath string
+	// NetworkSource enables conservative classification of filesystem errors
+	// that indicate a temporarily disconnected remote source.
+	NetworkSource bool
+	// OnDirectoryCompleted is called after a directory subtree has been fully
+	// enumerated. LastScannedPath is the greatest file path visited so far and
+	// FilesScanned is the session-local count. Callers may use this boundary to
+	// persist a durable resume checkpoint before traversal advances.
+	OnDirectoryCompleted func(DirectoryCheckpoint) error
+}
+
+// DirectoryCheckpoint describes a deterministic, completed traversal prefix.
+type DirectoryCheckpoint struct {
+	LastScannedPath string
+	FilesScanned    int
 }
 
 // Stats holds scan statistics returned by Scan.
@@ -41,6 +56,10 @@ type Stats struct {
 	// directory). The scan continues past these. Fatal errors are
 	// returned as the error result of Scan itself.
 	Errors []ErrorEntry
+	// SourceUnavailable is true only when a network source produced an error
+	// consistent with a disconnected or stale mount. Permission errors remain
+	// ordinary partial-coverage errors.
+	SourceUnavailable bool
 }
 
 // ErrorEntry records a non-fatal error encountered during scanning.
@@ -84,6 +103,12 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	}
 	rootInfo, err := os.Stat(root)
 	if err != nil {
+		if opts.NetworkSource && (isNetworkInterruption(err) || errors.Is(err, os.ErrNotExist)) {
+			return Stats{
+				Errors:            []ErrorEntry{{Path: root, Error: err}},
+				SourceUnavailable: true,
+			}, nil
+		}
 		return Stats{}, err
 	}
 	rootDev, _ := deviceAndInode(rootInfo)
@@ -93,6 +118,8 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	// seen guards (storage_id, path) idempotency across the whole scan.
 	// Sized for typical directory volumes; grows as needed.
 	seen := make(map[scanPathKey]struct{}, 4096)
+	lastScannedPath := ""
+	checkpointBlocked := false
 
 	// walkDir performs a pre-order depth-first traversal of dirPath. Entries
 	// are sorted with dirSortKey so that the visit order matches a global
@@ -110,6 +137,10 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 		entries, err := os.ReadDir(dirPath)
 		if err != nil {
 			stats.Errors = append(stats.Errors, ErrorEntry{Path: dirPath, Error: err})
+			checkpointBlocked = true
+			if opts.NetworkSource && (isNetworkInterruption(err) || (dirPath == root && errors.Is(err, os.ErrNotExist))) {
+				stats.SourceUnavailable = true
+			}
 			return nil // single dir failure does not abort the scan
 		}
 
@@ -137,6 +168,10 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			info, err := entry.Info()
 			if err != nil {
 				stats.Errors = append(stats.Errors, ErrorEntry{Path: path, Error: err})
+				checkpointBlocked = true
+				if opts.NetworkSource && isNetworkInterruption(err) {
+					stats.SourceUnavailable = true
+				}
 				continue
 			}
 
@@ -176,12 +211,21 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			}
 
 			stats.FilesScanned++
+			lastScannedPath = path
 			physical := physicalIdentity(info, identityReliable)
 			if err := visit(domain.FileInstance{
 				StorageID: opts.StorageID, Path: path, Name: entry.Name(), Size: info.Size(),
 				Mode: uint32(info.Mode()), ModifiedAt: info.ModTime(), Device: dev, Inode: ino,
 				Physical:     physical,
 				DiscoveredAt: time.Now().UTC(),
+			}); err != nil {
+				return err
+			}
+		}
+		if opts.OnDirectoryCompleted != nil && lastScannedPath != "" && !checkpointBlocked {
+			if err := opts.OnDirectoryCompleted(DirectoryCheckpoint{
+				LastScannedPath: lastScannedPath,
+				FilesScanned:    stats.FilesScanned,
 			}); err != nil {
 				return err
 			}
@@ -193,6 +237,26 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 		return stats, err
 	}
 	return stats, nil
+}
+
+// IsNetworkUnavailableError reports whether an error from a known network
+// filesystem is consistent with a disconnected/stale source. os.ErrNotExist
+// is included because an already-enumerated mount disappears as ENOENT when
+// a worker later opens the file for hashing.
+func IsNetworkUnavailableError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || isNetworkInterruption(err)
+}
+
+func isNetworkInterruption(err error) bool {
+	return errors.Is(err, syscall.ENOTCONN) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ETIMEDOUT) ||
+		errors.Is(err, syscall.EHOSTDOWN) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ENETDOWN) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.ESTALE) ||
+		errors.Is(err, syscall.EIO)
 }
 
 // dirSortKey returns a sort key for a directory entry that makes a pre-order

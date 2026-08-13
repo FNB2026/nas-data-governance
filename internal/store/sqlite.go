@@ -995,7 +995,7 @@ func (s *SQLiteStore) ListExecutingPlans(ctx context.Context) ([]string, error) 
 // hash recomputation.
 func (s *SQLiteStore) ListFileMetadata(ctx context.Context, storageID string) ([]FileMeta, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT path, size, mtime, device, inode, quick_hash, content_sha256
+		`SELECT path, size, mtime, device, inode, physical_reliable, quick_hash, content_sha256
 		 FROM file_instances
 		 WHERE storage_id = ? AND file_status = 'active'
 		 ORDER BY path`, storageID)
@@ -1008,8 +1008,9 @@ func (s *SQLiteStore) ListFileMetadata(ctx context.Context, storageID string) ([
 		var m FileMeta
 		var mtime string
 		var device, inode sql.NullInt64
+		var physicalReliable int
 		var quickHash, contentSHA256 sql.NullString
-		if err := rows.Scan(&m.Path, &m.Size, &mtime, &device, &inode, &quickHash, &contentSHA256); err != nil {
+		if err := rows.Scan(&m.Path, &m.Size, &mtime, &device, &inode, &physicalReliable, &quickHash, &contentSHA256); err != nil {
 			return nil, err
 		}
 		m.ModifiedAt, _ = time.Parse(time.RFC3339Nano, mtime)
@@ -1019,6 +1020,7 @@ func (s *SQLiteStore) ListFileMetadata(ctx context.Context, storageID string) ([
 		if inode.Valid {
 			m.Inode = uint64(inode.Int64)
 		}
+		m.PhysicalReliable = physicalReliable != 0
 		m.QuickHash = quickHash.String
 		m.ContentSHA256 = contentSHA256.String
 		out = append(out, m)
@@ -1128,7 +1130,8 @@ func (s *SQLiteStore) UpdateCheckpoint(ctx context.Context, checkpointID int64, 
 	return nil
 }
 
-// CompleteCheckpoint marks a checkpoint as 'completed' or 'aborted'.
+// CompleteCheckpoint marks a checkpoint as 'completed', 'aborted', or
+// 'paused_network'.
 func (s *SQLiteStore) CompleteCheckpoint(ctx context.Context, checkpointID int64, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := s.db.ExecContext(ctx,
@@ -1142,7 +1145,7 @@ func (s *SQLiteStore) CompleteCheckpoint(ctx context.Context, checkpointID int64
 
 // LastCheckpoint returns the most recent resumable checkpoint for a storage.
 // A checkpoint is resumable when its status is 'running' (crash-interrupted)
-// or 'aborted' (cancelled by the user), AND no more recent 'completed'
+// 'aborted' (cancelled by the user), or 'paused_network', AND no more recent 'completed'
 // checkpoint exists for the same storage. The NOT EXISTS clause ensures
 // that once a fresh full scan completes, stale aborted checkpoints from
 // earlier runs are no longer offered for resume.
@@ -1157,7 +1160,7 @@ func (s *SQLiteStore) LastCheckpoint(ctx context.Context, storageID string) (Che
 	err := s.db.QueryRowContext(ctx,
 		`SELECT c.id, c.storage_id, c.last_scanned_path, c.scanned_count, c.status, c.started_at, c.updated_at
 		 FROM scan_checkpoints c
-		 WHERE c.storage_id = ? AND c.status IN ('running', 'aborted')
+		 WHERE c.storage_id = ? AND c.status IN ('running', 'aborted', 'paused_network')
 		 AND NOT EXISTS (
 		     SELECT 1 FROM scan_checkpoints c2
 		     WHERE c2.storage_id = ? AND c2.status = 'completed'
