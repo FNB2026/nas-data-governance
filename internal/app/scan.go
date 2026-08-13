@@ -400,13 +400,18 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	s.setStage(in, "quick_hash")
 	hashErrs := hashRunner.Wait()
 	_ = hashErrs // already recorded as hashFailures
-	persistCtx := ctx
-	var cancelPersist context.CancelFunc
+	// Cancellation may leave an incomplete directory prefix in memory. Do not
+	// force that batch into the project database or advance its checkpoint:
+	// retain the last already-durable directory boundary and mark it aborted.
 	if ctx.Err() != nil {
-		persistCtx, cancelPersist = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelPersist()
+		if result.CheckpointID != 0 && s.store != nil {
+			checkpointCtx, cancelCheckpoint := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = s.store.CompleteCheckpoint(checkpointCtx, result.CheckpointID, "aborted")
+			cancelCheckpoint()
+		}
+		return nil, ctx.Err()
 	}
-	if persistErr := persistPending(persistCtx); persistErr != nil {
+	if persistErr := persistPending(ctx); persistErr != nil {
 		if result.CheckpointID != 0 && s.store != nil {
 			_ = s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, "aborted")
 		}
@@ -415,7 +420,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 
 	if err != nil {
 		if result.CheckpointID != 0 && s.store != nil {
-			_ = s.store.CompleteCheckpoint(persistCtx, result.CheckpointID, "aborted")
+			_ = s.store.CompleteCheckpoint(ctx, result.CheckpointID, "aborted")
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
