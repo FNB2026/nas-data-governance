@@ -85,6 +85,8 @@ export function OpenProjectReadWrite(arg1:string):Promise<wails.ProjectInfo>;
 
 export function PickDirectory(arg1:string):Promise<string>;
 
+export function PreflightSource(arg1:string):Promise<wails.SourcePreflightDTO>;
+
 export function RecoverPurges(arg1:string):Promise<Array<wails.PurgeRecoveryResultDTO>>;
 
 export function RecoverRestores(arg1:wails.RecoverRestoresRequest):Promise<Array<wails.RestoreRecoveryResultDTO>>;

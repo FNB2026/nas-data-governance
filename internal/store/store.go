@@ -233,16 +233,18 @@ type JournalEntry struct {
 
 // FileMeta is the lightweight metadata returned by ListFileMetadata.
 // It carries only the fields needed for incremental change detection
-// (size + mtime + inode) and hash cache reuse (quick_hash, content_sha256).
+// and hash cache reuse. PhysicalReliable is required because an inode from
+// SMB/NFS/WebDAV/FUSE must never authorize reuse of a cached content hash.
 // Path is included so callers can match scanned files to DB records.
 type FileMeta struct {
-	Path          string
-	Size          int64
-	ModifiedAt    time.Time
-	Device        uint64
-	Inode         uint64
-	QuickHash     string
-	ContentSHA256 string
+	Path             string
+	Size             int64
+	ModifiedAt       time.Time
+	Device           uint64
+	Inode            uint64
+	PhysicalReliable bool
+	QuickHash        string
+	ContentSHA256    string
 }
 
 // Checkpoint is one row of scan_checkpoints. It records where a scan
@@ -252,7 +254,7 @@ type Checkpoint struct {
 	StorageID       string
 	LastScannedPath string
 	ScannedCount    int
-	Status          string // running | completed | aborted
+	Status          string // running | completed | aborted | paused_network
 	StartedAt       time.Time
 	UpdatedAt       time.Time
 }

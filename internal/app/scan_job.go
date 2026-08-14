@@ -113,9 +113,22 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 		close(progressDone)
 		wg.Wait()
 
+		if result != nil {
+			// Preserve the last aggregate snapshot for completed, paused, and
+			// partially processed scans without exposing any source paths.
+			_ = reporter.SetProgress(context.Background(), jobs.ProgressPayload{
+				Discovered: r.scan.discovered.Load(),
+				Processed:  r.scan.processed.Load(),
+				Failed:     r.scan.failed.Load(),
+			})
+		}
+
 		if scanErr != nil {
 			if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
 				return jobs.ErrCancellationRequested
+			}
+			if errors.Is(scanErr, ErrNetworkSourceUnavailable) {
+				return jobs.ErrNetworkPaused
 			}
 			return scanErr
 		}

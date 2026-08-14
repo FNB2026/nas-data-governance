@@ -32,7 +32,7 @@ import (
 // Valid transitions:
 //
 //	QUEUED          → RUNNING | CANCELLED | FAILED
-//	RUNNING         → CANCEL_REQUESTED | COMPLETED | FAILED
+//	RUNNING         → CANCEL_REQUESTED | PAUSED_NETWORK | COMPLETED | FAILED
 //	CANCEL_REQUESTED → CANCELLED | COMPLETED | FAILED
 //	COMPLETED       (terminal)
 //	FAILED          (terminal)
@@ -43,6 +43,7 @@ const (
 	StateQueued          JobState = "QUEUED"
 	StateRunning         JobState = "RUNNING"
 	StateCancelRequested JobState = "CANCEL_REQUESTED"
+	StatePausedNetwork   JobState = "PAUSED_NETWORK"
 	StateCompleted       JobState = "COMPLETED"
 	StateFailed          JobState = "FAILED"
 	StateCancelled       JobState = "CANCELLED"
@@ -50,7 +51,7 @@ const (
 
 // IsTerminal returns true if no further state transitions are possible.
 func (s JobState) IsTerminal() bool {
-	return s == StateCompleted || s == StateFailed || s == StateCancelled
+	return s == StatePausedNetwork || s == StateCompleted || s == StateFailed || s == StateCancelled
 }
 
 // validTransitions defines the legal state machine edges.
@@ -62,6 +63,7 @@ var validTransitions = map[JobState]map[JobState]bool{
 	},
 	StateRunning: {
 		StateCancelRequested: true,
+		StatePausedNetwork:   true,
 		StateCompleted:       true,
 		StateFailed:          true,
 	},
@@ -222,3 +224,7 @@ var ErrJobAlreadyRunning = errors.New("jobs: job already running")
 // ErrCancellationRequested is returned from a job function when it
 // detects that cancellation was requested and stopped gracefully.
 var ErrCancellationRequested = errors.New("jobs: cancellation requested")
+
+// ErrNetworkPaused stops a scan without treating a temporary remote-source
+// outage as a failed job. The durable scan checkpoint remains resumable.
+var ErrNetworkPaused = errors.New("jobs: paused because network source is unavailable")

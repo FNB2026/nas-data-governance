@@ -8,9 +8,14 @@ import (
 )
 
 func physicalIdentityReliable(root string) bool {
+	_, _, reliable := filesystemProfile(root)
+	return reliable
+}
+
+func filesystemProfile(root string) (string, bool, bool) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(root, &stat); err != nil {
-		return false
+		return "unknown", false, false
 	}
 	buf := make([]byte, 0, len(stat.Fstypename))
 	for _, c := range stat.Fstypename {
@@ -19,11 +24,5 @@ func physicalIdentityReliable(root string) bool {
 		}
 		buf = append(buf, byte(c))
 	}
-	fsType := strings.ToLower(string(buf))
-	switch fsType {
-	case "smbfs", "nfs", "afpfs", "webdav", "fusefs", "osxfuse", "macfuse":
-		return false
-	default:
-		return fsType != ""
-	}
+	return profileForFilesystem(strings.ToLower(string(buf)))
 }

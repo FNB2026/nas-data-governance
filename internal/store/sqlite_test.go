@@ -253,7 +253,9 @@ func TestUpsertFilesPreservesHighBitSMBIdentifiers(t *testing.T) {
 	wantInode := uint64(1<<63) + 99
 	files := []domain.FileInstance{{
 		StorageID: "smb", Path: "/share/a", Name: "a", Size: 1,
-		Device: wantDevice, Inode: wantInode, ModifiedAt: time.Now(), DiscoveredAt: time.Now(),
+		Device: wantDevice, Inode: wantInode,
+		Physical:   domain.PhysicalIdentity{Device: wantDevice, Inode: wantInode, Reliable: false},
+		ModifiedAt: time.Now(), DiscoveredAt: time.Now(),
 	}}
 	if _, err := s.UpsertFiles(ctx, files); err != nil {
 		t.Fatalf("upsert high-bit SMB identifiers: %v", err)
@@ -268,6 +270,9 @@ func TestUpsertFilesPreservesHighBitSMBIdentifiers(t *testing.T) {
 	meta, err := s.ListFileMetadata(ctx, "smb")
 	if err != nil || len(meta) != 1 || meta[0].Device != wantDevice || meta[0].Inode != wantInode {
 		t.Fatalf("metadata identifier round trip: %#v err=%v", meta, err)
+	}
+	if meta[0].PhysicalReliable {
+		t.Fatal("SMB metadata unexpectedly became physically reliable")
 	}
 }
 

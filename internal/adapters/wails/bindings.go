@@ -28,6 +28,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/merge"
 	projectsvc "github.com/FNB2026/nas-data-governance/internal/project"
 	"github.com/FNB2026/nas-data-governance/internal/query"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"github.com/FNB2026/nas-data-governance/internal/version"
 )
@@ -502,16 +503,21 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	}
 	storageID = derivedID
 
-	workers := req.Workers
-	if workers < 1 {
-		workers = 4
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 5*time.Second)
+	profile, err := scanner.ProbeSource(probeCtx, req.Root)
+	cancelProbe()
+	if err != nil {
+		return StartScanResponse{}, fmt.Errorf("wails: source preflight: %w", err)
 	}
+
+	workers := scanWorkersForProfile(req.Workers, profile)
 
 	in := app.ScanInput{
 		Root:           req.Root,
 		StorageID:      storageID,
 		FullScan:       req.FullScan,
 		Resume:         req.Resume,
+		NetworkSource:  profile.Network,
 		Workers:        workers,
 		HashAttempts:   3,
 		HashRetryDelay: 1 * time.Second,
@@ -522,6 +528,41 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		return StartScanResponse{}, fmt.Errorf("wails: start scan: %w", err)
 	}
 	return StartScanResponse{JobID: jobID}, nil
+}
+
+func scanWorkersForProfile(requested int, profile scanner.SourceProfile) int {
+	workers := requested
+	if workers < 1 {
+		workers = profile.RecommendedWorkers
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	// A user may request a lower value, but high unbounded concurrency on a
+	// network filesystem can amplify latency and saturate a remote NAS link.
+	if profile.Network && workers > 4 {
+		workers = 4
+	}
+	return workers
+}
+
+// PreflightSource performs the same bounded, read-only source check used by
+// StartScan without creating a job or changing project state.
+func (a *API) PreflightSource(root string) (SourcePreflightDTO, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	profile, err := scanner.ProbeSource(ctx, root)
+	if err != nil {
+		return SourcePreflightDTO{Status: string(scanner.SourceUnavailable)}, err
+	}
+	return SourcePreflightDTO{
+		Status:                   string(profile.Status),
+		FilesystemType:           profile.FilesystemType,
+		Network:                  profile.Network,
+		PhysicalIdentityReliable: profile.PhysicalIdentityReliable,
+		LatencyMS:                profile.Latency.Milliseconds(),
+		RecommendedWorkers:       profile.RecommendedWorkers,
+	}, nil
 }
 
 // GetScanProgress returns the current state and progress counters for a
@@ -555,7 +596,7 @@ func (a *API) GetScanProgress(jobID string) (ScanJobProgress, error) {
 // (Continue Scan) button.
 //
 // A checkpoint is resumable when its status is 'running' (crash-interrupted)
-// or 'aborted' (user-cancelled) and not superseded by a later completed scan.
+// 'aborted' (user-cancelled), or 'paused_network' and not superseded by a later completed scan.
 // Returns Available=false (not an error) when no checkpoint exists.
 func (a *API) GetScanCheckpoint(root string) (ScanCheckpointDTO, error) {
 	a.mu.RLock()
@@ -576,10 +617,10 @@ func (a *API) GetScanCheckpoint(root string) (ScanCheckpointDTO, error) {
 		}
 		return ScanCheckpointDTO{}, fmt.Errorf("wails: get scan checkpoint: %w", err)
 	}
-	// A checkpoint is only resumable when its status is 'running'
-	// (crash-interrupted) or 'aborted' (user-cancelled). A 'completed'
-	// checkpoint means the scan finished successfully — no resume needed.
-	resumable := cp.Status == "running" || cp.Status == "aborted"
+	// A checkpoint is resumable when it is crash-interrupted, user-cancelled,
+	// or paused because a network source disappeared. A completed checkpoint
+	// means the scan finished successfully — no resume needed.
+	resumable := cp.Status == "running" || cp.Status == "aborted" || cp.Status == "paused_network"
 	return ScanCheckpointDTO{
 		Available:       resumable,
 		LastScannedPath: cp.LastScannedPath,

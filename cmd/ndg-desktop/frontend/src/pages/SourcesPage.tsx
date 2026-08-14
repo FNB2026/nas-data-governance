@@ -28,6 +28,7 @@ export default function SourcesPage() {
   } = useProject();
 
   const [readiness, setReadiness] = useState<wails.ProjectReadinessDTO | null>(null);
+  const [sourceProfiles, setSourceProfiles] = useState<Record<string, wails.SourcePreflightDTO | null>>({});
 
   const loadReadiness = useCallback(async () => {
     if (!hasWailsRuntime()) return;
@@ -47,6 +48,26 @@ export default function SourcesPage() {
       setReadiness(null);
     }
   }, [project, dataRevision, loadReadiness]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!project || !hasWailsRuntime()) {
+      setSourceProfiles({});
+      return () => { cancelled = true; };
+    }
+    setSourceProfiles({});
+    void Promise.all(storages.map(async (storage) => {
+      try {
+        const profile = await api.scan.preflight(storage.root_path);
+        return [storage.id, profile] as const;
+      } catch {
+        return [storage.id, null] as const;
+      }
+    })).then((entries) => {
+      if (!cancelled) setSourceProfiles(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [project, storages, dataRevision]);
 
   return (
     <div className="page page--sources">
@@ -112,7 +133,7 @@ export default function SourcesPage() {
             </section>
           )}
 
-          <StorageList storages={storages} storagesError={storagesError} />
+          <StorageList storages={storages} storagesError={storagesError} sourceProfiles={sourceProfiles} />
           <DiagnosticPanel storages={storages} />
         </>
       )}

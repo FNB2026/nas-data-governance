@@ -236,6 +236,35 @@ func TestRun_Failure(t *testing.T) {
 	}
 }
 
+func TestRun_NetworkPauseIsResumableTerminalState(t *testing.T) {
+	mgr, st := newTestManager(t)
+	ctx := context.Background()
+	jobID, err := mgr.Create(ctx, "proj-1", jobs.JobScan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = mgr.Run(ctx, jobID, func(context.Context, *jobs.Reporter) error {
+		return jobs.ErrNetworkPaused
+	})
+	if !errors.Is(err, jobs.ErrNetworkPaused) {
+		t.Fatalf("Run error = %v", err)
+	}
+	run, err := st.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != jobs.StatePausedNetwork || run.CompletedAt == nil {
+		t.Fatalf("paused run = %#v", run)
+	}
+	events, err := st.ListEvents(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := events[len(events)-1].EventType; got != "job:paused_network" {
+		t.Fatalf("last event = %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Cancellation
 // ---------------------------------------------------------------------------
@@ -606,6 +635,7 @@ func TestCanTransitionTo_LegalTransitions(t *testing.T) {
 		{jobs.StateQueued, jobs.StateCompleted, false},
 		{jobs.StateQueued, jobs.StateFailed, true},
 		{jobs.StateRunning, jobs.StateCancelRequested, true},
+		{jobs.StateRunning, jobs.StatePausedNetwork, true},
 		{jobs.StateRunning, jobs.StateCompleted, true},
 		{jobs.StateRunning, jobs.StateFailed, true},
 		{jobs.StateRunning, jobs.StateQueued, false},
@@ -616,6 +646,7 @@ func TestCanTransitionTo_LegalTransitions(t *testing.T) {
 		{jobs.StateCompleted, jobs.StateRunning, false},
 		{jobs.StateFailed, jobs.StateRunning, false},
 		{jobs.StateCancelled, jobs.StateRunning, false},
+		{jobs.StatePausedNetwork, jobs.StateRunning, false},
 	}
 	for _, tt := range tests {
 		got := jobs.CanTransitionTo(tt.from, tt.to)
@@ -634,6 +665,9 @@ func TestIsTerminal(t *testing.T) {
 	}
 	if !jobs.StateCancelled.IsTerminal() {
 		t.Error("CANCELLED should be terminal")
+	}
+	if !jobs.StatePausedNetwork.IsTerminal() {
+		t.Error("PAUSED_NETWORK should be terminal for the stopped worker; resume creates a new job")
 	}
 	if jobs.StateQueued.IsTerminal() {
 		t.Error("QUEUED should not be terminal")

@@ -49,6 +49,7 @@ import {
   OpenProject,
   OpenProjectReadWrite,
   PickDirectory,
+  PreflightSource,
   RecoverPurges,
   RecoverRestores,
   RecoverSourcePlans,
@@ -100,6 +101,8 @@ export const api = {
 
   // ---- Scan operations ----
   scan: {
+	preflight: (root: string): Promise<wails.SourcePreflightDTO> =>
+		callRead(() => PreflightSource(root)),
     start: (req: wails.StartScanRequest): Promise<wails.StartScanResponse> =>
       callOnce(() => StartScan(req)),
     cancel: (jobId: string): Promise<void> =>

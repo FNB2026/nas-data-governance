@@ -85,6 +85,9 @@ type ScanInput struct {
 	FullScan bool
 	// Resume resumes from the last checkpoint if available.
 	Resume bool
+	// NetworkSource enables remote-disconnect pause semantics. It is derived
+	// from the read-only source preflight rather than from user input.
+	NetworkSource bool
 	// Workers is the number of concurrent hash workers (1 = serial).
 	Workers int
 	// HashAttempts is the maximum read attempts per hash (1-10).
@@ -96,6 +99,11 @@ type ScanInput struct {
 	// It is intentionally private: callers cannot forge job state.
 	onStageChanged func(string)
 }
+
+// ErrNetworkSourceUnavailable indicates that a remote filesystem became
+// unavailable after the durable scan prefix had been saved. Callers should
+// offer resume rather than treating this as data loss or a completed scan.
+var ErrNetworkSourceUnavailable = errors.New("app: network source unavailable; scan paused")
 
 // ScanProgress is a point-in-time snapshot of scan progress. Safe to
 // read from a separate goroutine while Scan is running.
@@ -129,6 +137,9 @@ type ScanResult struct {
 	// FullTraversal is true when the scan completed without errors,
 	// meaning MarkFilesMissing was used instead of MarkFilesUnavailable.
 	FullTraversal bool
+	// CoverageState makes the reconciliation decision explicit for UI and
+	// audit consumers. Partial coverage must never be interpreted as deletion.
+	CoverageState string
 }
 
 // ScanService handles filesystem scanning with incremental hash reuse,
@@ -255,14 +266,14 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 
 	// Checkpoint: resume from the last incomplete scan if --resume.
-	// Only 'running' (crash-interrupted) or 'aborted' (user-cancelled)
-	// checkpoints are resumable. A 'completed' checkpoint means the
+	// Running, aborted, and network-paused checkpoints are resumable. A
+	// 'completed' checkpoint means the
 	// previous scan finished — resuming from it would skip already-
 	// fully-scanned files, so we start a fresh checkpoint instead.
 	if s.store != nil {
 		if in.Resume && !in.FullScan {
 			cp, err := s.store.LastCheckpoint(ctx, in.StorageID)
-			if err == nil && (cp.Status == "running" || cp.Status == "aborted") {
+			if err == nil && (cp.Status == "running" || cp.Status == "aborted" || cp.Status == "paused_network") {
 				result.ResumedFrom = cp.LastScannedPath
 				result.CheckpointID = cp.ID
 				result.ResumedCount = cp.ScannedCount
@@ -283,6 +294,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	var filesMu sync.Mutex
 	var hashFailures []HashFailure
 	var failuresMu sync.Mutex
+	var networkUnavailable atomic.Bool
+	persistedCount := 0
+	lastCheckpointedSessionCount := 0
 
 	addFile := func(f domain.FileInstance) {
 		filesMu.Lock()
@@ -298,36 +312,68 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 
 	hashRunner := runner.New(in.Workers)
+	persistPending := func(persistCtx context.Context) error {
+		if s.store == nil {
+			return nil
+		}
+		filesMu.Lock()
+		if persistedCount >= len(files) {
+			filesMu.Unlock()
+			return nil
+		}
+		batch := append([]domain.FileInstance(nil), files[persistedCount:]...)
+		filesMu.Unlock()
+
+		ids, err := s.store.UpsertFiles(persistCtx, batch)
+		if err != nil {
+			return err
+		}
+		for i, id := range ids {
+			if err := s.store.SaveContext(persistCtx, id, dircontext.Classify(batch[i].Path), dircontext.RuleVersion()); err != nil {
+				return err
+			}
+		}
+		persistedCount += len(batch)
+		return nil
+	}
 	scanOpts := scanner.Options{
 		Root:          in.Root,
 		StorageID:     in.StorageID,
 		ExcludedNames: scanner.DefaultExclusions(),
 		ResumePath:    result.ResumedFrom,
+		NetworkSource: in.NetworkSource,
+		OnDirectoryCompleted: func(cp scanner.DirectoryCheckpoint) error {
+			if s.store == nil || result.CheckpointID == 0 || cp.FilesScanned <= lastCheckpointedSessionCount {
+				return nil
+			}
+			// A resume boundary becomes durable only after all hashing submitted
+			// for this completed directory prefix has finished and its metadata
+			// has been committed to the project database.
+			hashRunner.Wait()
+			if networkUnavailable.Load() {
+				// Do not advance past files whose content was not readable after
+				// the network mount disappeared. Resume must revisit them.
+				return nil
+			}
+			if err := persistPending(ctx); err != nil {
+				return errors.New("persist directory scan checkpoint failed")
+			}
+			totalScanned := result.ResumedCount + cp.FilesScanned
+			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, cp.LastScannedPath, totalScanned); err != nil {
+				return errors.New("update directory scan checkpoint failed")
+			}
+			lastCheckpointedSessionCount = cp.FilesScanned
+			return nil
+		},
 	}
 	stats, err := scanner.Scan(ctx, scanOpts, func(file domain.FileInstance) error {
-		count := s.discovered.Add(1)
-		// Record the actual last-scanned file path every 1000 files so
-		// that a resumed scan can skip already-traversed paths. The path
-		// is the absolute filesystem path of the most recently discovered
-		// file at this 1000-file boundary.
-		//
-		// The scanned_count written to the checkpoint MUST include the
-		// files already counted by the resumed checkpoint (ResumedCount).
-		// Without this, every resume cycle resets the running count to
-		// near-zero, and the stored count regresses instead of growing
-		// monotonically across multiple interrupt→resume cycles.
-		if s.store != nil && result.CheckpointID != 0 && count%1000 == 0 {
-			totalScanned := result.ResumedCount + int(count)
-			if err := s.store.UpdateCheckpoint(ctx, result.CheckpointID, file.Path, totalScanned); err != nil {
-				return errors.New("update aggregate scan checkpoint failed")
-			}
-		}
-		// Incremental check: if size + mtime + inode are unchanged,
-		// reuse cached hashes instead of recomputing.
+		s.discovered.Add(1)
+		// Incremental reuse is allowed only when both the previous and current
+		// scan report a reliable physical identity. SMB/NFS/WebDAV/FUSE may
+		// expose synthetic or unstable inode values; those values must never
+		// authorize reuse of a cached content hash.
 		if cached, ok := cache[file.Path]; ok {
-			if cached.Size == file.Size &&
-				cached.ModifiedAt.Equal(file.ModifiedAt) &&
-				cached.Inode == file.Inode && cached.QuickHash != "" {
+			if canReuseCachedHash(cached, file) {
 				file.QuickHash = cached.QuickHash
 				file.ContentSHA256 = cached.ContentSHA256
 				addFile(file)
@@ -338,6 +384,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		return hashRunner.Submit(ctx, func() error {
 			q, used, qerr := hashWithRetry(ctx, file.Path, file.Size, in.HashAttempts, in.HashRetryDelay, s.quickHash)
 			if qerr != nil {
+				if in.NetworkSource && scanner.IsNetworkUnavailableError(qerr) {
+					networkUnavailable.Store(true)
+				}
 				addFile(file)
 				addFailure(NewHashFailure(file, "quick", used, "hash_failed"))
 				return errors.New("quick fingerprint failed; path omitted")
@@ -351,6 +400,23 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	s.setStage(in, "quick_hash")
 	hashErrs := hashRunner.Wait()
 	_ = hashErrs // already recorded as hashFailures
+	// Cancellation may leave an incomplete directory prefix in memory. Do not
+	// force that batch into the project database or advance its checkpoint:
+	// retain the last already-durable directory boundary and mark it aborted.
+	if ctx.Err() != nil {
+		if result.CheckpointID != 0 && s.store != nil {
+			checkpointCtx, cancelCheckpoint := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = s.store.CompleteCheckpoint(checkpointCtx, result.CheckpointID, "aborted")
+			cancelCheckpoint()
+		}
+		return nil, ctx.Err()
+	}
+	if persistErr := persistPending(ctx); persistErr != nil {
+		if result.CheckpointID != 0 && s.store != nil {
+			_ = s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, "aborted")
+		}
+		return nil, fmt.Errorf("app: persist scan prefix: %w", persistErr)
+	}
 
 	if err != nil {
 		if result.CheckpointID != 0 && s.store != nil {
@@ -382,6 +448,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			fullRunner.Submit(ctx, func() error {
 				h, used, ferr := hashWithRetry(ctx, files[idx].Path, files[idx].Size, in.HashAttempts, in.HashRetryDelay, s.fullHash)
 				if ferr != nil {
+					if in.NetworkSource && scanner.IsNetworkUnavailableError(ferr) {
+						networkUnavailable.Store(true)
+					}
 					addFailure(NewHashFailure(files[idx], "full", used, "hash_failed"))
 					return errors.New("full fingerprint failed; path omitted")
 				}
@@ -393,6 +462,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		}
 	}
 	_ = fullRunner.Wait()
+	if networkUnavailable.Load() {
+		stats.SourceUnavailable = true
+	}
 	s.setStage(in, "persisting")
 
 	result.Files = files
@@ -401,6 +473,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 
 	// Persist to DB and mark missing files.
 	if s.store != nil {
+		// Full hashes are computed after traversal checkpoints are persisted.
+		// Upsert the final in-memory records once more so those stronger hashes
+		// replace the quick-hash-only checkpoint rows.
 		ids, err := s.store.UpsertFiles(ctx, files)
 		if err != nil {
 			return nil, err
@@ -411,27 +486,62 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			}
 		}
 		// Mark files not seen in this scan as missing.
-		seenPaths := make([]string, len(files))
-		for i, f := range files {
-			seenPaths[i] = f.Path
+		seenPaths := make([]string, 0, len(files)+len(cache))
+		// A resumed scan intentionally skips the already-persisted prefix.
+		// Include that durable prefix in reconciliation so a successful resume
+		// cannot incorrectly mark its own checkpointed files as missing.
+		if result.ResumedFrom != "" {
+			for path := range cache {
+				if path <= result.ResumedFrom {
+					seenPaths = append(seenPaths, path)
+				}
+			}
 		}
-		if len(stats.Errors) == 0 {
+		for _, f := range files {
+			seenPaths = append(seenPaths, f.Path)
+		}
+		if len(stats.Errors) == 0 && !stats.SourceUnavailable {
 			result.Missing, err = s.store.MarkFilesMissing(ctx, in.StorageID, seenPaths)
 			result.FullTraversal = true
+			result.CoverageState = "complete"
 		} else {
 			result.Unavailable, err = s.store.MarkFilesUnavailable(ctx, in.StorageID, seenPaths)
+			result.CoverageState = "partial"
 		}
 		if err != nil {
 			return nil, fmt.Errorf("app: reconcile scan coverage: %w", err)
 		}
-		// Complete checkpoint.
+		// Complete or pause the checkpoint. A network pause remains resumable.
 		if result.CheckpointID != 0 {
-			_ = s.store.CompleteCheckpoint(ctx, result.CheckpointID, "completed")
+			status := "completed"
+			if stats.SourceUnavailable {
+				status = "paused_network"
+			}
+			_ = s.store.CompleteCheckpoint(ctx, result.CheckpointID, status)
 		}
+	}
+	if s.store == nil {
+		if len(stats.Errors) == 0 && !stats.SourceUnavailable {
+			result.FullTraversal = true
+			result.CoverageState = "complete"
+		} else {
+			result.CoverageState = "partial"
+		}
+	}
+	if stats.SourceUnavailable {
+		return result, ErrNetworkSourceUnavailable
 	}
 
 	s.setStage(in, "completed")
 	return result, nil
+}
+
+func canReuseCachedHash(cached store.FileMeta, file domain.FileInstance) bool {
+	return cached.Size == file.Size &&
+		cached.ModifiedAt.Equal(file.ModifiedAt) &&
+		cached.PhysicalReliable && file.Physical.Reliable &&
+		cached.Device == file.Device &&
+		cached.Inode == file.Inode && cached.QuickHash != ""
 }
 
 // hashWithRetry calls hash with up to `attempts` retries, sleeping

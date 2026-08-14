@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -318,6 +319,65 @@ func TestScanReturnsStatsWithDirCount(t *testing.T) {
 	}
 	if stats.FilesScanned != 4 {
 		t.Fatalf("expected 4 files scanned, got %d", stats.FilesScanned)
+	}
+}
+
+func TestScanReportsDurableDirectoryBoundariesInTraversalOrder(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a", "one.txt"), "1")
+	writeFile(t, filepath.Join(root, "b", "two.txt"), "2")
+
+	var checkpoints []DirectoryCheckpoint
+	_, err := Scan(context.Background(), Options{
+		Root: root,
+		OnDirectoryCompleted: func(cp DirectoryCheckpoint) error {
+			checkpoints = append(checkpoints, cp)
+			return nil
+		},
+	}, func(domain.FileInstance) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checkpoints) < 2 {
+		t.Fatalf("directory checkpoints = %v, want at least two advancing boundaries", checkpoints)
+	}
+	for i := 1; i < len(checkpoints); i++ {
+		if checkpoints[i].FilesScanned < checkpoints[i-1].FilesScanned ||
+			checkpoints[i].LastScannedPath < checkpoints[i-1].LastScannedPath {
+			t.Fatalf("checkpoint regressed: %v", checkpoints)
+		}
+	}
+	last := checkpoints[len(checkpoints)-1]
+	if last.FilesScanned != 2 || last.LastScannedPath != filepath.Join(root, "b", "two.txt") {
+		t.Fatalf("last checkpoint = %#v", last)
+	}
+}
+
+func TestNetworkInterruptionClassificationExcludesPermissionErrors(t *testing.T) {
+	for _, err := range []error{syscall.ENOTCONN, syscall.ETIMEDOUT, syscall.ESTALE, syscall.EIO} {
+		if !isNetworkInterruption(err) {
+			t.Errorf("%v should be a network interruption", err)
+		}
+	}
+	if isNetworkInterruption(os.ErrPermission) {
+		t.Fatal("permission error must remain partial coverage, not a network pause")
+	}
+	if !IsNetworkUnavailableError(os.ErrNotExist) {
+		t.Fatal("a disappeared mounted path must be treated as network unavailable")
+	}
+}
+
+func TestNetworkSourceMissingAtTraversalStartPausesCoverage(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "disconnected-share")
+	stats, err := Scan(context.Background(), Options{
+		Root:          missing,
+		NetworkSource: true,
+	}, func(domain.FileInstance) error { return nil })
+	if err != nil {
+		t.Fatalf("network source disappearance should be a resumable coverage result: %v", err)
+	}
+	if !stats.SourceUnavailable || len(stats.Errors) != 1 {
+		t.Fatalf("stats = %#v, want unavailable with one path-local error", stats)
 	}
 }
 
