@@ -354,7 +354,7 @@ export default function ScanPanel({
       ) : (
         <DisabledNotice
           reason={canScanReason ?? "只读模式，无法执行写操作"}
-          hint="可查看任务历史，无法新建扫描。"
+          hint="可前往重复结果或审计与恢复查看项目数据。"
         />
       )}
       {scanError && <p className="error" role="alert">{scanError}</p>}
@@ -502,8 +502,10 @@ export default function ScanPanel({
           <ErrorState message={jobsError} />
         ) : jobs.length === 0 ? (
           <EmptyState
-            title="暂无数据"
-            hint="暂无任务记录。填写上方扫描参数并点击“开始扫描”以创建第一个任务。"
+            title={canScan ? "暂无数据" : "暂无可显示的任务记录"}
+            hint={canScan
+              ? "暂无任务记录。填写上方扫描参数并点击“开始扫描”以创建第一个任务。"
+              : "当前模式下无法新建扫描；可前往重复结果或审计与恢复查看项目数据。"}
           />
         ) : filteredJobs.length === 0 ? (
           <EmptyState title="无匹配结果" hint="没有匹配筛选条件的任务" />
