@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
+import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
+import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
@@ -86,6 +89,18 @@ function actionLabel(action: string): string {
 
 export default function GovernanceReviewPage() {
   const { capabilities, isReadWrite, dataRevision, pushToast, displayPath } = useProject();
+
+  // Write affordances (generate drafts / record decisions / approve) are
+  // gated by capability, not just the read/write mode flag: the recovery
+  // lock also blocks new writes while keeping the read surface usable.
+  const canWriteReviews = capabilities.can_edit_reviews && capabilities.can_approve_plans;
+  const reviewDisabledReason =
+    capabilities.disabled_reasons?.["governance-review"] ??
+    (capabilities.recovery_lock_active
+      ? "恢复锁激活中，请先处理未完成执行"
+      : !isReadWrite
+        ? "只读模式，无法执行写操作"
+        : null);
 
   // Plan data
   const [plans, setPlans] = useState<wails.PlanDTO[]>([]);
@@ -286,7 +301,7 @@ export default function GovernanceReviewPage() {
           >
             {plansLoading ? "加载中…" : "刷新"}
           </button>
-          {isReadWrite && (
+          {canWriteReviews && (
             <button
               className="btn-sm"
               onClick={() => void handleBuildDrafts()}
@@ -332,8 +347,13 @@ export default function GovernanceReviewPage() {
         </div>
       </div>
 
-      {plansError && (
-        <p className="error" role="alert">{plansError}</p>
+      {plansError && <ErrorState message={plansError} />}
+
+      {!canWriteReviews && (
+        <DisabledNotice
+          reason={reviewDisabledReason ?? "只读模式，无法执行写操作"}
+          hint="当前模式无法生成草案、记录决策或批准计划；计划列表仍可查看。"
+        />
       )}
 
       {/* Two-panel layout */}
@@ -341,13 +361,13 @@ export default function GovernanceReviewPage() {
         {/* Plan list */}
         <div className="gov-plan-list">
           {filteredPlans.length === 0 ? (
-            <div className="gov-empty">
-              {draftPlans
-                ? "草案生成完成，但无重复组可规划"
-                : plans.length === 0
-                  ? "暂无已保存计划。点击「生成草案」从已扫描文件生成规划草案。"
-                  : "当前筛选条件下无计划"}
-            </div>
+            draftPlans ? (
+              <EmptyState title="暂无数据" hint="草案生成完成，但无重复组可规划" />
+            ) : plans.length === 0 ? (
+              <EmptyState title="暂无数据" hint="暂无已保存计划。点击「生成草案」从已扫描文件生成规划草案。" />
+            ) : (
+              <EmptyState title="无匹配结果" hint="当前筛选条件下无计划" />
+            )
           ) : (
             <>
               {draftPlans && (
@@ -478,8 +498,8 @@ export default function GovernanceReviewPage() {
                 </div>
               )}
 
-              {/* Decision form (RW only) */}
-              {isReadWrite && (
+              {/* Decision form (write capability only) */}
+              {canWriteReviews && (
                 <div className="gov-section gov-decision-form">
                   <h4>记录复核决策</h4>
                   <div className="gov-form-row">
@@ -529,13 +549,6 @@ export default function GovernanceReviewPage() {
                       </span>
                     )}
                   </div>
-                </div>
-              )}
-
-              {/* Read-only notice */}
-              {!isReadWrite && (
-                <div className="gov-readonly-notice">
-                  只读模式 — 决策记录和计划审批需要读写模式
                 </div>
               )}
             </>

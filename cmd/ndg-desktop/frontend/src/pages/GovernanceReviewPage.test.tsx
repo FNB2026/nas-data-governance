@@ -6,7 +6,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const { apiMock, contextMock, pushToastMock } = vi.hoisted(() => ({
   pushToastMock: vi.fn(),
   contextMock: {
-    capabilities: { project_open: true },
+    capabilities: {
+      project_open: true,
+      can_edit_reviews: true,
+      can_approve_plans: true,
+      recovery_lock_active: false,
+      disabled_reasons: {},
+    },
     isReadWrite: true,
     dataRevision: 0,
     pushToast: vi.fn(),
