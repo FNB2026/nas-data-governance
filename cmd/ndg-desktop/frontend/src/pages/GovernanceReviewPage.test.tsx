@@ -75,15 +75,20 @@ describe("GovernanceReviewPage workflow", () => {
   it("previews, persists, and approves a generated draft", async () => {
     render(<GovernanceReviewPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "生成草案" }));
-    expect(await screen.findByText("草案预览 — 共 1 条（点击「保存到数据库」持久化）")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "生成系统建议" }));
+    expect(await screen.findByText("系统建议预览 — 共 1 条；尚未保存、批准或执行")).toBeVisible();
     expect(apiMock.governance.buildDrafts).toHaveBeenCalledWith("");
 
-    fireEvent.click(screen.getByRole("button", { name: "保存到数据库" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存系统建议" }));
     await waitFor(() => expect(apiMock.governance.saveDrafts).toHaveBeenCalledWith(""));
 
     fireEvent.click(screen.getByText("plan-1"));
-    fireEvent.click(await screen.findByRole("button", { name: "批准计划" }));
+    const approveButton = await screen.findByRole("button", { name: "批准计划" });
+    expect(approveButton).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存用户决定" }));
+    await waitFor(() => expect(apiMock.governance.saveDecision).toHaveBeenCalled());
+    expect(approveButton).toBeEnabled();
+    fireEvent.click(approveButton);
 
     await waitFor(() => {
       expect(apiMock.governance.approve).toHaveBeenCalledWith({ plan_ids: ["plan-1"] });
@@ -101,7 +106,7 @@ describe("GovernanceReviewPage workflow", () => {
     fireEvent.change(screen.getByPlaceholderText("说明决策原因…"), {
       target: { value: "  等待业务确认  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存决策" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存用户决定" }));
 
     await waitFor(() => {
       expect(apiMock.governance.saveDecision).toHaveBeenCalledWith({
@@ -110,5 +115,24 @@ describe("GovernanceReviewPage workflow", () => {
         reason: "等待业务确认",
       });
     });
+  });
+
+  it("shows an approved, user-decided plan as ready for the execution center", async () => {
+    const onNavigate = vi.fn();
+    apiMock.governance.listAll.mockResolvedValue([{ ...draftPlan, state: "APPROVED" }]);
+    apiMock.governance.listDecisions.mockResolvedValue([{
+      group_id: "group-1",
+      decision_type: "KEEP_ALL",
+      reason: "保留业务副本",
+    }]);
+
+    render(<GovernanceReviewPage onNavigate={onNavigate} />);
+
+    fireEvent.click(await screen.findByText("plan-1"));
+    expect(await screen.findByText("已记录的用户决定")).toBeVisible();
+    expect(screen.getByText("已批准。进入执行中心后仍需完成执行前校验。")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "前往执行中心" }));
+    expect(onNavigate).toHaveBeenCalledWith("execution-center");
   });
 });

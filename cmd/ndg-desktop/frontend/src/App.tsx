@@ -17,12 +17,12 @@ import ExecutionCenterPage from "./pages/ExecutionCenterPage";
 import AuditRecoveryPage from "./pages/AuditRecoveryPage";
 import SettingsPage from "./pages/SettingsPage";
 
-function renderPage(route: AppRoute) {
+function renderPage(route: AppRoute, onRouteChange: (route: AppRoute) => void) {
   switch (route) {
     case "sources": return <SourcesPage />;
     case "scan-jobs": return <ScanJobsPage />;
     case "duplicate-results": return <DuplicateResultsPage />;
-    case "governance-review": return <GovernanceReviewPage />;
+    case "governance-review": return <GovernanceReviewPage onNavigate={onRouteChange} />;
     case "execution-center": return <ExecutionCenterPage />;
     case "audit-recovery": return <AuditRecoveryPage />;
     case "settings": return <SettingsPage />;
@@ -86,7 +86,7 @@ function AppContent() {
 
   return (
     <AppShell activeRoute={activeRoute} onRouteChange={setActiveRoute}>
-      {renderPage(activeRoute)}
+      {renderPage(activeRoute, setActiveRoute)}
     </AppShell>
   );
 }

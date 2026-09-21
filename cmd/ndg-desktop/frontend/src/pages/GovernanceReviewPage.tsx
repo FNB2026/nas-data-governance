@@ -10,6 +10,7 @@ import EmptyState from "../components/EmptyState";
 import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
+import { type AppRoute } from "../app/routes";
 
 // ---- Constants ----
 
@@ -87,7 +88,11 @@ function actionLabel(action: string): string {
 
 // ---- Component ----
 
-export default function GovernanceReviewPage() {
+interface GovernanceReviewPageProps {
+  onNavigate?: (route: AppRoute) => void;
+}
+
+export default function GovernanceReviewPage({ onNavigate }: GovernanceReviewPageProps) {
   const { capabilities, isReadWrite, dataRevision, pushToast, displayPath } = useProject();
 
   // Write affordances (generate drafts / record decisions / approve) are
@@ -270,6 +275,14 @@ export default function GovernanceReviewPage() {
     acc[p.state] = (acc[p.state] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
+  const selectedDecision = selectedPlan ? decisionsMap.get(selectedPlan.group_id) : undefined;
+  const hasRecordedDecision = selectedDecision !== undefined;
+  const canApproveSelected =
+    canWriteReviews &&
+    selectedPlan?.state === "DRAFT" &&
+    selectedPlan.risk !== "critical" &&
+    !draftPlans &&
+    hasRecordedDecision;
 
   // ---- Render ----
 
@@ -307,7 +320,7 @@ export default function GovernanceReviewPage() {
               onClick={() => void handleBuildDrafts()}
               disabled={buildingDrafts}
             >
-              {buildingDrafts ? "生成中…" : "生成草案"}
+              {buildingDrafts ? "生成中…" : "生成系统建议"}
             </button>
           )}
           {draftPlans && (
@@ -317,13 +330,13 @@ export default function GovernanceReviewPage() {
                 onClick={() => void handleSaveDrafts()}
                 disabled={savingDrafts || draftPlans.length === 0}
               >
-                {savingDrafts ? "保存中…" : "保存到数据库"}
+                {savingDrafts ? "保存中…" : "保存系统建议"}
               </button>
               <button
                 className="btn-sm secondary"
                 onClick={() => setDraftPlans(null)}
               >
-                返回已保存计划
+                返回已保存建议
               </button>
             </>
           )}
@@ -356,6 +369,37 @@ export default function GovernanceReviewPage() {
         />
       )}
 
+      <section className="gov-workflow" aria-label="治理复核流程">
+        <div className="gov-workflow-step gov-workflow-step--system">
+          <span className="gov-workflow-number">1</span>
+          <div>
+            <strong>系统建议</strong>
+            <span>{selectedPlan ? "仅供复核，不会自动执行" : "生成后选择一份建议查看依据"}</span>
+          </div>
+        </div>
+        <div className={`gov-workflow-step ${hasRecordedDecision ? "gov-workflow-step--complete" : ""}`}>
+          <span className="gov-workflow-number">2</span>
+          <div>
+            <strong>用户决定</strong>
+            <span>{hasRecordedDecision ? decisionLabel(selectedDecision.decision_type) : "记录后才能批准计划"}</span>
+          </div>
+        </div>
+        <div className={`gov-workflow-step ${selectedPlan?.state === "APPROVED" ? "gov-workflow-step--complete" : ""}`}>
+          <span className="gov-workflow-number">3</span>
+          <div>
+            <strong>批准状态</strong>
+            <span>{selectedPlan ? planStateLabel(selectedPlan.state) : "选择计划后显示"}</span>
+          </div>
+        </div>
+        <div className={`gov-workflow-step ${selectedPlan?.state === "APPROVED" ? "gov-workflow-step--ready" : ""}`}>
+          <span className="gov-workflow-number">4</span>
+          <div>
+            <strong>执行中心</strong>
+            <span>{selectedPlan?.state === "APPROVED" ? "可进入执行前校验" : "批准后才可进入"}</span>
+          </div>
+        </div>
+      </section>
+
       {/* Two-panel layout */}
       <div className="gov-layout">
         {/* Plan list */}
@@ -364,7 +408,7 @@ export default function GovernanceReviewPage() {
             draftPlans ? (
               <EmptyState title="暂无数据" hint="草案生成完成，但无重复组可规划" />
             ) : plans.length === 0 ? (
-              <EmptyState title="暂无数据" hint="暂无已保存计划。点击「生成草案」从已扫描文件生成规划草案。" />
+              <EmptyState title="暂无数据" hint="暂无已保存建议。点击「生成系统建议」从已扫描文件生成建议草案。" />
             ) : (
               <EmptyState title="无匹配结果" hint="当前筛选条件下无计划" />
             )
@@ -372,7 +416,7 @@ export default function GovernanceReviewPage() {
             <>
               {draftPlans && (
                 <div className="gov-draft-notice">
-                  草案预览 — 共 {draftPlans.length} 条（点击「保存到数据库」持久化）
+                  系统建议预览 — 共 {draftPlans.length} 条；尚未保存、批准或执行
                 </div>
               )}
               {filteredPlans.map((plan) => {
@@ -442,10 +486,10 @@ export default function GovernanceReviewPage() {
                 </div>
               </div>
 
-              {/* Evidence */}
+              {/* System evidence */}
               {selectedPlan.evidence.length > 0 && (
                 <div className="gov-section">
-                  <h4>证据</h4>
+                  <h4>系统建议依据</h4>
                   <ul className="gov-evidence-list">
                     {selectedPlan.evidence.map((ev, i) => (
                       <li key={i}>{ev}</li>
@@ -454,9 +498,10 @@ export default function GovernanceReviewPage() {
                 </div>
               )}
 
-              {/* Actions */}
+              {/* Suggested actions */}
               <div className="gov-section">
-                <h4>动作 ({selectedPlan.actions.length})</h4>
+                <h4>系统建议动作 ({selectedPlan.actions.length})</h4>
+                <p className="gov-section-hint">建议不会修改源数据；请依据下方证据记录你的决定。</p>
                 <div className="gov-actions-list">
                   {selectedPlan.actions.map((action, i) => (
                     <div key={i} className="gov-action-item">
@@ -483,16 +528,16 @@ export default function GovernanceReviewPage() {
                 </div>
               </div>
 
-              {/* Existing decision */}
-              {decisionsMap.get(selectedPlan.group_id) && (
+              {/* Existing user decision */}
+              {selectedDecision && (
                 <div className="gov-section">
-                  <h4>已有决策</h4>
+                  <h4>已记录的用户决定</h4>
                   <div className="gov-existing-decision">
                     <span className="gov-decision-tag gov-decision-tag--large">
-                      {decisionLabel(decisionsMap.get(selectedPlan.group_id)!.decision_type)}
+                      {decisionLabel(selectedDecision.decision_type)}
                     </span>
-                    {decisionsMap.get(selectedPlan.group_id)!.reason && (
-                      <p className="muted">{decisionsMap.get(selectedPlan.group_id)!.reason}</p>
+                    {selectedDecision.reason && (
+                      <p className="muted">{selectedDecision.reason}</p>
                     )}
                   </div>
                 </div>
@@ -501,7 +546,8 @@ export default function GovernanceReviewPage() {
               {/* Decision form (write capability only) */}
               {canWriteReviews && (
                 <div className="gov-section gov-decision-form">
-                  <h4>记录复核决策</h4>
+                  <h4>用户决定</h4>
+                  <p className="gov-section-hint">保存决定不会批准计划，也不会触发隔离、移动或删除。</p>
                   <div className="gov-form-row">
                     <label className="gov-form-label">决策类型</label>
                     <select
@@ -532,25 +578,48 @@ export default function GovernanceReviewPage() {
                       onClick={() => void handleSaveDecision()}
                       disabled={savingDecision}
                     >
-                      {savingDecision ? "保存中…" : "保存决策"}
+                      {savingDecision ? "保存中…" : "保存用户决定"}
                     </button>
-                    {selectedPlan.state === "DRAFT" && selectedPlan.risk !== "critical" && !draftPlans && (
+                  </div>
+                </div>
+              )}
+
+              <div className="gov-section gov-approval-section">
+                <h4>批准状态</h4>
+                {selectedPlan.state === "DRAFT" && selectedPlan.risk !== "critical" && !draftPlans && (
+                  <>
+                    <p className="gov-section-hint">
+                      {hasRecordedDecision
+                        ? "批准是独立的人工作用；批准后仍需在执行中心完成执行前校验。"
+                        : "请先记录用户决定。系统建议本身不能作为批准。"}
+                    </p>
+                    {canWriteReviews && (
                       <button
                         className="btn-sm"
                         onClick={() => void handleApprove(selectedPlan.id)}
-                        disabled={approving}
+                        disabled={approving || !canApproveSelected}
                       >
                         {approving ? "批准中…" : "批准计划"}
                       </button>
                     )}
-                    {selectedPlan.risk === "critical" && (
-                      <span className="gov-hold-notice">
-                        严重风险计划处于 HOLD 状态，需独立释放
-                      </span>
+                  </>
+                )}
+                {selectedPlan.risk === "critical" && (
+                  <span className="gov-hold-notice">
+                    严重风险计划处于 HOLD 状态，需独立释放
+                  </span>
+                )}
+                {selectedPlan.state === "APPROVED" && (
+                  <div className="gov-execution-ready">
+                    <span>已批准。进入执行中心后仍需完成执行前校验。</span>
+                    {onNavigate && (
+                      <button className="btn-sm secondary" onClick={() => onNavigate("execution-center")}>
+                        前往执行中心
+                      </button>
                     )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
         </div>
