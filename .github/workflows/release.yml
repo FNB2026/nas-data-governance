@@ -9,7 +9,7 @@ name: Release
 #   3. sign-notarize — Sign with Developer ID, notarize, staple, create DMG
 #   4. draft-release — Create GitHub Release with artifacts + SBOM
 #
-# Prerequisites (manual operations, see release-gates-v0.5.md R-09):
+# Prerequisites (manual operations and live status: docs/release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md):
 #   - GitHub Environment "release-macos" with required reviewers
 #   - Repository secrets configured in the release-macos environment:
 #     * DEVELOPER_ID_CERTIFICATE_P12  — base64-encoded .p12 certificate
