@@ -2,10 +2,13 @@
 
 import { useProject } from "../state/ProjectContext";
 import { maskPath } from "../state/settings";
+import LoadingState from "../components/LoadingState";
+import ErrorState from "../components/ErrorState";
 
 export default function SettingsPage() {
   const {
     version,
+    error,
     capabilities,
     pathPrivacyMode,
     togglePathPrivacy,
@@ -45,8 +48,10 @@ export default function SettingsPage() {
               </tr>
             </tbody>
           </table>
+        ) : error ? (
+          <ErrorState message={error} />
         ) : (
-          <p className="muted">加载中...</p>
+          <LoadingState label="正在加载版本信息…" />
         )}
       </div>
 
