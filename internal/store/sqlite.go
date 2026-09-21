@@ -816,7 +816,7 @@ func (s *SQLiteStore) AppendLog(ctx context.Context, planID, eventType string, d
 
 func (s *SQLiteStore) ListLogs(ctx context.Context, planID string) ([]domain.OperationLog, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, plan_id, event_type, detail_json, created_at FROM operation_logs WHERE plan_id = ? ORDER BY id`, planID)
+		`SELECT id, plan_id, event_type, detail_json, created_at FROM operation_logs WHERE (? = '' OR plan_id = ?) ORDER BY id`, planID, planID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list logs: %w", err)
 	}
@@ -922,7 +922,7 @@ func (s *SQLiteStore) ListJournalAll(ctx context.Context, planID string) ([]Jour
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT plan_id, task_id, action_index, action_type, source_path, target_path,
 		        content_sha256, file_size, status, rollback_status, started_at, completed_at
-		 FROM execution_journal WHERE plan_id = ? ORDER BY action_index`, planID)
+		 FROM execution_journal WHERE (? = '' OR plan_id = ?) ORDER BY plan_id, action_index`, planID, planID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list journal all: %w", err)
 	}
