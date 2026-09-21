@@ -68,6 +68,7 @@ beforeEach(() => {
   Object.defineProperty(window, "go", { value: {}, configurable: true });
   Object.defineProperty(window, "runtime", { value: {}, configurable: true });
   contextMock.capabilities.can_execute_quarantine = true;
+  contextMock.capabilities.can_execute_purge = true;
   contextMock.capabilities.recovery_lock_active = false;
   apiMock.governance.listAll.mockReset().mockResolvedValue([approvedPlan]);
   apiMock.execution.listQuarantine.mockReset().mockResolvedValue([]);
@@ -98,9 +99,9 @@ describe("ExecutionCenterPage plan execution", () => {
     render(<ExecutionCenterPage />);
     await selectPlanAndFillRoots();
 
-    const executeButton = screen.getByRole("button", { name: "执行选中计划" });
+    const executeButton = screen.getByRole("button", { name: "执行隔离" });
     expect(executeButton).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "试运行" }));
+    fireEvent.click(screen.getByRole("button", { name: "执行前试运行" }));
 
     await waitFor(() => {
       expect(apiMock.execution.executePlans).toHaveBeenNthCalledWith(1, {
@@ -127,7 +128,7 @@ describe("ExecutionCenterPage plan execution", () => {
     render(<ExecutionCenterPage />);
     expect(await screen.findByText("plan-approved")).toBeVisible();
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "试运行" }));
+    fireEvent.click(screen.getByRole("button", { name: "执行前试运行" }));
 
     expect(pushToastMock).toHaveBeenCalledWith("error", "缺少隔离根目录", "请填写隔离根目录");
     expect(apiMock.execution.executePlans).not.toHaveBeenCalled();
@@ -135,13 +136,33 @@ describe("ExecutionCenterPage plan execution", () => {
 
   it("keeps new plan execution disabled while the recovery lock is active", async () => {
     contextMock.capabilities.can_execute_quarantine = false;
+    contextMock.capabilities.can_execute_purge = false;
     contextMock.capabilities.recovery_lock_active = true;
     apiMock.recovery.checkLock.mockResolvedValue({ lock_active: true, executing_count: 1 });
     render(<ExecutionCenterPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("恢复锁激活");
     fireEvent.click(screen.getByRole("checkbox"));
-    expect(screen.getByRole("button", { name: "试运行" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "执行选中计划" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "执行前试运行" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "执行隔离" })).toBeDisabled();
+  });
+
+  it("keeps purge approval disabled while the recovery lock is active", async () => {
+    contextMock.capabilities.can_execute_purge = false;
+    contextMock.capabilities.recovery_lock_active = true;
+    apiMock.execution.listPurges.mockResolvedValue([{
+      id: "purge-draft",
+      state: "DRAFT",
+      expected_size: 1024,
+      expected_sha256: "abcdef0123456789",
+      retain_until: "2026-01-01T00:00:00Z",
+      approval_digest: "digest",
+    }]);
+
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "清理 (1)" }));
+
+    expect(await screen.findByRole("button", { name: "批准" })).toBeDisabled();
+    expect(screen.getByText("永久清理危险区")).toBeVisible();
   });
 });

@@ -2531,6 +2531,53 @@ button.secondary {
   font-size: 0.8rem;
 }
 
+/* UI-P5: execution safety boundaries */
+.exec-safety-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.exec-safety-step,
+.exec-quarantine-notice,
+.exec-danger-zone {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+}
+
+.exec-safety-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.7rem;
+}
+
+.exec-safety-step strong { font-size: 0.78rem; }
+.exec-safety-step span,
+.exec-preflight-hint,
+.exec-quarantine-notice span,
+.exec-danger-zone span { color: var(--text-muted); font-size: 0.76rem; line-height: 1.45; }
+
+.exec-safety-step--complete { border-color: rgba(52, 199, 89, 0.42); }
+.exec-safety-step--ready { border-color: rgba(0, 113, 227, 0.45); background: rgba(0, 113, 227, 0.04); }
+
+.exec-preflight-hint { margin: 0.65rem 0; }
+
+.exec-quarantine-notice,
+.exec-danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.85rem;
+}
+
+.exec-quarantine-notice { border-color: rgba(0, 113, 227, 0.28); background: rgba(0, 113, 227, 0.04); }
+.exec-danger-zone { border-color: rgba(255, 59, 48, 0.5); background: rgba(255, 59, 48, 0.06); }
+.exec-danger-zone strong { color: var(--error); }
+
 /* Plan state badges */
 .plan-state-badge {
   display: inline-block;
@@ -2559,6 +2606,10 @@ button.secondary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .exec-safety-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .gov-layout {
     grid-template-columns: 1fr;
   }
@@ -2570,6 +2621,10 @@ button.secondary {
 
 @media (max-width: 560px) {
   .gov-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .exec-safety-flow {
     grid-template-columns: 1fr;
   }
 
