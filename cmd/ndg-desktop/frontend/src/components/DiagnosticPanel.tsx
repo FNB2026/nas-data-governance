@@ -2,6 +2,9 @@ import { useState } from "react";
 import { wails, formatdiag, governancediag, merge } from "../wailsjs/go/models";
 import { api } from "../api/client";
 import { formatBytes, formatDateTime, hasWailsRuntime } from "../lib/utils";
+import LoadingState from "./LoadingState";
+import ErrorState from "./ErrorState";
+import EmptyState from "./EmptyState";
 
 type DiagTab = "formats" | "governance" | "merges";
 
@@ -103,28 +106,30 @@ export default function DiagnosticPanel({ storages }: DiagnosticPanelProps) {
         </button>
       </div>
 
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <ErrorState message={error} />}
+
+      {loading && <LoadingState label="正在生成报告…" />}
 
       {/* Report content */}
-      {activeTab === "formats" && formatReport && (
+      {!loading && activeTab === "formats" && formatReport && (
         <FormatReportView report={formatReport} />
       )}
-      {activeTab === "governance" && govReport && (
+      {!loading && activeTab === "governance" && govReport && (
         <GovernanceReportView report={govReport} />
       )}
-      {activeTab === "merges" && mergeReport && (
+      {!loading && activeTab === "merges" && mergeReport && (
         <MergeReportView report={mergeReport} />
       )}
 
       {/* Empty state */}
       {!error && !loading && !formatReport && activeTab === "formats" && (
-        <p className="muted">点击「运行诊断」生成格式审查报告</p>
+        <EmptyState title="暂无诊断报告" hint="点击「运行诊断」生成格式审查报告" />
       )}
       {!error && !loading && !govReport && activeTab === "governance" && (
-        <p className="muted">点击「运行诊断」生成治理审查报告</p>
+        <EmptyState title="暂无诊断报告" hint="点击「运行诊断」生成治理审查报告" />
       )}
       {!error && !loading && !mergeReport && activeTab === "merges" && (
-        <p className="muted">点击「运行诊断」生成合并建议报告</p>
+        <EmptyState title="暂无诊断报告" hint="点击「运行诊断」生成合并建议报告" />
       )}
     </section>
   );
