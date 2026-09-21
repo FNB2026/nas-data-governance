@@ -9,6 +9,9 @@ import {
 } from "../lib/utils";
 import CopyButton from "./CopyButton";
 import { useProject } from "../state/ProjectContext";
+import ErrorState from "./ErrorState";
+import EmptyState from "./EmptyState";
+import DisabledNotice from "./DisabledNotice";
 
 export interface ScanPanelProps {
   // form state
@@ -29,6 +32,11 @@ export interface ScanPanelProps {
   storages: wails.StorageInfo[];
   // capability
   canScan: boolean;
+  /** Reason shown when canScan is false (recovery lock / read-only). */
+  canScanReason?: string | null;
+  /** NAS disconnect: scan form targets a registered storage while the connection is down. */
+  nasDisconnected: boolean;
+  onRecheckConnection: () => void;
   canRetryScan: boolean;
   // resume capability
   canResumeScan: boolean;
@@ -143,6 +151,9 @@ export default function ScanPanel({
   hasMoreJobs,
   storages,
   canScan,
+  canScanReason,
+  nasDisconnected,
+  onRecheckConnection,
   canRetryScan,
   canResumeScan,
   resumeCheckpointCount,
@@ -242,7 +253,15 @@ export default function ScanPanel({
         )}
       </div>
 
-      {/* Scan form — hidden in read-only mode */}
+      {/* Scan form — hidden in read-only mode / recovery lock */}
+      {canScan && nasDisconnected && (
+        <DisabledNotice
+          reason="NAS 连接中断"
+          hint="当前扫描目标为已登记存储，无法确认其状态。请重新检查连接后再扫描。"
+          actionLabel="重新检查"
+          onAction={onRecheckConnection}
+        />
+      )}
       {canScan ? (
         <div className="scan-form" aria-label="扫描参数">
           <label className="scan-root-field">
@@ -333,7 +352,10 @@ export default function ScanPanel({
           )}
         </div>
       ) : (
-        <p className="muted">只读模式：可查看任务历史，无法新建扫描。切换到读写模式以创建新扫描。</p>
+        <DisabledNotice
+          reason={canScanReason ?? "只读模式，无法执行写操作"}
+          hint="可查看任务历史，无法新建扫描。"
+        />
       )}
       {scanError && <p className="error" role="alert">{scanError}</p>}
 
@@ -477,14 +499,14 @@ export default function ScanPanel({
         )}
 
         {jobsError ? (
-          <p className="error" role="alert">{jobsError}</p>
+          <ErrorState message={jobsError} />
         ) : jobs.length === 0 ? (
-          <div className="empty-state">
-            <p className="muted">暂无任务记录</p>
-            <p className="muted">填写上方扫描参数并点击"开始扫描"以创建第一个任务。</p>
-          </div>
+          <EmptyState
+            title="暂无数据"
+            hint="暂无任务记录。填写上方扫描参数并点击“开始扫描”以创建第一个任务。"
+          />
         ) : filteredJobs.length === 0 ? (
-          <p className="muted">没有匹配筛选条件的任务</p>
+          <EmptyState title="无匹配结果" hint="没有匹配筛选条件的任务" />
         ) : (
           <div className="table-wrap">
             <table className="data-table">
