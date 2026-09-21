@@ -9,7 +9,9 @@ const { apiMock, contextMock, pushToastMock } = vi.hoisted(() => ({
     capabilities: {
       project_open: true,
       can_execute_quarantine: true,
+      can_execute_purge: true,
       recovery_lock_active: false,
+      disabled_reasons: {},
     },
     isReadWrite: true,
     dataRevision: 0,

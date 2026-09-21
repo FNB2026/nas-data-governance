@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
+import ErrorState from "../components/ErrorState";
+import LoadingState from "../components/LoadingState";
+import EmptyState from "../components/EmptyState";
+import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
@@ -62,6 +66,17 @@ export default function ExecutionCenterPage() {
   const { capabilities, isReadWrite, dataRevision, pushToast } = useProject();
 
   const [activeTab, setActiveTab] = useState<ExecTab>("plans");
+
+  // Write affordances (quarantine execute / purge) are gated by
+  // capability: read-only mode or an active recovery lock both block new
+  // writes while the recovery tab stays usable.
+  const execWriteDisabled =
+    !capabilities.can_execute_quarantine || !capabilities.can_execute_purge;
+  const execDisabledReason =
+    capabilities.disabled_reasons?.["execution-center"] ??
+    (!isReadWrite
+      ? "只读模式，无法执行写操作"
+      : "恢复锁激活中，请先处理未完成执行");
 
   // Plan execution data
   const [allPlans, setAllPlans] = useState<wails.PlanDTO[]>([]);
@@ -499,14 +514,12 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {plansError && <p className="error" role="alert">{plansError}</p>}
-
-          {approvedPlans.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">
-                {plansLoading ? "加载中…" : "暂无可执行的已批准计划。请在「治理复核」页面生成并批准计划。"}
-              </p>
-            </div>
+          {plansError ? (
+            <ErrorState message={plansError} />
+          ) : plansLoading && approvedPlans.length === 0 ? (
+            <LoadingState />
+          ) : approvedPlans.length === 0 ? (
+            <EmptyState title="暂无数据" hint="暂无可执行的已批准计划。请在「治理复核」页面生成并批准计划。" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -624,11 +637,12 @@ export default function ExecutionCenterPage() {
             </div>
           )}
 
-          {/* Read-only notice */}
-          {!isReadWrite && (
-            <div className="exec-readonly-notice">
-              只读模式 — 计划执行需要读写模式
-            </div>
+          {/* Write capability notice */}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="隔离执行与清理需要读写模式且无恢复锁；计划列表仍可查看。"
+            />
           )}
         </div>
       )}
@@ -666,12 +680,19 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {quarantineError && <p className="error" role="alert">{quarantineError}</p>}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="创建恢复草案、批准与执行需要读写模式且无恢复锁；隔离项查看不受影响。"
+            />
+          )}
 
-          {filteredItems.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">{quarantineLoading ? "加载中…" : "暂无隔离项"}</p>
-            </div>
+          {quarantineError ? (
+            <ErrorState message={quarantineError} />
+          ) : quarantineLoading && filteredItems.length === 0 ? (
+            <LoadingState />
+          ) : filteredItems.length === 0 ? (
+            <EmptyState title="暂无数据" hint="暂无隔离项" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -770,7 +791,7 @@ export default function ExecutionCenterPage() {
             <button
               className="btn-sm"
               onClick={() => void handleCreatePurgePlans()}
-              disabled={purging || !isReadWrite}
+              disabled={purging || !isReadWrite || !capabilities.can_execute_purge}
             >
               {purging ? "生成中…" : "生成清理草案"}
             </button>
@@ -785,12 +806,17 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {purgeError && <p className="error" role="alert">{purgeError}</p>}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="生成、批准与执行清理计划需要读写模式且无恢复锁。"
+            />
+          )}
 
-          {purgePlans.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">点击「生成清理草案」为到期隔离项创建清理计划</p>
-            </div>
+          {purgeError ? (
+            <ErrorState message={purgeError} />
+          ) : purgePlans.length === 0 ? (
+            <EmptyState title="暂无数据" hint="点击「生成清理草案」为到期隔离项创建清理计划" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
