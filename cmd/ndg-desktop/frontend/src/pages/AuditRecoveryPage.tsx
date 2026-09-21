@@ -163,6 +163,76 @@ export function maskDetailJson(value: unknown, maskFn: (path: string) => string)
   return value;
 }
 
+// ---- Summary & recovery guidance (UI-P6) ----
+// The journal is the single source of truth for failure / rollback counts;
+// audit logs only explain events and never participate in the tallies.
+
+/** rollback_status values that mean a rollback actually occurred. */
+const ROLLBACK_OCCURRED: ReadonlySet<string> = new Set(["done", "completed", "rolled_back"]);
+
+export interface AuditSummary {
+  logCount: number;
+  journalCount: number;
+  failedCount: number;
+  rollbackCount: number;
+  restorePending: number;
+  purgeRecoverable: number;
+}
+
+export function computeSummary(
+  logs: readonly wails.OperationLogDTO[],
+  journal: readonly wails.JournalEntryDTO[],
+  recoveryStatus: wails.RecoveryStatusDTO | null,
+): AuditSummary {
+  return {
+    logCount: logs.length,
+    journalCount: journal.length,
+    failedCount: journal.filter((entry) => entry.status === "failed").length,
+    rollbackCount: journal.filter(
+      (entry) => !!entry.rollback_status && ROLLBACK_OCCURRED.has(entry.rollback_status),
+    ).length,
+    restorePending: recoveryStatus?.restore_pending_count ?? 0,
+    purgeRecoverable: recoveryStatus?.purge_recoverable_count ?? 0,
+  };
+}
+
+export interface RecoveryStep {
+  index: number;
+  label: string;
+  text: string;
+  ready: boolean;
+}
+
+export function recoverySteps(
+  recoveryStatus: wails.RecoveryStatusDTO | null,
+  quarantineRoot: string,
+  sourceRoots: string,
+): RecoveryStep[] {
+  if (!recoveryStatus) return [];
+  const hasBothRoots = quarantineRoot.trim().length > 0 && sourceRoots.trim().length > 0;
+  const hasQuarantineRoot = quarantineRoot.trim().length > 0;
+  return [
+    {
+      index: 1,
+      label: "恢复普通执行",
+      text: `${recoveryStatus.source_executing_count} 步待处理`,
+      ready: recoveryStatus.source_executing_count > 0,
+    },
+    {
+      index: 2,
+      label: "恢复隔离还原",
+      text: `${recoveryStatus.restore_pending_count} 步待处理`,
+      ready: recoveryStatus.restore_pending_count > 0 && hasBothRoots,
+    },
+    {
+      index: 3,
+      label: "恢复永久清理",
+      text: `${recoveryStatus.purge_recoverable_count} 步待处理`,
+      ready: recoveryStatus.purge_recoverable_count > 0 && hasQuarantineRoot,
+    },
+  ];
+}
+
 // ---- Component ----
 
 export default function AuditRecoveryPage() {
@@ -301,6 +371,10 @@ export default function AuditRecoveryPage() {
     ...journal.map((j) => j.plan_id),
   ])).sort();
 
+  // Summary & guidance (UI-P6): derived, read-only.
+  const summary = computeSummary(logs, journal, recoveryStatus);
+  const steps = recoverySteps(recoveryStatus, quarantineRoot, sourceRoots);
+
   // ---- Render ----
 
   if (!capabilities.project_open) {
@@ -321,11 +395,57 @@ export default function AuditRecoveryPage() {
         <p className="muted">操作审计日志、执行 Journal 与恢复状态</p>
       </div>
 
+      {/* Summary overview (UI-P6) — journal is the single source of truth */}
+      <div className="ek-summary-grid" aria-label="审计与恢复概览">
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{logsLoading ? "—" : summary.logCount}</span>
+          <span className="ek-summary-label">审计日志</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.journalCount}</span>
+          <span className="ek-summary-label">执行条目</span>
+        </div>
+        <div className={`ek-summary-card${summary.failedCount > 0 ? " ek-summary-card--danger" : ""}`}>
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.failedCount}</span>
+          <span className="ek-summary-label">失败</span>
+        </div>
+        <div className={`ek-summary-card${summary.rollbackCount > 0 ? " ek-summary-card--danger" : ""}`}>
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.rollbackCount}</span>
+          <span className="ek-summary-label">已回滚</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{recoveryStatus ? summary.restorePending : "—"}</span>
+          <span className="ek-summary-label">待隔离还原</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{recoveryStatus ? summary.purgeRecoverable : "—"}</span>
+          <span className="ek-summary-label">可永久清理</span>
+        </div>
+      </div>
+
       {/* Recovery lock banner */}
       {recoveryStatus?.lock_active && (
         <div className="exec-lock-banner" role="alert">
           <strong>恢复锁激活</strong> — 共 {recoveryStatus.executing_count} 条未完成写入，请在本页完成恢复
         </div>
+      )}
+
+      {/* Recovery guidance (UI-P6): read-only step flow */}
+      {recoveryStatus?.lock_active && (
+        <section className="gov-workflow" aria-label="恢复指引">
+          {steps.map((step) => (
+            <div
+              key={step.index}
+              className={`gov-workflow-step${step.ready ? " gov-workflow-step--ready" : ""}`}
+            >
+              <span className="gov-workflow-number">{step.index}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <span>{step.text}</span>
+              </div>
+            </div>
+          ))}
+        </section>
       )}
 
       {recoveryStatus?.lock_active && (
