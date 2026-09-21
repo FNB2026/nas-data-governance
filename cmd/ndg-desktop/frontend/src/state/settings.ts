@@ -1,5 +1,10 @@
 // Local settings store: persists user preferences in localStorage.
-// Currently manages path privacy mode (masking file paths in the UI).
+// Manages path privacy mode (masking file paths in the UI), scan
+// defaults, and first-run onboarding progress.
+//
+// UI-P7-C note: onboarding state is deliberately kept in this existing
+// frontend persistence layer — no database migration and no new backend
+// API are introduced for it.
 
 const STORAGE_KEY = "ndg-settings";
 
@@ -10,13 +15,23 @@ export interface AppSettings {
   defaultFullScan: boolean;
   /** Default worker count for new scans (empty = auto-detect). */
   defaultWorkers: string;
+  /** True once the first-run onboarding overlay has been dismissed. */
+  onboardingDone: boolean;
+  /** True once the post-create "getting started" step rail is dismissed. */
+  gettingStartedDone: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   pathPrivacyMode: false,
   defaultFullScan: false,
   defaultWorkers: "",
+  onboardingDone: false,
+  gettingStartedDone: false,
 };
+
+function readBool(source: object, key: string): boolean {
+  return key in source && (source as Record<string, unknown>)[key] === true;
+}
 
 export function loadSettings(): AppSettings {
   try {
@@ -25,14 +40,14 @@ export function loadSettings(): AppSettings {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return DEFAULT_SETTINGS;
     return {
-      pathPrivacyMode:
-        "pathPrivacyMode" in parsed && parsed.pathPrivacyMode === true,
-      defaultFullScan:
-        "defaultFullScan" in parsed && parsed.defaultFullScan === true,
+      pathPrivacyMode: readBool(parsed, "pathPrivacyMode"),
+      defaultFullScan: readBool(parsed, "defaultFullScan"),
       defaultWorkers:
         "defaultWorkers" in parsed && typeof parsed.defaultWorkers === "string"
           ? parsed.defaultWorkers
           : "",
+      onboardingDone: readBool(parsed, "onboardingDone"),
+      gettingStartedDone: readBool(parsed, "gettingStartedDone"),
     };
   } catch {
     return DEFAULT_SETTINGS;

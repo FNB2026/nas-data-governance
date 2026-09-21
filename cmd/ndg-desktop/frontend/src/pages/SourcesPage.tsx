@@ -6,12 +6,18 @@ import ProjectPanel from "../components/ProjectPanel";
 import ProjectStartCard from "../components/ProjectStartCard";
 import StorageList from "../components/StorageList";
 import DiagnosticPanel from "../components/DiagnosticPanel";
+import GettingStartedRail from "../components/GettingStartedRail";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime } from "../lib/utils";
 import { wails } from "../wailsjs/go/models";
 import { api } from "../api/client";
+import type { AppRoute } from "../app/routes";
 
-export default function SourcesPage() {
+export interface SourcesPageProps {
+  onNavigate: (route: AppRoute) => void;
+}
+
+export default function SourcesPage({ onNavigate }: SourcesPageProps) {
   const {
     project,
     busy,
@@ -21,6 +27,7 @@ export default function SourcesPage() {
     storagesError,
     recentProjects,
     dataRevision,
+    gettingStartedDone,
     createNewProject,
     openExisting,
     closeProject,
@@ -75,6 +82,8 @@ export default function SourcesPage() {
         <h2>数据源</h2>
         <p className="muted">项目、存储、扫描准备与诊断报告</p>
       </div>
+
+      {project && !gettingStartedDone && <GettingStartedRail onNavigate={onNavigate} />}
 
       {project ? (
         <ProjectPanel
