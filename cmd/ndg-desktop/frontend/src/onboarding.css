@@ -116,7 +116,7 @@
   place-items: center;
   border-radius: var(--radius-md);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: var(--font-size-lg);
   font-weight: 600;
   flex-shrink: 0;
@@ -215,7 +215,7 @@
 .getting-started-step--done .getting-started-index {
   background: var(--success);
   border-color: var(--success);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 .getting-started-body {
@@ -249,7 +249,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-xl);
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--scrim);
   z-index: var(--z-modal);
 }
 

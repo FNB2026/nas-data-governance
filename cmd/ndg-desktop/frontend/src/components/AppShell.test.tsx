@@ -103,3 +103,49 @@ describe("AppShell", () => {
     expect(screen.getByText("扫描中 · 已处理 42,813 / 103,211")).toBeInTheDocument();
   });
 });
+
+describe("AppShell accessibility contract (UI-P8-B)", () => {
+  function renderShell() {
+    return render(
+      <AppShell activeRoute="sources" onRouteChange={vi.fn()}>
+        <div>数据源内容</div>
+      </AppShell>,
+    );
+  }
+
+  it("offers a skip link that targets the main region", () => {
+    const { container } = renderShell();
+
+    const skipLink = screen.getByRole("link", { name: "跳到主要内容" });
+    expect(skipLink).toHaveAttribute("href", "#main-content");
+
+    const main = container.querySelector("main");
+    expect(main).toHaveAttribute("id", "main-content");
+    // Programmatic focus target for the skip link.
+    expect(main).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("labels the primary navigation landmark", () => {
+    renderShell();
+
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+  });
+
+  it("never expresses a disabled destination by colour alone", () => {
+    renderShell();
+
+    const blocked = screen.getByRole("button", { name: /扫描任务：新建扫描、进度与历史/ });
+    // Native disabled attribute (removed from the tab order) …
+    expect(blocked).toBeDisabled();
+    // … plus the reason carried in the accessible name, not only in a tooltip.
+    expect(blocked).toHaveAccessibleName(/请先打开项目/);
+  });
+
+  it("marks the current page for assistive tech, not only visually", () => {
+    renderShell();
+
+    const current = screen.getByRole("button", { name: /数据源：项目、存储与扫描准备/ });
+    expect(current).toHaveAttribute("aria-current", "page");
+    expect(current).not.toBeDisabled();
+  });
+});

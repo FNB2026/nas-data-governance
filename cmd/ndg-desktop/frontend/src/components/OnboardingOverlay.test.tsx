@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import OnboardingOverlay from "./OnboardingOverlay";
 
 afterEach(cleanup);
@@ -16,8 +16,8 @@ function setup(overrides: Partial<Parameters<typeof OnboardingOverlay>[0]> = {})
     error: null,
     ...overrides,
   };
-  render(<OnboardingOverlay {...props} />);
-  return props;
+  const { unmount } = render(<OnboardingOverlay {...props} />);
+  return Object.assign(props, { unmount });
 }
 
 describe("OnboardingOverlay first-run content", () => {
@@ -124,5 +124,73 @@ describe("OnboardingOverlay actions", () => {
 
     expect(screen.getByRole("button", { name: "选择数据目录" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "打开已有项目" })).toBeDisabled();
+  });
+});
+
+describe("OnboardingOverlay modal focus contract (UI-P8-B)", () => {
+  it("names and describes the dialog for assistive tech", () => {
+    setup();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAccessibleName("开始使用 NDG");
+    expect(dialog).toHaveAccessibleDescription(/本地优先的 NAS 数据治理工作台/);
+  });
+
+  it("moves focus into the dialog on open", () => {
+    setup();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("never lets Tab escape the dialog", () => {
+    setup();
+
+    const dialog = screen.getByRole("dialog");
+    const controls = within(dialog).getAllByRole("button");
+    expect(controls.length).toBeGreaterThan(1);
+
+    // Tab forward more times than there are controls: focus must stay inside.
+    for (let i = 0; i < controls.length + 3; i += 1) {
+      fireEvent.keyDown(document, { key: "Tab" });
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+
+    // …and the same going backwards.
+    for (let i = 0; i < controls.length + 3; i += 1) {
+      fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it("wraps from the last control to the first and back", () => {
+    setup();
+
+    const dialog = screen.getByRole("dialog");
+    const controls = within(dialog).getAllByRole("button");
+
+    controls[controls.length - 1].focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(controls[0]);
+
+    controls[0].focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(controls[controls.length - 1]);
+  });
+
+  it("restores focus to the trigger when the dialog closes", () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "打开引导";
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    const props = setup();
+    expect(document.activeElement).not.toBe(trigger);
+
+    props.unmount();
+    expect(document.activeElement).toBe(trigger);
+
+    trigger.remove();
   });
 });

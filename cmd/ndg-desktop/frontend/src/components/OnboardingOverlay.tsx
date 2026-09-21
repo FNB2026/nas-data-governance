@@ -11,7 +11,7 @@
 //   2. 扫描不会修改源文件
 //   3. 第一次为什么建议选较小的目录
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface OnboardingOverlayProps {
   busy: boolean;
@@ -35,6 +35,23 @@ const SAFETY_FACTS = [
   { title: "由你决定", body: "系统只给建议和证据，是否保留、隔离或清理始终由你确认。" },
 ];
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+/** Visible-at-runtime focusable descendants, in DOM order. */
+function focusableWithin(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.hidden && el.getAttribute("aria-hidden") !== "true",
+  );
+}
+
 export default function OnboardingOverlay({
   busy,
   onPickDirectory,
@@ -45,8 +62,62 @@ export default function OnboardingOverlay({
 }: OnboardingOverlayProps) {
   const [showSafety, setShowSafety] = useState(false);
   const [picking, setPicking] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  const handlePrimary = async () => {
+  // Keep the latest dismiss handler in a ref so the focus trap effect can
+  // stay mounted exactly once (re-running it would steal focus back).
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  // ---- UI-P8-B: modal focus contract ----
+  // 1. focus moves into the dialog on open (the container, so the dialog
+  //    name/description are announced before its controls);
+  // 2. Tab / Shift+Tab cycle inside the dialog and cannot reach the page
+  //    behind it;
+  // 3. Escape closes;
+  // 4. focus returns to whatever was focused before the dialog opened.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    (panel ?? previouslyFocused)?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDismissRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const items = focusableWithin(panel);
+      if (items.length === 0) {
+        event.preventDefault();
+        panel?.focus();
+        return;
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const index = active ? items.indexOf(active) : -1;
+      const next = event.shiftKey
+        ? index <= 0
+          ? items.length - 1
+          : index - 1
+        : index === -1 || index === items.length - 1
+          ? 0
+          : index + 1;
+
+      event.preventDefault();
+      items[next].focus();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, []);
+
+  const handlePrimary = useCallback(async () => {
     setPicking(true);
     try {
       const picked = await onPickDirectory();
@@ -60,7 +131,7 @@ export default function OnboardingOverlay({
     } finally {
       setPicking(false);
     }
-  };
+  }, [onCreateProject, onDismiss, onPickDirectory]);
 
   return (
     <div
@@ -68,11 +139,10 @@ export default function OnboardingOverlay({
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-title"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onDismiss();
-      }}
+      aria-describedby="onboarding-lead"
     >
-      <div className="onboarding-panel">
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+      <div className="onboarding-panel" ref={panelRef} tabIndex={-1}>
         <div className="onboarding-header">
           <div className="onboarding-brand">
             <span className="app-brand-mark" aria-hidden="true">N</span>
@@ -88,7 +158,7 @@ export default function OnboardingOverlay({
           </button>
         </div>
 
-        <p className="onboarding-lead muted">
+        <p className="onboarding-lead muted" id="onboarding-lead">
           本地优先的 NAS 数据治理工作台。找出重复文件，先给你证据，再由你决定。
         </p>
 

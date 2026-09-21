@@ -135,16 +135,18 @@ export default function SettingsPage() {
         </div>
 
         <h4 className="settings-subhead">键盘快捷键</h4>
-        <table className="data-table">
-          <tbody>
-            {SHORTCUTS.map((item) => (
-              <tr key={item.keys}>
-                <td className="mono">{item.keys}</td>
-                <td>{item.action}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table className="data-table data-table--kv">
+            <tbody>
+              {SHORTCUTS.map((item) => (
+                <tr key={item.keys}>
+                  <th scope="row" className="mono">{item.keys}</th>
+                  <td>{item.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </SettingsSection>
 
       {/* ---- 扫描 ---- */}
@@ -216,26 +218,28 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <table className="data-table settings-guarantee-table">
-          <tbody>
-            <tr>
-              <td>路径脱敏</td>
-              <td>{pathPrivacyMode ? "已开启" : "未开启"}</td>
-            </tr>
-            <tr>
-              <td>外部 AI</td>
-              <td><OffBadge label="外部 AI" /></td>
-            </tr>
-            <tr>
-              <td>遥测</td>
-              <td><OffBadge label="遥测" /></td>
-            </tr>
-            <tr>
-              <td>云上传</td>
-              <td><OffBadge label="云上传" /></td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table className="data-table data-table--kv settings-guarantee-table">
+            <tbody>
+              <tr>
+                <th scope="row">路径脱敏</th>
+                <td>{pathPrivacyMode ? "已开启" : "未开启"}</td>
+              </tr>
+              <tr>
+                <th scope="row">外部 AI</th>
+                <td><OffBadge label="外部 AI" /></td>
+              </tr>
+              <tr>
+                <th scope="row">遥测</th>
+                <td><OffBadge label="遥测" /></td>
+              </tr>
+              <tr>
+                <th scope="row">云上传</th>
+                <td><OffBadge label="云上传" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p className="muted diag-read-only-hint">
           NDG 不会在未经明确同意的情况下进行任何联网操作。
         </p>
@@ -247,32 +251,34 @@ export default function SettingsPage() {
         title="安全"
         description="当前项目的能力边界。只读或恢复锁生效时，写操作会在入口处被阻止。"
       >
-        <table className="data-table">
-          <tbody>
-            <tr>
-              <td>当前项目模式</td>
-              <td>{modeLabel}</td>
-            </tr>
-            <tr>
-              <td>可执行扫描</td>
-              <td>{capabilities.can_scan ? "可用" : "受限"}</td>
-            </tr>
-            <tr>
-              <td>可执行治理（隔离）</td>
-              <td>{capabilities.can_execute_quarantine ? "可用" : "受限"}</td>
-            </tr>
-            <tr>
-              <td>可执行永久清理</td>
-              <td>{capabilities.can_execute_purge ? "可用" : "受限"}</td>
-            </tr>
-            <tr>
-              <td>Recovery Lock</td>
-              <td>
-                {capabilities.recovery_lock_active ? "激活" : "无"}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table className="data-table data-table--kv">
+            <tbody>
+              <tr>
+                <th scope="row">当前项目模式</th>
+                <td>{modeLabel}</td>
+              </tr>
+              <tr>
+                <th scope="row">可执行扫描</th>
+                <td>{capabilities.can_scan ? "可用" : "受限"}</td>
+              </tr>
+              <tr>
+                <th scope="row">可执行治理（隔离）</th>
+                <td>{capabilities.can_execute_quarantine ? "可用" : "受限"}</td>
+              </tr>
+              <tr>
+                <th scope="row">可执行永久清理</th>
+                <td>{capabilities.can_execute_purge ? "可用" : "受限"}</td>
+              </tr>
+              <tr>
+                <th scope="row">Recovery Lock</th>
+                <td>
+                  {capabilities.recovery_lock_active ? "激活" : "无"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p className="muted diag-read-only-hint">
           本地优先 / 无隐式联网：所有判断与执行都在本机完成。
         </p>
@@ -289,26 +295,28 @@ export default function SettingsPage() {
         </div>
 
         {version ? (
-          <table className="data-table">
-            <tbody>
-              <tr>
-                <td>版本</td>
-                <td className="mono">{version.version}</td>
-              </tr>
-              <tr>
-                <td>提交</td>
-                <td className="mono">{version.commit}</td>
-              </tr>
-              <tr>
-                <td>构建时间</td>
-                <td className="mono">{version.build_time}</td>
-              </tr>
-              <tr>
-                <td>发布通道</td>
-                <td className="mono">{version.channel || "—"}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="data-table data-table--kv">
+              <tbody>
+                <tr>
+                  <th scope="row">版本</th>
+                  <td className="mono">{version.version}</td>
+                </tr>
+                <tr>
+                  <th scope="row">提交</th>
+                  <td className="mono cell-wrap">{version.commit}</td>
+                </tr>
+                <tr>
+                  <th scope="row">构建时间</th>
+                  <td className="mono cell-wrap">{version.build_time}</td>
+                </tr>
+                <tr>
+                  <th scope="row">发布通道</th>
+                  <td className="mono">{version.channel || "—"}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         ) : error ? (
           <ErrorState message={error} />
         ) : (

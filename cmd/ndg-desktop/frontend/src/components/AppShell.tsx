@@ -41,6 +41,11 @@ export default function AppShell({
 
   return (
     <div className="app-shell">
+      {/* UI-P8-B: keyboard users can jump past the header/sidebar straight
+          into the page content. Visible only while focused. */}
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <header className="app-header">
         <div className="app-header-left">
           <div className="app-brand" aria-label="NDG 数据治理">
@@ -81,7 +86,7 @@ export default function AppShell({
       </header>
 
       <div className="app-body">
-        <nav className="app-sidebar">
+        <nav className="app-sidebar" aria-label="主导航">
           {NAV_ITEMS.map((item) => {
             const enabled = isRouteEnabled(item.id, capabilities);
             const reason = capabilities.disabled_reasons[item.id];
@@ -105,7 +110,9 @@ export default function AppShell({
           })}
         </nav>
 
-        <main className="app-content">{children}</main>
+        <main className="app-content" id="main-content" tabIndex={-1}>
+          {children}
+        </main>
       </div>
 
       <footer className="app-footer">

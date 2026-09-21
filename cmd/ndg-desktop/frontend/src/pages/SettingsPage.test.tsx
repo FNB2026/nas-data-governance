@@ -242,3 +242,50 @@ describe("SettingsPage about group", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("SettingsPage table semantics (UI-P8-A/B)", () => {
+  // The About group only renders its table once a version is available.
+  const withVersion = () => {
+    contextMock.version = {
+      version: "0.5.0-beta.1",
+      commit: "abc123",
+      build_time: "2026-09-01T00:00:00+0800",
+      channel: "beta",
+    };
+  };
+
+  it("wraps every data table in a horizontally scrollable region", () => {
+    withVersion();
+    const { container } = render(<SettingsPage />);
+
+    const tables = Array.from(container.querySelectorAll("table.data-table"));
+    expect(tables.length).toBe(4);
+
+    for (const table of tables) {
+      expect(table.closest(".table-wrap")).not.toBeNull();
+    }
+  });
+
+  it("exposes every label cell as a row header", () => {
+    withVersion();
+    const { container } = render(<SettingsPage />);
+
+    // 键盘快捷键 3 + 隐私 4 + 安全 5 + 关于 4
+    expect(container.querySelectorAll('th[scope="row"]').length).toBe(16);
+    // No label cell is left as a plain <td> in these key/value tables.
+    expect(container.querySelectorAll("td").length).toBe(16);
+  });
+
+  it("lets long values wrap instead of widening the table", () => {
+    contextMock.version = {
+      version: "0.5.0-beta.2",
+      commit: "0ec8cc733008ab2acb5d868a8931c214e3b4d64f",
+      build_time: "2026-09-21T19:19:37+0800",
+      channel: "beta",
+    };
+    const { container } = render(<SettingsPage />);
+
+    const commitCell = container.querySelector("td.cell-wrap.mono");
+    expect(commitCell).toHaveTextContent("0ec8cc733008ab2acb5d868a8931c214e3b4d64f");
+  });
+});

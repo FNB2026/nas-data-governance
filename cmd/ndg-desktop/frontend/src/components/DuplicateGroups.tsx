@@ -107,7 +107,7 @@ export default function DuplicateGroups({
         />
       ) : (
         <>
-          <div className="dup-list-wrap">
+          <div className="dup-list-wrap table-wrap">
             <table className="data-table dup-table">
               <thead>
                 <tr>
