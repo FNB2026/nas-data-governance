@@ -35,3 +35,4 @@ cmd/ndg-desktop/build/darwin/Info.dev.plist
 
 # Local AI/IDE workspace
 .trae/
+.workbuddy/
