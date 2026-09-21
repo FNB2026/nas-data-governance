@@ -4,13 +4,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { wails } from "../wailsjs/go/models";
 
+const projectState = vi.hoisted(() => ({ pathPrivacyMode: false }));
+
 vi.mock("../state/ProjectContext", () => ({
-  useProject: () => ({ displayPath: (path: string) => path }),
+  useProject: () => ({
+    displayPath: (path: string) => path,
+    pathPrivacyMode: projectState.pathPrivacyMode,
+  }),
 }));
 
 import GroupDetail from "./GroupDetail";
 
-afterEach(cleanup);
+afterEach(() => {
+  projectState.pathPrivacyMode = false;
+  cleanup();
+});
 
 const firstPath = "/Volumes/archive/F.产业资料库/场地类/场景资料库（待整理）/公园、绿景/IMG_20181216_154426.jpg";
 const secondPath = "/Volumes/archive/F.产业资料库/场地类/场景资料库（待整理）/景/IMG_20181216_154426.jpg";
@@ -84,6 +92,23 @@ describe("GroupDetail directory context & retention", () => {
     expect(screen.getByText("PRJ-2024-002")).toBeInTheDocument();
     expect(screen.getByText("同组保留项：保留评分最高")).toBeInTheDocument();
     expect(screen.getByText(/目录权威等级 90/)).toBeInTheDocument();
+  });
+
+  it("hides business-anchor details in path privacy mode", () => {
+    projectState.pathPrivacyMode = true;
+
+    render(
+      <GroupDetail
+        selectedGroup={detailWithDirContext()}
+        detailLoading={false}
+        detailError={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("已隐藏")).toHaveLength(2);
+    expect(screen.queryByText("PRJ-2024-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("PRJ-2024-002")).not.toBeInTheDocument();
   });
 });
 

@@ -31,7 +31,7 @@ export default function GroupDetail({
   detailError,
   onClose,
 }: GroupDetailProps) {
-  const { displayPath } = useProject();
+  const { displayPath, pathPrivacyMode } = useProject();
 
   if (!selectedGroup && !detailLoading && !detailError) return null;
 
@@ -280,7 +280,11 @@ export default function GroupDetail({
                           {dirCtx ? `${dirCtx.privacy_level} · ${dirCtx.authority_level}` : "—"}
                         </td>
                         <td className="muted">
-                          {dirCtx?.business_anchor || dirCtx?.branch_point || "—"}
+                          {dirCtx?.business_anchor || dirCtx?.branch_point
+                            ? pathPrivacyMode
+                              ? "已隐藏"
+                              : dirCtx.business_anchor || dirCtx.branch_point
+                            : "—"}
                         </td>
                         <td className="num">
                           {score ? <strong>{score.total}</strong> : "—"}
