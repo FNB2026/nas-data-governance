@@ -32,3 +32,6 @@ cmd/ndg-desktop/build/darwin/Info.dev.plist
 # build artifacts (binary at repo root, not the cmd/nas-governance source dir)
 /nas-governance
 /ndg-desktop
+
+# Local AI/IDE workspace
+.trae/
