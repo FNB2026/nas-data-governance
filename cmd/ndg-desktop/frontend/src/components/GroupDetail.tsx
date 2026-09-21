@@ -2,6 +2,8 @@
 // physical identity grouping, and hardlink detection evidence.
 
 import { wails } from "../wailsjs/go/models";
+import LoadingState from "./LoadingState";
+import ErrorState from "./ErrorState";
 import { formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import { useProject } from "../state/ProjectContext";
 import {
@@ -63,9 +65,9 @@ export default function GroupDetail({
         <button className="btn-sm secondary" onClick={onClose}>关闭</button>
       </div>
       {detailLoading ? (
-        <p className="muted">加载中…</p>
+        <LoadingState />
       ) : detailError ? (
-        <p className="error" role="alert">{detailError}</p>
+        <ErrorState message={detailError} />
       ) : selectedGroup && cap && risk ? (
         <>
           {/* Summary bar */}
