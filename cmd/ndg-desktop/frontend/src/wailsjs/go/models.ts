@@ -1218,11 +1218,17 @@ export namespace wails {
 	    physical_reliable: boolean;
 	    format_kind?: string;
 	    format_mime?: string;
-	
+	    // Directory context & retention (UI-P3): mirrors the FileItem DTO in
+	    // internal/adapters/wails/dto.go — keep in sync when regenerating.
+	    dir_context?: domain.DirectoryContext;
+	    retain_score?: domain.RetentionScore;
+	    retain_reason?: string;
+	    is_retain_selected?: boolean;
+
 	    static createFrom(source: any = {}) {
 	        return new FileItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -1239,6 +1245,10 @@ export namespace wails {
 	        this.physical_reliable = source["physical_reliable"];
 	        this.format_kind = source["format_kind"];
 	        this.format_mime = source["format_mime"];
+	        this.dir_context = source["dir_context"] ? new domain.DirectoryContext(source["dir_context"]) : undefined;
+	        this.retain_score = source["retain_score"] ? new domain.RetentionScore(source["retain_score"]) : undefined;
+	        this.retain_reason = source["retain_reason"];
+	        this.is_retain_selected = source["is_retain_selected"];
 	    }
 	}
 	export class GroupDecisionDTO {

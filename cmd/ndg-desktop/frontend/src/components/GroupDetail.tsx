@@ -216,6 +216,99 @@ export default function GroupDetail({
               </div>
             </div>
           )}
+
+          {/* Directory context & retention reasons (UI-P3) */}
+          <div className="evidence-section">
+            <h3 className="evidence-section-title">
+              目录语境与保留理由
+              <span className="muted evidence-section-count">
+                {selectedGroup.files.length} 副本
+              </span>
+            </h3>
+            <p className="evidence-hint muted">
+              不同目录职责、受保护目录或不同业务锚点意味着内容相同也不应直接删除，需人工复核。
+            </p>
+            <div className="table-wrap">
+              <table className="data-table evidence-table">
+                <thead>
+                  <tr>
+                    <th>路径分段</th>
+                    <th>目录职责</th>
+                    <th>权限</th>
+                    <th>业务锚点</th>
+                    <th className="num">保留得分</th>
+                    <th>保留理由</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedGroup.files.map((file, i) => {
+                    const maskedPath = displayPath(file.path);
+                    const segments = pathSegments(maskedPath);
+                    const dirCtx = file.dir_context;
+                    const score = file.retain_score;
+                    return (
+                      <tr
+                        key={`${file.path}-ctx-${i}`}
+                        className={file.is_retain_selected ? "ctx-retain-row" : ""}
+                      >
+                        <td className="path-cell" title={maskedPath}>
+                          <span className="path-segments" title={maskedPath}>
+                            {segments.slice(-4, -1).map((seg, idx) => (
+                              <span key={idx} className="path-seg">{seg}</span>
+                            ))}
+                            {segments.length > 4 && (
+                              <span className="path-seg path-seg--ellipsis">…</span>
+                            )}
+                          </span>
+                          <span className="path-compact muted">
+                            {compactPath(maskedPath, 3)}
+                          </span>
+                        </td>
+                        <td>
+                          {dirCtx ? (
+                            <>
+                              <span className="gov-role-tag">{dirCtx.role}</span>
+                              {dirCtx.protected && (
+                                <span className="gov-protected-flag">受保护</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td className="muted">
+                          {dirCtx ? `${dirCtx.privacy_level} · ${dirCtx.authority_level}` : "—"}
+                        </td>
+                        <td className="muted">
+                          {dirCtx?.business_anchor || dirCtx?.branch_point || "—"}
+                        </td>
+                        <td className="num">
+                          {score ? <strong>{score.total}</strong> : "—"}
+                          {file.is_retain_selected && (
+                            <span className="gov-retain-flag">保留项</span>
+                          )}
+                        </td>
+                        <td>
+                          {file.retain_reason && (
+                            <span className={file.is_retain_selected ? "" : "muted"}>
+                              {file.retain_reason}
+                            </span>
+                          )}
+                          {score && score.reasons.length > 0 && (
+                            <ul className="gov-reason-list muted">
+                              {score.reasons.slice(0, 4).map((reason, ri) => (
+                                <li key={ri}>{reason}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </>
       ) : null}
     </section>
