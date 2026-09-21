@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
+import ErrorState from "../components/ErrorState";
+import LoadingState from "../components/LoadingState";
+import EmptyState from "../components/EmptyState";
+import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
@@ -225,7 +229,10 @@ export default function AuditRecoveryPage() {
               {recoveryResult && <pre className="exec-recovery-log">{recoveryResult}</pre>}
             </>
           ) : (
-            <p className="muted">请以读写模式重新打开项目后执行恢复。</p>
+            <DisabledNotice
+              reason="只读模式，无法执行写操作"
+              hint="恢复操作需要读写模式，请以读写模式重新打开项目后执行恢复。"
+            />
           )}
         </section>
       )}
@@ -253,11 +260,12 @@ export default function AuditRecoveryPage() {
         {/* Audit logs panel */}
         <div className="audit-panel">
           <h3>操作审计 ({logs.length})</h3>
-          {logsError && <p className="error" role="alert">{logsError}</p>}
-          {logsLoading ? (
-            <p className="muted">加载中…</p>
+          {logsError ? (
+            <ErrorState message={logsError} />
+          ) : logsLoading ? (
+            <LoadingState />
           ) : logs.length === 0 ? (
-            <p className="muted">暂无审计日志</p>
+            <EmptyState title="暂无数据" hint="暂无审计日志" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -301,11 +309,12 @@ export default function AuditRecoveryPage() {
         {/* Journal entries panel */}
         <div className="audit-panel">
           <h3>执行 Journal ({journal.length})</h3>
-          {journalError && <p className="error" role="alert">{journalError}</p>}
-          {journalLoading ? (
-            <p className="muted">加载中…</p>
+          {journalError ? (
+            <ErrorState message={journalError} />
+          ) : journalLoading ? (
+            <LoadingState />
           ) : journal.length === 0 ? (
-            <p className="muted">暂无 Journal 记录</p>
+            <EmptyState title="暂无数据" hint="暂无 Journal 记录" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
