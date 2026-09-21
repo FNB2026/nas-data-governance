@@ -2437,6 +2437,59 @@ button.secondary {
   font-size: 0.72rem;
 }
 
+/* UI-P6: audit & recovery readable expression */
+.audit-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.35rem;
+}
+
+.ek-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--font-size-xs);
+}
+
+.ek-detail-key {
+  color: var(--text-muted);
+  min-width: 3.5rem;
+}
+
+.ek-masked {
+  color: var(--text-muted);
+}
+
+.ek-detail-row .state-badge {
+  font-size: 0.68rem;
+}
+
+.ek-action-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ek-action-badge--delete {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.ek-action-badge--quarantine {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.ek-action-badge--keep {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
 .gov-action-reason {
   font-size: 0.78rem;
   color: var(--text-muted);
