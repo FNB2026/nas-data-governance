@@ -9,6 +9,7 @@
 ## 规范基线
 
 - [白皮书](whitepaper.md)：领域模型、安全边界与治理方法。
+- [NDG v0.5 Beta RC / Release Execution 执行操作手册](release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)：首个公开 Beta（目标 `v0.5.0-beta.2`）发布前唯一执行基线，实时进度、阻断原因和决策在此维护。
 - [桌面端前端架构与后端协同推进方案](desktop-frontend-architecture.md)：七域页面、Binding/DTO、执行安全接线、Phase 0—7、测试矩阵与 DoD；当前桌面实施主文档。
 - [桌面信息架构](ui/information-architecture.md)：七域导航与页面职责摘要。
 
@@ -26,5 +27,6 @@
 ## 历史方案
 
 - [桌面端前端重构执行方案](frontend-execution-plan.md)：早期五页面拆分方案，已被七域主文档取代，仅保留作迁移背景与历史参考。
+- [v0.5 发布准备现状审计](release/readiness-audit-v0.5.md)与[发布门槛清单](release/release-gates-v0.5.md)：2026-07-30 历史审计依据，不承担实时进度管理。
 
 文档中的“已完成”属于其标注日期的事实快照；实施前仍需以当前代码、生成 Binding、数据库迁移和验证结果重新校准。
