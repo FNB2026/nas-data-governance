@@ -356,6 +356,66 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Test 10: Untar into git-ignored build/bin directory (B16 regression)
+# Reproduces the release.yml "Untar .app" failure:
+#   tar: could not chdir to 'cmd/ndg-desktop/build/bin/'
+# The target directory is git-ignored and does not exist in a fresh
+# checkout. The fix must create it with mkdir -p BEFORE tar -C extracts.
+# This test simulates a real tarball with an executable payload and
+# verifies both failure-before-fix and success-after-fix behavior.
+# ---------------------------------------------------------------------------
+echo "--- Test 10: Untar into git-ignored build/bin directory (B16) ---"
+
+TMP_ROOT="$(mktemp -d)"
+trap '/bin/rm -rf "$TMP_ROOT"' EXIT
+
+# Build the source .app-like structure with an executable payload
+mkdir -p "$TMP_ROOT/build/bin/NDG.app/Contents/MacOS"
+printf '#!/bin/sh\nexit 0\n' > "$TMP_ROOT/build/bin/NDG.app/Contents/MacOS/NDG"
+chmod 755 "$TMP_ROOT/build/bin/NDG.app/Contents/MacOS/NDG"
+
+# Create the tarball exactly like build-unsigned does (tar -C from build/bin)
+(cd "$TMP_ROOT/build/bin" && tar -czf "$TMP_ROOT/unsigned-app.tar.gz" NDG.app)
+
+# Simulate the fresh checkout: the build/bin directory is git-ignored, so
+# remove the entire build tree (it never exists in sign-notarize).
+rm -rf "$TMP_ROOT/build"
+
+# --- Before-fix failure mode: tar -C into a nonexistent directory ---
+# This replicates the production error:
+#   tar: could not chdir to 'cmd/ndg-desktop/build/bin/'
+TAR_C_FAILED=0
+if tar -xzf "$TMP_ROOT/unsigned-app.tar.gz" -C "$TMP_ROOT/build/bin/" 2>/dev/null; then
+    TAR_C_FAILED=0
+else
+    TAR_C_FAILED=1
+fi
+
+if [[ "$TAR_C_FAILED" -eq 1 ]]; then
+    pass "tar -C into missing directory fails (reproduces 'could not chdir' bug)"
+else
+    fail "tar -C into missing directory unexpectedly succeeded"
+fi
+
+# --- After-fix: mkdir -p then tar -C ---
+mkdir -p "$TMP_ROOT/build/bin/"
+if tar -xzf "$TMP_ROOT/unsigned-app.tar.gz" -C "$TMP_ROOT/build/bin/"; then
+    pass "mkdir -p + tar -C extracts tarball successfully"
+else
+    fail "mkdir -p + tar -C failed to extract tarball"
+fi
+
+# --- Verify executable permission is preserved after untar ---
+EXEC="$TMP_ROOT/build/bin/NDG.app/Contents/MacOS/NDG"
+if [[ -x "$EXEC" ]]; then
+    pass "executable bit preserved after untar (verified -x)"
+else
+    fail "executable bit lost after untar: $EXEC"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo "========================================"

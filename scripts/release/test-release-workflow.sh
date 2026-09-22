@@ -144,6 +144,15 @@ else
     fail ".app tarball extraction step not found"
 fi
 
+# B16: The untar step must create the git-ignored build/bin directory before
+# extracting. tar -C fails with "could not chdir" when the target directory
+# is absent in a fresh checkout.
+if grep -A6 'Untar \.app.*verify executable' "$WORKFLOW" | grep -q 'mkdir -p cmd/ndg-desktop/build/bin'; then
+    pass "Untar step creates git-ignored build/bin directory before extraction"
+else
+    fail "Untar step missing 'mkdir -p' for git-ignored build/bin directory"
+fi
+
 if grep -q 'test -x\|\[\[ ! -x' "$WORKFLOW"; then
     pass "Executable permission is verified after untar"
 else
