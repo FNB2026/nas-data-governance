@@ -4,8 +4,8 @@
 > 首个公开 Beta 候选版本：`v0.5.0-beta.2`（UI 收口及 RC 冻结后创建）
 > 阶段：Beta RC / Release Execution
 > 文档性质：首个公开 Beta 发布前唯一执行基线；本文中的清单负责实时进度管理
-> 仓库核对：2026-09-21，`main` = `4bade7715b47d4a71e4a114f835388602f2e865a`
-> 当前代码版本：`0.5.0-beta.1`；同名标签已存在于远端，指向上述 SHA；`VERSION` 尚未提升到 `0.5.0-beta.2`
+> 仓库核对：2026-09-22，依赖处置后的 `main` = `23b8a218a8a135d5629431ceaf942d6544609f41`
+> 当前候选版本：`0.5.0-beta.2`；版本元数据与 `BUNDLE_BUILD_NUMBER=2` 已同步，尚未冻结 RC SHA 或创建标签
 > 已锁定路线：**UI Final Polish → `VERSION` 提升至 beta.2 → RC 冻结 → 新标签发行 → 实机验收 → 首个 Public Beta**
 
 ## 执行入口与优先级
@@ -18,22 +18,23 @@
 
 首个公开 Beta **选择 UI Final Polish 后发行 `v0.5.0-beta.2`**。`v0.5.0-beta.1` 保留为不可变的历史 RC/发布尝试；不补凭据后重跑它来作为首个公开 Beta，不移动、不删除该标签。UI 和必要的 Release Blocker 修复进入新提交，`VERSION`、应用版本元数据和发行说明在新候选构建前同步为 `0.5.0-beta.2`。只有 UI 验收及全部发布门槛通过后，才冻结 RC SHA、创建并推送 `v0.5.0-beta.2`。若代码变更迫使 RC 重新冻结，须重新跑相关关口；已推送的新标签同样不得移动。
 
-六项 Apple/GitHub 发布 Secret 仍是签名发行硬门槛。凭据只由有权限的持有人配置在 `release-macos` Environment；文档仅记录配置状态和验证结果，不记录值。`VERSION` 目前保留 `0.5.0-beta.1`，在 UI/Release 修复进入目标提交时再按仓库版本同步脚本提升，避免当前主干与既有标签产生没有对应代码的虚假 beta.2 状态。
+六项 Apple/GitHub 发布 Secret 仍是签名发行硬门槛。凭据只由有权限的持有人配置在 `release-macos` Environment；文档仅记录配置状态和验证结果，不记录值。UI/Release 修复和依赖处置已进入候选提交，`VERSION` 已按仓库同步脚本提升为 `0.5.0-beta.2`；下一步是完整 RC Gate、冻结 SHA 与新标签。
 
-### 执行状态与证据（2026-09-21 快照；后续只在此处更新实时状态）
+### 执行状态与证据（2026-09-22；后续只在此处更新实时状态）
 
 | 关口 | 状态 | 当前证据 / 下一动作 |
 |---|---|---|
 | 首发版本决策 | `[x]` | 2026-09-21：选择 UI Final Polish 后以 `v0.5.0-beta.2` 首发；`beta.1` 仅保留历史 RC/失败发布尝试。 |
-| 历史版本与来源 | `[x]` | `VERSION=0.5.0-beta.1`；远端标签 `v0.5.0-beta.1` 指向 `4bade771`，与核对时 `main` 一致。标签不可覆盖，也不作为首个公开 Beta。 |
-| beta.2 版本与 RC | `[ ]` | UI/Release 修复后同步版本、完成验收、固定新 RC SHA；当前尚无 beta.2 提交或标签。 |
+| 历史版本与来源 | `[x]` | `v0.5.0-beta.1` 固定指向 `4bade771`，是历史 RC/失败发布尝试。标签不可覆盖，也不作为首个公开 Beta。 |
+| beta.2 版本与 RC | `[ ]` | `VERSION=0.5.0-beta.2`、应用元数据和 `BUNDLE_BUILD_NUMBER=2` 已同步；尚须在该候选提交完成全量 Gate、冻结 RC SHA 并创建标签。 |
+| 依赖告警处置 | `[x]` | #31（Echo）、#33（Vitest）与 #37（transitive Nano ID）已分别审查、远端 CI 通过并合入；#34/#35 已关闭。`npm audit --audit-level=high` 为 0。 |
 | 仓库发布能力 | `[x]` | `scripts/release/`、`.github/workflows/release.yml`、`make version-check`、`make desktop-build` 已存在；须以标签提交中的实现为准。 |
 | 标签工作流 Verify | `[x]` | [GitHub Actions run 31780920930](https://github.com/FNB2026/nas-data-governance/actions/runs/31780920930)：Verify 成功。 |
 | 标签工作流 Build Unsigned | `[x]` | 同一 run 的 `Build Unsigned .app` 成功；只证明未签名构建。 |
 | 签名与公证 | `[ ] BLOCKED` | beta.1 run 在 `Verify required secrets` 失败；六项 `release-macos` Environment Secrets 均报告缺失。配置后在 **beta.2 新标签工作流**中验证实际签名、公证与 staple；不要记录凭据值。 |
 | Release / DMG / SHA-256 / SBOM | `[ ]` | `gh release view v0.5.0-beta.1` 返回 `release not found`；目标为 beta.2 标签生成的 DMG、校验和、SBOM 与 Draft Release。 |
 | GitHub 防护 | `[ ]` | `release-macos` 环境及 required reviewer 存在；REST branch protection 查询返回 `Branch not protected`。还需核查仓库 ruleset、Secret Scanning、Push Protection 等的实际生效情况。 |
-| UI Final Polish 与 RC 冻结 | `[ ]` | 七域代码存在；本文的 UI 验收、最小窗口、错误与危险操作流程尚须逐项验证。通过后才能冻结 beta.2 RC。 |
+| UI Final Polish 与 RC 冻结 | `[ ]` | P1–P8 与 P8-D 的 K1–K6 已验收；1180×720 与全屏有真实桌面证据，1440×900、1728×1117 由项目负责人按记录豁免且不作为 PASS。尚须在版本候选上完成全量 Gate 并冻结 beta.2 RC。 |
 | Clean Install / 真实 NAS / 治理恢复 | `[ ]` | 尚无签名发行物及实机验收证据；只在隔离测试数据与可恢复路径上验证写操作。 |
 | Public Beta | `[ ]` | 以上所有阻断关口通过、记录发布决策后才能公开。 |
 
