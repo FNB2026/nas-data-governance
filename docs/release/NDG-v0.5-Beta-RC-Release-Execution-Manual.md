@@ -1047,6 +1047,14 @@ Purge
 错误
 ```
 
+### P8-D 当前证据（2026-09-22）
+
+K3、K4、K5、K6 已通过真实 NDG.app 的本地可丢弃夹具验收：未作用户决定不能批准；隔离后可按原路径恢复并复核 SHA-256；Purge 经草案、批准、试运行、错误确认拦截和逐字确认后进入 `PURGED`；Recovery Lock 阻止扫描与执行入口，同时保留审计与恢复入口，恢复后将无已完成写入的 `EXECUTING` 计划重置为 `APPROVED`。
+
+K5/K6 fixture 位于 `scripts/release/p8d-fixture/`，只使用 `MkdirTemp` 创建临时项目，不接受外部项目数据库、NAS 或 source root 路径。它用于构造已完整经过最短 24 小时保留期的历史记录，不改变产品默认 30 天保留期。
+
+K1、K2、1180×720 与其余 P8-D 场景仍须按本手册完成；因此本阶段**不得**提升 `VERSION` 或创建 `v0.5.0-beta.2`。
+
 ---
 
 # 19. UI Final Polish 完成定义
