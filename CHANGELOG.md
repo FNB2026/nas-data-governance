@@ -2,6 +2,13 @@
 
 本项目的显著变更按里程碑组织。每个里程碑对应 [开发路线](knowledge/maps/roadmap.md) 中的章节。
 
+## 0.5.0-beta.2 — 首个公开 Beta 候选
+
+- 完成桌面端 UI Final Polish：统一应用框架和状态反馈，补齐目录语境、治理决策、执行风险边界、恢复路径、设置与首次启动引导。
+- 在真实只读 SMB 数据源及隔离测试夹具完成扫描恢复、路径脱敏、审批边界、隔离恢复、Purge 与 Recovery Lock 验收；未对真实 NAS 源文件执行写入、隔离或删除。
+- 修复 macOS 版本同步脚本的 BSD `sed` 兼容性，确保 package-lock 与 Info.plist 可由同一机制同步。
+- 升级 Echo、Vitest 及其间接 Nano ID 依赖，前端锁文件高危审计结果为零。
+
 ## Unreleased
 
 - 开源前安全收口：非 dry-run `execute` 强制要求 SQLite `--db`，Journal 初始化或动作完成记录失败即停止并回滚；核心索引、计划、审计和 SQLite 产物统一为目录 `0700`、文件 `0600`，并收紧既有宽权限文件。

@@ -92,7 +92,7 @@ LOCK_JSON="$ROOT/cmd/ndg-desktop/frontend/package-lock.json"
 if [[ -f "$LOCK_JSON" ]]; then
     sed -i.bak \
         -e "3s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" \
-        -e "/\"name\": \"ndg-desktop-frontend\"/{n;s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/}" \
+        -e "/\"name\": \"ndg-desktop-frontend\"/{n; s|\"version\": \"[^\"]*\"|\"version\": \"$VERSION\"|;}" \
         "$LOCK_JSON"
     rm -f "$LOCK_JSON.bak"
     echo "sync-version: updated $LOCK_JSON"
@@ -108,8 +108,8 @@ update_plist() {
         return
     fi
     sed -i.bak \
-        -e "/<key>CFBundleShortVersionString<\/key>/{n;s/<string>[^<]*<\/string>/<string>$SHORT_VERSION<\/string>/}" \
-        -e "/<key>CFBundleVersion<\/key>/{n;s/<string>[^<]*<\/string>/<string>$BUILD_NUMBER<\/string>/}" \
+        -e "/<key>CFBundleShortVersionString<\/key>/{n; s|<string>[^<]*<\/string>|<string>$SHORT_VERSION<\/string>|;}" \
+        -e "/<key>CFBundleVersion<\/key>/{n; s|<string>[^<]*<\/string>|<string>$BUILD_NUMBER<\/string>|;}" \
         "$plist"
     rm -f "$plist.bak"
     echo "sync-version: updated $plist"
