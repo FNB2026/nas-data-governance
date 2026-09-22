@@ -416,6 +416,113 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Test 11: notarytool submission ID parsing (B17 regression)
+# Reproduces the notarize-macos-app.sh failure:
+#   SUBMISSION_ID="$(echo "$SUBMIT_OUTPUT" | grep -E '^id:' | awk '{print $2}')"
+# notarytool indents the id line with two spaces:
+#     id: c6654232-54e7-48f4-8103-fb16608d2ed1
+# so grep '^id:' matches nothing. Under `set -euo pipefail` the failed
+# grep in a command substitution exits the script before the empty-value
+# guard runs. The fix parses --output-format json instead.
+# ---------------------------------------------------------------------------
+echo "--- Test 11: notarytool submission ID parsing (B17) ---"
+
+# Fixture: JSON submit output containing a two-space-indented id line,
+# and the same JSON as notarytool would print.
+FIXTURE_JSON='{
+  "id" : "c6654232-54e7-48f4-8103-fb16608d2ed1",
+  "message" : "Successfully uploaded submission"
+}'
+
+# Real notarytool human-readable form (with leading whitespace before id):
+FIXTURE_HUMAN_ID='  id: c6654232-54e7-48f4-8103-fb16608d2ed1'
+EXPECTED_ID='c6654232-54e7-48f4-8103-fb16608d2ed1'
+
+# --- 1. Old parser: grep '^id:' on the indented text ---
+# Note: `|| true` is required here — the old grep would fail under the
+# test script's own `set -e -o pipefail`. This mirrors exactly why the
+# production script dies at this line, and lets us assert the empty result.
+OLD_SUBMISSION_ID="$(echo "$FIXTURE_HUMAN_ID" | grep -E '^id:' | awk '{print $2}' || true)"
+if [[ -z "$OLD_SUBMISSION_ID" ]]; then
+    pass "Old grep '^id:' parser returns empty on indented notarytool output (B17 regression reproduced)"
+else
+    fail "Old grep '^id:' parser unexpectedly matched indented id: '$OLD_SUBMISSION_ID'"
+fi
+
+# --- 2. New parser: extract id from JSON output ---
+extract_submission_id() {
+    python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("id", ""))
+except Exception:
+    print("")
+' <<< "$1"
+}
+
+NEW_SUBMISSION_ID="$(extract_submission_id "$FIXTURE_JSON")"
+if [[ "$NEW_SUBMISSION_ID" == "$EXPECTED_ID" ]]; then
+    pass "JSON parser extracts submission ID from JSON output"
+else
+    fail "JSON parser failed: got '$NEW_SUBMISSION_ID', expected '$EXPECTED_ID'"
+fi
+
+# --- 3. Under set -euo pipefail: valid ID is extracted, no silent exit ---
+# Simulate the script's exact assignment under the same shell options.
+PIPE_OUTPUT="$(set -euo pipefail; ID="$(printf '%s' "$FIXTURE_JSON" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("id", ""))
+except Exception:
+    print("")
+')"; [[ -n "$ID" ]] && echo "OK:$ID" || echo "EMPTY")"
+PIPE_OUTPUT="${PIPE_OUTPUT%$'\n'}"
+if [[ "$PIPE_OUTPUT" == "OK:$EXPECTED_ID" ]]; then
+    pass "set -euo pipefail: valid JSON id extracted without silent exit"
+else
+    fail "set -euo pipefail: id extraction misbehaved, got '$PIPE_OUTPUT'"
+fi
+
+# --- 4. Under set -euo pipefail: missing id reaches the explicit FAIL guard ---
+# A submission with no id (e.g. error JSON without "id") must not kill the
+# script silently; the empty guard must be reachable.
+MISSING_JSON='{"message":"submission could not be completed"}'
+PIPE_MISSING="$(set -euo pipefail; ID="$(printf '%s' "$MISSING_JSON" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("id", ""))
+except Exception:
+    print("")
+')"; [[ -n "$ID" ]] && echo "OK:$ID" || echo "EMPTY:FAIL-GUARD-REACHABLE")"
+PIPE_MISSING="${PIPE_MISSING%$'\n'}"
+if [[ "$PIPE_MISSING" == "EMPTY:FAIL-GUARD-REACHABLE" ]]; then
+    pass "set -euo pipefail: missing id reaches explicit FAIL guard (no silent exit)"
+else
+    fail "set -euo pipefail: missing id did not reach FAIL guard, got '$PIPE_MISSING'"
+fi
+
+# --- 5. Nested command substitution under pipefail: exit code captured ---
+# Verify the submission-id assignment line does not abort the script when
+# JSON has no id (the core production crash).
+set +e
+CRASH_TEST="$(set -euo pipefail; ID="$(printf '%s' "$MISSING_JSON" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("id", ""))
+except Exception:
+    print("")
+')"; echo "survived:$ID")"
+CRASH_TEST_RC=$?
+set -e
+if [[ $CRASH_TEST_RC -eq 0 && "$CRASH_TEST" == "survived:" ]]; then
+    pass "set -euo pipefail: assignment with empty id does not abort (guard reachable)"
+else
+    fail "set -euo pipefail: assignment aborted (rc=$CRASH_TEST_RC, got '$CRASH_TEST')"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo "========================================"

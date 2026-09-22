@@ -4,12 +4,28 @@
 #
 # This script performs:
 #   1. Submit the DMG to Apple notarization via `xcrun notarytool submit`
+#      (uses --output-format json for structured parsing; requires
+#      python3, which is present on the macOS build runner)
 #   2. Wait for the notarization to complete (notarytool wait)
-#   3. Check the notarization result (must be Accepted)
+#   3. Check the notarization result (JSON status must be Accepted)
 #   4. Staple the notarization ticket to the DMG via `xcrun stapler staple`
 #   5. Verify the staple via `xcrun stapler validate`
 #   6. Generate the final SHA256 checksum (AFTER staple, because stapler
 #      modifies the DMG file and invalidates any earlier checksum)
+#
+# Design note (B17): submit and info use --output-format json and parse
+# the structured "id" / "status" fields rather than grepping human-
+# readable text. notarytool indent the "id:" line with two spaces
+# ("  id: UUID"), so `grep '^id:'` matches nothing and, under
+# `set -euo pipefail`, a failed grep in a command substitution exits the
+# script before the empty-value guard runs. JSON output is whitespace-
+# independent and fails explicitly.
+#
+# Keep submit and wait as separate invocations. Submit + --wait blocks
+# until completion (up to 60m) and is a valid alternative, but a separate
+# `notarytool wait` retains the same timeout semantics while keeping the
+# submission ID available for `notarytool log`/`info` debugging on
+# failure, so no intermediate text parsing is added.
 #
 # Prerequisites:
 #   - DMG signed with Developer ID Application certificate
@@ -125,13 +141,26 @@ fi
 echo "notarize: credential method = $CRED_METHOD"
 
 # --- Step 1: Submit DMG for notarization ---
+# Use --output-format json so the submission ID is parsed from a
+# structured JSON object instead of fragile human-readable text.
+# B17: The human-readable form indents the id line ("  id: UUID"), so
+# grep '^id:' matches nothing and under `set -euo pipefail` the failed
+# grep in a command substitution terminates the script before the
+# empty-value guard can run. JSON output avoids that failure mode.
 echo ""
 echo "notarize: submitting DMG to Apple notarization service..."
-SUBMIT_OUTPUT="$(xcrun notarytool submit "$DMG_PATH" "${CRED_ARGS[@]}" 2>&1)"
+SUBMIT_OUTPUT="$(xcrun notarytool submit "$DMG_PATH" "${CRED_ARGS[@]}" --output-format json 2>&1)"
 echo "$SUBMIT_OUTPUT"
 
-# Extract submission ID
-SUBMISSION_ID="$(echo "$SUBMIT_OUTPUT" | grep -E '^id:' | awk '{print $2}')"
+# Extract submission ID from the JSON output. Empty on failure so the
+# guard below runs (explicit FAIL) instead of a silent set -e exit.
+SUBMISSION_ID="$(printf '%s' "$SUBMIT_OUTPUT" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("id", ""))
+except Exception:
+    print("")
+')"
 if [[ -z "$SUBMISSION_ID" ]]; then
     echo "notarize: FAIL — could not extract submission ID from notarytool output" >&2
     echo "  Check notarytool output above for errors." >&2
@@ -158,13 +187,24 @@ if [[ $WAIT_EXIT_CODE -ne 0 ]]; then
 fi
 
 # --- Step 3: Check notarization status ---
+# B17: Use --output-format json and parse the structured status field
+# instead of grepping human-readable text. The status value is exactly
+# "Accepted", "In Progress", "Invalid", etc. in JSON output.
 echo ""
 echo "notarize: checking notarization result..."
-NOTARY_INFO="$(xcrun notarytool info "$SUBMISSION_ID" "${CRED_ARGS[@]}" 2>&1)"
+NOTARY_INFO="$(xcrun notarytool info "$SUBMISSION_ID" "${CRED_ARGS[@]}" --output-format json 2>&1)"
 echo "$NOTARY_INFO"
 
-if ! echo "$NOTARY_INFO" | grep -q 'Accepted'; then
-    echo "notarize: FAIL — notarization was not accepted" >&2
+NOTARY_STATUS="$(printf '%s' "$NOTARY_INFO" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("status", ""))
+except Exception:
+    print("")
+')"
+
+if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
+    echo "notarize: FAIL — notarization was not accepted (status: '$NOTARY_STATUS')" >&2
     echo "  Fetch the log with: xcrun notarytool log $SUBMISSION_ID (use your credentials)" >&2
     exit 1
 fi
