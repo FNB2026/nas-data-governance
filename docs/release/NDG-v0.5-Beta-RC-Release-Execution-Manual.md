@@ -41,6 +41,9 @@
 
 `v0.5.0-beta.1` 已在远端，不再执行本文任何“创建/推送同名标签”的旧命令，也不将其失败工作流重跑结果作为本轮首发候选。UI、安全或发布代码修复进入新提交并使用 `v0.5.0-beta.2`；同步 `VERSION` 和发行说明。不得删除、移动或强推 `beta.1` 标签，也不得把新提交的手工构建冒充 `beta.1` 标签产物。本手册在 `main` 上管理执行，不改变已固定的标签内容。
 
+> 核验标签指向时，`v0.5.0-beta.*` 是 **annotated tag**，必须用 `^{commit}` 或 `git rev-list -n1` 取 commit，
+> 不要比较 tag object —— 详见 §27.1。
+
 ---
 
 # 0. 本轮工作的最终目标
@@ -1149,6 +1152,39 @@ docs/release/
 [ ] Private Vulnerability Reporting
 ```
 
+### 依赖告警审计结论（2026-09-22 冻结）
+
+已对当时 3 条 open alert 逐条做**可达性审计**（判据：漏洞的可触发前提在发布产物中是否成立），
+结论冻结如下：
+
+| # | 严重度 | 依赖 | CVE / GHSA | 是否在 Release 产物中可达 |
+| --- | --- | --- | --- | --- |
+| 17 | high | `labstack/echo/v4` v4.13.3 | CVE-2026-55677 | **否** |
+| 18 | medium | `@vitest/mocker` 4.1.10 | CVE-2026-84373 | 否（开发期工具链） |
+| 19 | medium | `vitest` 4.1.10 | CVE-2026-84373 | 否（开发期工具链） |
+
+**新增 RC Blocker：0。** echo 之所以被判为不可达，证据是它只经
+`wails/v2/internal/app/app_dev.go`（`//go:build dev`）引入 `internal/frontend/devserver`：
+
+```bash
+go list -deps ./cmd/ndg-desktop | grep -c 'labstack/echo'          # → 0
+go list -deps -tags dev ./cmd/ndg-desktop | grep -c 'devserver'     # → 1
+```
+
+且仓库 Go 代码**零 `net/http` 引用**，没有任何 HTTP 服务或静态文件服务。
+完整审计见 `var/reports/dependabot-audit-2026-09-22.md`。
+
+**处置决定（2026-09-22 锁定）：RC 前只合单包 PR `#31`（echo）与 `#33`（vitest + @vitest/mocker）。**
+
+- **不合分组升级 PR `#34` / `#35`** —— 它们是 4 个 Go / 5 个 npm 依赖的批量升级，
+  会把与告警无关的版本变化带进最终候选，冻版前夕无谓扩大回归面；留到 beta.2 之后的维护窗口。
+- **不要在旧 main 上合这些 PR** —— 已核实 `main` 的 HEAD 即 `v0.5.0-beta.1` 指向的提交
+  `4bade7715b…`，四个 PR 的 base 全是它，而 UI Final Polish 已远超之。
+  正确顺序是：先合 Final Polish → 让 Dependabot 基于新 main rebase / recreate → 再合 `#31` / `#33`。
+  PR 显示 `MERGEABLE / CLEAN` 只代表"相对旧 base 干净"。
+- 合并后专项验证：`#31` → `go build -tags dev ./cmd/ndg-desktop`、`go test ./...`、`go vet ./...`；
+  `#33` → `npm test`、`npm run build`。随后关闭被取代的 `#34` / `#35`。
+
 ## Environment
 
 确认存在：
@@ -1305,6 +1341,58 @@ Gatekeeper 绕过
 `v0.5.0-beta.1` 已存在于本地和远端，均指向 `4bade7715b47d4a71e4a114f835388602f2e865a`，保持不动。`beta.2` 创建前须确认：UI Final Polish 已验收，全部 Release Blocker 已修复，`VERSION=0.5.0-beta.2`，版本一致性和 Release Drill 通过，目标提交已合并到 `main`，工作树干净，且本地和远端都不存在 `v0.5.0-beta.2` 标签。
 
 上述门槛通过后，记录 RC SHA，按仓库发布权限创建、核验并推送 `v0.5.0-beta.2`。推送后标签不可移动；如出现新阻断项，在新提交修复并使用下一版本，而非覆盖该标签。发布凭据可提前配置，但只允许 beta.2 的标签产物进入本轮 Draft Release 与实机验收。
+
+## 27.1 标签核验的两个取值陷阱（2026-09-22 锁定）
+
+`v0.5.0-beta.*` 是 **annotated tag**（`git cat-file -t` 返回 `tag`，非 `commit`）。
+**所有 tag → commit 的比较统一使用 `^{commit}` 或 `git rev-list -n1`，禁止比较 tag object。**
+
+```bash
+$ git rev-parse v0.5.0-beta.1
+8aaf0e28d1d68d1c7001c57e9420ea259b999aa8         # tag 对象 —— 不能用于比较
+$ git rev-parse 'v0.5.0-beta.1^{commit}'
+4bade7715b47d4a71e4a114f835388602f2e865a         # 真正的 commit
+$ git rev-list -n1 v0.5.0-beta.1
+4bade7715b47d4a71e4a114f835388602f2e865a         # 等价写法
+```
+
+注意 `git tag -l --format='%(objectname)'` 取到的**同样是 tag 对象**。
+直接用 `git rev-parse <tag>` 去比 commit，判定将**永远不相等**——这是假失败，不是真问题。
+
+## 27.2 About Commit 的位数：本地构建与 Release 构建不同
+
+| 构建路径 | 取值 | 结果 |
+| --- | --- | --- |
+| 本地 `make desktop-build` | `Makefile` 的 `git rev-parse --short=12 HEAD` | **12 位**缩写 |
+| Release workflow | `COMMIT="${{ github.sha }}"` | **40 位**完整 SHA |
+
+本地构建的 `.app` 若直接与 `git rev-parse HEAD` 做字符串相等，必然失败。
+
+**RC 本地验收采用完整 SHA 路线（已锁定）**，不使用模糊前缀判断：
+
+```bash
+COMMIT="$(git rev-parse HEAD)" make desktop-build
+```
+
+`Makefile` 中 `COMMIT ?= …` 不会覆盖已定义变量，因此环境变量优先，About 将显示完整 40 位 SHA。
+
+## 27.3 三方严格相等（禁止前缀 / 包含判断）
+
+```bash
+RC_SHA="$(git rev-parse main)"
+TAG_SHA="$(git rev-parse 'v0.5.0-beta.2^{commit}')"   # 必须带 ^{commit}
+test "$RC_SHA" = "$TAG_SHA" || { echo "FAIL: tag 未指向 RC SHA" >&2; exit 1; }
+# 另需人工确认：About 中显示的 Commit 与 $RC_SHA 逐字相等（40 位）
+```
+
+`scripts/release/check-version-consistency.sh` **只校验 `VERSION` 与 tag 名一致，不比对 commit**，
+因此本项是人工 Gate，写法必须一次写对；不要把判据放松成"包含即可"或"忽略 commit"。
+
+> `${{ github.sha }}` 在 push 事件下按 GitHub 文档定义为该 ref 的 tip commit，
+> 支持 Release 构建注入 commit SHA；首次 beta.2 真正触发后仍应以 About 实测确认一次。
+
+**以上仅为判据用法，不改动 `Makefile`、`release.yml` 或任何 Release 脚本。**
+相关只读核查记录见 `var/reports/rc-freeze-preflight-2026-09-22.md`。
 
 ---
 
