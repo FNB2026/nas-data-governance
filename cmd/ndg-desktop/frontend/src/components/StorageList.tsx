@@ -1,5 +1,7 @@
 import { wails } from "../wailsjs/go/models";
 import { useProject } from "../state/ProjectContext";
+import ErrorState from "./ErrorState";
+import EmptyState from "./EmptyState";
 
 export interface StorageListProps {
   storages: wails.StorageInfo[];
@@ -14,9 +16,9 @@ export default function StorageList({ storages, storagesError, sourceProfiles }:
     <section className="card card--full">
       <h2>存储列表</h2>
       {storagesError ? (
-        <p className="error" role="alert">{storagesError}</p>
+        <ErrorState message={storagesError} />
       ) : storages.length === 0 ? (
-        <p className="muted">暂无已注册的存储</p>
+        <EmptyState title="暂无数据" hint="暂无已注册的存储" />
       ) : (
         <div className="table-wrap">
           <table className="data-table">

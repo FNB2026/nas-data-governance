@@ -23,7 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "governance-review", label: "治理复核", description: "治理决策与计划草案" },
   { id: "execution-center", label: "执行中心", description: "隔离、清理与执行安全" },
   { id: "audit-recovery", label: "审计与恢复", description: "操作审计、Journal与恢复" },
-  { id: "settings", label: "设置", description: "应用配置与开发者信息" },
+  { id: "settings", label: "设置", description: "应用配置、隐私与安全状态" },
 ];
 
 export const DEFAULT_ROUTE: AppRoute = "sources";

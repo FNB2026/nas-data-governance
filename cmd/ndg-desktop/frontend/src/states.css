@@ -1,0 +1,94 @@
+/*
+ * Unified state primitives (UI-P2): Loading / Empty / Error / Disabled.
+ * All colors and spacing reference the tokens in styles/tokens.css.
+ */
+
+/* ---- LoadingState ---- */
+.state-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.state-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: state-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- EmptyState ---- */
+.state-empty-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---- ErrorState ---- */
+.state-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  background: var(--error-bg);
+  color: var(--error);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+}
+
+.state-error .error {
+  margin-top: 0;
+}
+
+.state-error-detail {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.state-error-detail pre {
+  margin: var(--space-sm) 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* ---- DisabledNotice ---- */
+.disabled-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--warning-bg);
+  color: var(--warning);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+}
+
+.disabled-notice-icon {
+  flex-shrink: 0;
+}
+
+.disabled-notice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.disabled-notice-reason {
+  margin: 0;
+  font-weight: 600;
+}
+
+.disabled-notice .muted {
+  margin: 0;
+}

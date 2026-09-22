@@ -110,6 +110,10 @@ desktop-build: wails-check
 	  -trimpath \
 	  -platform darwin/arm64 \
 	  -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME) -X $(VERSION_PKG).Channel=$(CHANNEL)"
+	@git diff --exit-code -- cmd/ndg-desktop/frontend/src/wailsjs/go/models.ts || { \
+		echo "Generated Wails bindings changed. Review and commit the generated model, or restore it deliberately." >&2; \
+		exit 1; \
+	}
 
 desktop: desktop-build
 

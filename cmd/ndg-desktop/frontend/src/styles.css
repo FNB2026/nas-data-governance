@@ -13,6 +13,48 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ============================================================
+   UI-P8-B: focus visibility, non-color-only affordances, motion
+   ============================================================ */
+
+/* One focus treatment for every interactive element. :focus-visible keeps
+   it off pointer clicks and on for keyboard navigation.
+   Never remove this without providing an equivalent visible indicator. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Scrollable regions that are reachable by keyboard must show where focus
+   is, otherwise a keyboard user's position is invisible inside the table. */
+.table-wrap:focus-visible,
+.dup-list-wrap:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Disabled must never be signalled by colour alone: the dimmed treatment
+   is always paired with the native disabled attribute or aria-disabled,
+   plus a cursor change so the state is not conveyed by opacity only. */
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -20,10 +62,30 @@ body {
   height: 100vh;
 }
 
+/* UI-P8-B: skip link — off-screen until focused, then lands over the header. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: var(--z-modal);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: var(--space-lg);
+  top: var(--space-lg);
+}
+
 .app-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 0.75rem 1.5rem 0.75rem 5rem; /* left padding for traffic lights */
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
@@ -35,28 +97,40 @@ body {
 .app-header-left {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-md);
+  min-width: 0;
   --wails-draggable: no-drag;
 }
 
-.app-header-right {
+.app-brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  --wails-draggable: no-drag;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
-.app-header h1 {
-  font-size: 1.15rem;
-  font-weight: 600;
+.app-brand-mark {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+  font-size: var(--font-size-sm);
+}
+
+.app-brand-name {
+  font-size: var(--font-size-lg);
   white-space: nowrap;
-  --wails-draggable: no-drag;
 }
 
 .header-project-name {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   color: var(--text-muted);
-  max-width: 200px;
+  max-width: 18rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -83,6 +157,41 @@ body {
 .mode-badge--closed {
   background: var(--surface-secondary);
   color: var(--text-muted);
+}
+
+.header-recovery-indicator,
+.header-connection-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.header-recovery-indicator {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.header-connection-alert {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.header-status-action {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.header-status-action:hover {
+  opacity: 1;
 }
 
 .header-scan-indicator {
@@ -116,15 +225,6 @@ body {
     opacity: 0.3;
     transform: scale(0.7);
   }
-}
-
-.version-badge {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  background: var(--bg);
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  --wails-draggable: no-drag;
 }
 
 /* ---- Connection status indicator ---- */
@@ -260,13 +360,14 @@ body {
 }
 
 .nav-item--active .nav-item-desc {
-  color: rgba(0, 113, 227, 0.7);
+  color: var(--accent-muted);
 }
 
 .app-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1.5rem 2rem;
+  padding: var(--space-xl) var(--space-2xl);
+  min-width: 0;
 }
 
 .card {
@@ -386,7 +487,7 @@ button.secondary {
 }
 
 .page-header h2 {
-  font-size: 1.3rem;
+  font-size: var(--font-size-2xl);
   font-weight: 600;
   margin-bottom: 0.2rem;
 }
@@ -397,6 +498,53 @@ button.secondary {
 
 .page > .card {
   width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .app-header {
+    padding-right: var(--space-xl);
+  }
+
+  .app-sidebar {
+    width: 184px;
+  }
+
+  .nav-item {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .app-content {
+    padding: var(--space-xl);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    padding-left: 4.5rem;
+  }
+
+  .header-project-name {
+    max-width: 10rem;
+  }
+
+  .app-sidebar {
+    width: 3.5rem;
+    padding-inline: var(--space-xs);
+  }
+
+  .nav-item {
+    align-items: center;
+    padding-inline: var(--space-xs);
+  }
+
+  .nav-item-desc {
+    display: none;
+  }
+
+  .nav-item-label {
+    font-size: var(--font-size-xs);
+    text-align: center;
+  }
 }
 
 /* ---- Stub pages ---- */
@@ -596,7 +744,7 @@ button.secondary {
 }
 
 .data-table tr.row-selected {
-  background: rgba(0, 113, 227, 0.06);
+  background: var(--accent-bg-tint);
 }
 
 .mono {
@@ -608,6 +756,37 @@ button.secondary {
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---- UI-P8-A: table density, row headers and wrapping ---- */
+
+/* Key/value tables use <th scope="row"> for the label cell so assistive
+   tech can associate it with the value. It must not inherit the uppercase
+   column-header treatment. */
+.data-table th[scope="row"] {
+  font-weight: 500;
+  font-size: inherit;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+/* Key/value tables: the label column hugs its content and the value column
+   takes the remaining width, instead of the two columns splitting 50/50.
+   Without this the value column starts mid-card and the table reads sparse. */
+.data-table--kv th[scope="row"] {
+  width: 1%;
+}
+
+/* Cells that carry free-form text (paths, reasons, digests) wrap instead
+   of forcing the table wider than the window. */
+.data-table td.cell-wrap,
+.data-table th.cell-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 11rem;
+  max-width: 26rem;
 }
 
 /* ---- Load more ---- */
@@ -695,7 +874,7 @@ button.secondary {
   margin-left: 0.5rem;
   padding: 0.1rem 0.5rem;
   font-size: 0.72rem;
-  color: #fff;
+  color: var(--text-on-accent);
   background: var(--accent);
   border-radius: 999px;
 }
@@ -779,7 +958,7 @@ button.secondary {
    that it resumes from a checkpoint rather than starting fresh. */
 .scan-resume-btn {
   background: var(--success) !important;
-  color: #fff !important;
+  color: var(--text-on-accent) !important;
   border-color: var(--success) !important;
 }
 .scan-resume-btn:hover:not(:disabled) {
@@ -883,7 +1062,7 @@ button.secondary {
 }
 
 .path-status--valid {
-  color: #248a3d;
+  color: var(--success);
 }
 
 .path-status--invalid {
@@ -916,7 +1095,7 @@ button.secondary {
 }
 
 .progress-stats .warn {
-  color: #ff9500;
+  color: var(--warning);
 }
 
 .progress-stats .error-text {
@@ -935,32 +1114,32 @@ button.secondary {
 }
 
 .state-badge--queued {
-  background: #e8e8ed;
+  background: var(--surface-secondary);
   color: var(--text-muted);
 }
 
 .state-badge--running {
-  background: rgba(0, 113, 227, 0.12);
+  background: var(--accent-bg-active);
   color: var(--accent);
 }
 
 .state-badge--cancel-requested {
-  background: rgba(255, 149, 0, 0.15);
-  color: #ff9500;
+  background: var(--warning-bg-strong);
+  color: var(--warning);
 }
 
 .state-badge--completed {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .state-badge--failed {
-  background: rgba(255, 59, 48, 0.12);
+  background: var(--error-bg);
   color: var(--error);
 }
 
 .state-badge--cancelled {
-  background: #e8e8ed;
+  background: var(--surface-secondary);
   color: var(--text-muted);
 }
 
@@ -1114,8 +1293,8 @@ button.secondary {
 
 .diag-safety-notes {
   padding: 0.75rem 1rem;
-  background: rgba(255, 149, 0, 0.08);
-  border: 1px solid rgba(255, 149, 0, 0.25);
+  background: var(--warning-bg-soft);
+  border: 1px solid var(--warning-line);
   border-radius: 8px;
 }
 
@@ -1123,7 +1302,7 @@ button.secondary {
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 0.4rem;
-  color: #ff9500;
+  color: var(--warning);
 }
 
 .diag-safety-notes ul {
@@ -1155,7 +1334,7 @@ button.secondary {
   padding: 0.7rem 0.9rem;
   border-radius: 10px;
   background: var(--card-bg);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
   cursor: pointer;
   pointer-events: auto;
   animation: toast-slide-in 0.25s ease;
@@ -1174,7 +1353,7 @@ button.secondary {
 }
 
 .toast--success {
-  border-left-color: #34c759;
+  border-left-color: var(--success);
 }
 
 .toast--error {
@@ -1182,7 +1361,7 @@ button.secondary {
 }
 
 .toast--warning {
-  border-left-color: #ff9500;
+  border-left-color: var(--warning);
 }
 
 .toast--info {
@@ -1197,7 +1376,7 @@ button.secondary {
 }
 
 .toast--success .toast-icon {
-  color: #34c759;
+  color: var(--success);
 }
 
 .toast--error .toast-icon {
@@ -1205,7 +1384,7 @@ button.secondary {
 }
 
 .toast--warning .toast-icon {
-  color: #ff9500;
+  color: var(--warning);
 }
 
 .toast--info .toast-icon {
@@ -1309,7 +1488,7 @@ button.secondary {
 }
 
 .dup-summary-stat--reclaimable .dup-summary-value {
-  color: #248a3d;
+  color: var(--success);
 }
 
 .dup-summary-stat--high {
@@ -1371,17 +1550,17 @@ button.secondary {
 }
 
 .risk-badge--low {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .risk-badge--medium {
-  background: rgba(255, 149, 0, 0.15);
-  color: #ff9500;
+  background: var(--warning-bg-strong);
+  color: var(--warning);
 }
 
 .risk-badge--high {
-  background: rgba(255, 59, 48, 0.12);
+  background: var(--error-bg);
   color: var(--error);
 }
 
@@ -1495,13 +1674,13 @@ button.secondary {
 }
 
 .capacity-item--reclaimable {
-  border-color: rgba(52, 199, 89, 0.3);
-  background: rgba(52, 199, 89, 0.05);
+  border-color: var(--success-line);
+  background: var(--success-bg-soft);
 }
 
 .capacity-item--hardlink {
-  border-color: rgba(0, 113, 227, 0.2);
-  background: rgba(0, 113, 227, 0.04);
+  border-color: var(--accent-line);
+  background: var(--accent-bg-soft);
 }
 
 .capacity-label {
@@ -1516,7 +1695,7 @@ button.secondary {
 }
 
 .capacity-item--reclaimable .capacity-value {
-  color: #248a3d;
+  color: var(--success);
 }
 
 .capacity-item--hardlink .capacity-value {
@@ -1601,11 +1780,11 @@ button.secondary {
 
 /* Hardlink row highlighting */
 .evidence-table tr.row-hardlink {
-  background: rgba(0, 113, 227, 0.03);
+  background: var(--accent-bg-faint);
 }
 
 .evidence-table tr.row-hardlink:hover {
-  background: rgba(0, 113, 227, 0.06);
+  background: var(--accent-bg-tint);
 }
 
 /* Hardlink relationship diagram */
@@ -1623,8 +1802,8 @@ button.secondary {
 }
 
 .hardlink-group--linked {
-  border-color: rgba(0, 113, 227, 0.25);
-  background: rgba(0, 113, 227, 0.03);
+  border-color: var(--accent-line-strong);
+  background: var(--accent-bg-faint);
 }
 
 .hardlink-group-header {
@@ -1709,8 +1888,8 @@ button.secondary {
 }
 
 .exec-confirm-match {
-  border-color: #34c759 !important;
-  background: rgba(52, 199, 89, 0.05);
+  border-color: var(--success) !important;
+  background: var(--success-bg-soft);
 }
 
 .exec-results-panel {
@@ -1769,13 +1948,13 @@ button.secondary {
 }
 
 .exec-step-status--passed {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .exec-step-status--failed {
-  background: rgba(255, 59, 48, 0.15);
-  color: #c00;
+  background: var(--error-bg-strong);
+  color: var(--error);
 }
 
 .exec-step-status--skipped {
@@ -1880,13 +2059,13 @@ button.secondary {
 }
 
 .readiness-badge--ready {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .readiness-badge--not-ready {
-  background: rgba(255, 149, 0, 0.15);
-  color: #ff9500;
+  background: var(--warning-bg-strong);
+  color: var(--warning);
 }
 
 .readiness-checks {
@@ -1915,8 +2094,8 @@ button.secondary {
 }
 
 .readiness-check--passed .readiness-check-icon {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .readiness-check--failed .readiness-check-icon {
@@ -2006,6 +2185,74 @@ button.secondary {
   gap: 0.5rem;
 }
 
+.gov-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.gov-workflow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+}
+
+.gov-workflow-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.gov-workflow-step div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.gov-workflow-step strong {
+  font-size: 0.78rem;
+}
+
+.gov-workflow-step span:not(.gov-workflow-number) {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.gov-workflow-step--system {
+  border-color: var(--accent-line-emphasis);
+  background: var(--accent-bg-soft);
+}
+
+.gov-workflow-step--system .gov-workflow-number,
+.gov-workflow-step--complete .gov-workflow-number,
+.gov-workflow-step--ready .gov-workflow-number {
+  background: var(--accent);
+  color: white;
+}
+
+.gov-workflow-step--complete {
+  border-color: var(--success-line-strong);
+}
+
+.gov-workflow-step--ready {
+  border-color: var(--success-line-emphasis);
+  background: var(--success-bg-tint);
+}
+
 .gov-filter-select {
   font-size: 0.82rem;
   padding: 0.3rem 0.6rem;
@@ -2025,8 +2272,8 @@ button.secondary {
 }
 
 .mode-badge--rw {
-  background: rgba(52, 199, 89, 0.15);
-  color: #248a3d;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .mode-badge--ro {
@@ -2068,7 +2315,7 @@ button.secondary {
   color: var(--accent);
   padding: 0.4rem 0.6rem;
   margin-bottom: 0.4rem;
-  background: rgba(0, 113, 227, 0.08);
+  background: var(--accent-bg);
   border-radius: 8px;
 }
 
@@ -2085,7 +2332,7 @@ button.secondary {
 }
 
 .gov-plan-item--selected {
-  background: rgba(0, 113, 227, 0.1);
+  background: var(--accent-bg-hover);
 }
 
 .gov-plan-item-header {
@@ -2113,8 +2360,8 @@ button.secondary {
   font-size: 0.68rem;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  background: rgba(88, 86, 214, 0.12);
-  color: #5856d6;
+  background: var(--accent-secondary-bg);
+  color: var(--accent-secondary);
   white-space: nowrap;
 }
 
@@ -2182,6 +2429,13 @@ button.secondary {
   margin-bottom: 0.5rem;
 }
 
+.gov-section-hint {
+  margin: -0.1rem 0 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .gov-evidence-list {
   list-style: disc;
   padding-left: 1.5rem;
@@ -2217,14 +2471,14 @@ button.secondary {
   flex-shrink: 0;
 }
 
-.gov-action-badge--keep { background: rgba(52, 199, 89, 0.15); color: #248a3d; }
-.gov-action-badge--move { background: rgba(0, 113, 227, 0.12); color: var(--accent); }
-.gov-action-badge--copy { background: rgba(88, 86, 214, 0.12); color: #5856d6; }
-.gov-action-badge--rename { background: rgba(88, 86, 214, 0.12); color: #5856d6; }
-.gov-action-badge--delete { background: rgba(255, 59, 48, 0.12); color: var(--error); }
-.gov-action-badge--quarantine { background: rgba(255, 149, 0, 0.15); color: #ff9500; }
+.gov-action-badge--keep { background: var(--success-bg); color: var(--success); }
+.gov-action-badge--move { background: var(--accent-bg-active); color: var(--accent); }
+.gov-action-badge--copy { background: var(--accent-secondary-bg); color: var(--accent-secondary); }
+.gov-action-badge--rename { background: var(--accent-secondary-bg); color: var(--accent-secondary); }
+.gov-action-badge--delete { background: var(--error-bg); color: var(--error); }
+.gov-action-badge--quarantine { background: var(--warning-bg-strong); color: var(--warning); }
 .gov-action-badge--skip { background: var(--bg); color: var(--text-muted); }
-.gov-action-badge--review { background: rgba(255, 149, 0, 0.15); color: #ff9500; }
+.gov-action-badge--review { background: var(--warning-bg-strong); color: var(--warning); }
 
 .gov-action-path {
   font-size: 0.78rem;
@@ -2242,6 +2496,129 @@ button.secondary {
   background: var(--bg);
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* UI-P3: directory context & retention section */
+.evidence-table tr.ctx-retain-row {
+  background: var(--accent-bg-faint);
+}
+
+.gov-protected-flag {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--error-bg);
+  color: var(--error);
+  margin-left: 0.25rem;
+  white-space: nowrap;
+}
+
+.gov-retain-flag {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--success-bg);
+  color: var(--success);
+  margin-left: 0.25rem;
+  white-space: nowrap;
+}
+
+.gov-reason-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  font-size: 0.72rem;
+}
+
+/* UI-P6: audit & recovery readable expression */
+.audit-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.35rem;
+}
+
+.ek-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--font-size-xs);
+}
+
+.ek-detail-key {
+  color: var(--text-muted);
+  min-width: 3.5rem;
+}
+
+.ek-masked {
+  color: var(--text-muted);
+}
+
+.ek-detail-row .state-badge {
+  font-size: 0.68rem;
+}
+
+.ek-action-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ek-action-badge--delete {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.ek-action-badge--quarantine {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.ek-action-badge--keep {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+/* UI-P6: summary overview cards */
+.ek-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.ek-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+}
+
+.ek-summary-value {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+.ek-summary-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.ek-summary-card--danger .ek-summary-value {
+  color: var(--error);
+}
+
+@media (max-width: 900px) {
+  .ek-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .gov-action-reason {
@@ -2320,6 +2697,71 @@ button.secondary {
   margin-top: 1rem;
 }
 
+.gov-approval-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.gov-execution-ready {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: 0.8rem;
+}
+
+/* UI-P5: execution safety boundaries */
+.exec-safety-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.exec-safety-step,
+.exec-quarantine-notice,
+.exec-danger-zone {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+}
+
+.exec-safety-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.7rem;
+}
+
+.exec-safety-step strong { font-size: 0.78rem; }
+.exec-safety-step span,
+.exec-preflight-hint,
+.exec-quarantine-notice span,
+.exec-danger-zone span { color: var(--text-muted); font-size: 0.76rem; line-height: 1.45; }
+
+.exec-safety-step--complete { border-color: var(--success-line-strong); }
+.exec-safety-step--ready { border-color: var(--accent-line-emphasis); background: var(--accent-bg-soft); }
+
+.exec-preflight-hint { margin: 0.65rem 0; }
+
+.exec-quarantine-notice,
+.exec-danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.85rem;
+}
+
+.exec-quarantine-notice { border-color: var(--accent-line-strong); background: var(--accent-bg-soft); }
+.exec-danger-zone { border-color: var(--error-line); background: var(--error-bg-soft); }
+.exec-danger-zone strong { color: var(--error); }
+
 /* Plan state badges */
 .plan-state-badge {
   display: inline-block;
@@ -2330,26 +2772,49 @@ button.secondary {
   white-space: nowrap;
 }
 
-.plan-state-badge--draft { background: rgba(255, 149, 0, 0.15); color: #ff9500; }
-.plan-state-badge--approved { background: rgba(52, 199, 89, 0.15); color: #248a3d; }
-.plan-state-badge--stale-checked { background: rgba(0, 113, 227, 0.12); color: var(--accent); }
-.plan-state-badge--executing { background: rgba(0, 113, 227, 0.12); color: var(--accent); }
-.plan-state-badge--verified { background: rgba(52, 199, 89, 0.15); color: #248a3d; }
+.plan-state-badge--draft { background: var(--warning-bg-strong); color: var(--warning); }
+.plan-state-badge--approved { background: var(--success-bg); color: var(--success); }
+.plan-state-badge--stale-checked { background: var(--accent-bg-active); color: var(--accent); }
+.plan-state-badge--executing { background: var(--accent-bg-active); color: var(--accent); }
+.plan-state-badge--verified { background: var(--success-bg); color: var(--success); }
 .plan-state-badge--rolled-back { background: var(--bg); color: var(--text-muted); }
 
 /* Risk badge for critical */
 .risk-badge--critical {
-  background: rgba(255, 59, 48, 0.15);
+  background: var(--error-bg-strong);
   color: var(--error);
 }
 
 @media (max-width: 900px) {
+  .gov-workflow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .exec-safety-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .gov-layout {
     grid-template-columns: 1fr;
   }
 
   .gov-plan-list {
     max-height: 300px;
+  }
+}
+
+@media (max-width: 560px) {
+  .gov-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .exec-safety-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .gov-execution-ready {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
@@ -2391,7 +2856,7 @@ button.secondary {
   width: 1.75rem;
   height: 1.75rem;
   border-radius: 50%;
-  background: rgba(0, 113, 227, 0.1);
+  background: var(--accent-bg-hover);
   color: var(--accent);
   font-size: 0.85rem;
   font-weight: 600;
