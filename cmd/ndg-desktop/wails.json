@@ -13,7 +13,7 @@
   "info": {
     "companyName": "NDG",
     "productName": "NDG 数据治理工作台",
-    "productVersion": "0.5.0-beta.3",
+    "productVersion": "0.5.0-beta.4",
     "copyright": "Copyright © 2026 NDG",
     "comments": "Local-first NAS data governance workbench"
   }

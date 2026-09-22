@@ -2,6 +2,11 @@
 
 本项目的显著变更按里程碑组织。每个里程碑对应 [开发路线](knowledge/maps/roadmap.md) 中的章节。
 
+## 0.5.0-beta.4 — 发布链修复候选
+
+- 修复 notarization submission ID 解析：`notarize-macos-app.sh` 改用 `notarytool --output-format json` 结构化解析提交 ID 与公证状态，替代对带缩进的人类可读文本（`  id: UUID`）的脆弱 `grep '^id:'`，避免 `set -euo pipefail` 下静默退出。
+- 补足 beta.3 验证：notarization 上传提交（`NDG-0.5.0-beta.3-macos.dmg`）确认已在 Apple 侧成功接收。
+
 ## 0.5.0-beta.3 — 发布链修复候选
 
 - 修复 macOS 发布签名链：`Sign & Notarize` 的 Untar 步骤在全新 checkout 中解压到 git-ignored 的 `cmd/ndg-desktop/build/bin` 时因目标目录缺失失败（`tar: could not chdir`）；现在先 `mkdir -p` 再解压，并保持可执行位验证。附带回归测试（行为测试 + workflow 结构断言）。
