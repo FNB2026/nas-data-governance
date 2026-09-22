@@ -164,6 +164,10 @@ jobs:
             -platform darwin/arm64 \
             -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME} -X ${VERSION_PKG}.Channel=${CHANNEL}"
 
+          # wails build runs from cmd/ndg-desktop. Return to the checkout root
+          # before comparing the tracked generated binding, or Git receives a
+          # nonexistent doubled path and silently sees no diff.
+          cd "$GITHUB_WORKSPACE"
           git diff --exit-code -- cmd/ndg-desktop/frontend/src/wailsjs/go/models.ts || {
             echo "FAIL — generated Wails bindings are out of sync with the tracked model" >&2
             exit 1

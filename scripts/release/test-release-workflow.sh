@@ -654,6 +654,22 @@ fi
 
 echo ""
 
+# ---------------------------------------------------------------------------
+# Check 18: Generated Wails bindings are checked from the checkout root
+# ---------------------------------------------------------------------------
+echo "--- Check 18: Generated Wails binding guard ---"
+
+BUILD_STEP="$(awk '/- name: Build .app with version injection/{found=1} found{print} found && /^      - name: Verify .app/{exit}' "$WORKFLOW")"
+
+if echo "$BUILD_STEP" | grep -q 'cd "\$GITHUB_WORKSPACE"' && \
+   echo "$BUILD_STEP" | grep -q 'git diff --exit-code -- cmd/ndg-desktop/frontend/src/wailsjs/go/models.ts'; then
+    pass "Generated Wails binding diff runs from the checkout root"
+else
+    fail "Generated Wails binding guard can miss changes after cd cmd/ndg-desktop"
+fi
+
+echo ""
+
 # ===========================================================================
 # Summary
 # ===========================================================================
