@@ -2,6 +2,11 @@
 
 本项目的显著变更按里程碑组织。每个里程碑对应 [开发路线](knowledge/maps/roadmap.md) 中的章节。
 
+## 0.5.0-beta.3 — 发布链修复候选
+
+- 修复 macOS 发布签名链：`Sign & Notarize` 的 Untar 步骤在全新 checkout 中解压到 git-ignored 的 `cmd/ndg-desktop/build/bin` 时因目标目录缺失失败（`tar: could not chdir`）；现在先 `mkdir -p` 再解压，并保持可执行位验证。附带回归测试（行为测试 + workflow 结构断言）。
+- 补足 beta.2 的发布凭据配置：完成 Apple Developer ID Application 证书的创建、安装与 P12 导出，配置 App Store Connect Team API Key，并在 `release-macos` 环境补齐六项发布 Secret。
+
 ## 0.5.0-beta.2 — 首个公开 Beta 候选
 
 - 完成桌面端 UI Final Polish：统一应用框架和状态反馈，补齐目录语境、治理决策、执行风险边界、恢复路径、设置与首次启动引导。
