@@ -679,6 +679,56 @@ fi
 
 echo ""
 
+# ---------------------------------------------------------------------------
+# Check 19: B17 — notarize-macos-app.sh uses JSON parsing for submission
+# ---------------------------------------------------------------------------
+echo "--- Check 19: B17 — notarize script JSON parsing ---"
+
+NOTARIZE_SCRIPT="$ROOT/scripts/release/notarize-macos-app.sh"
+
+# Must not use the fragile text parser that fails on two-space-indented id
+if grep -q "SUBMISSION_ID=.*grep.*'^id:'" "$NOTARIZE_SCRIPT"; then
+    fail "notarize script still parses submission ID with grep '^id:' (B17 not fixed)"
+else
+    pass "notarize script does not parse submission ID with grep '^id:'"
+fi
+
+# Must request JSON output from notarytool
+if grep -q -- '--output-format json' "$NOTARIZE_SCRIPT"; then
+    pass "notarize script requests JSON output from notarytool"
+else
+    fail "notarize script missing --output-format json"
+fi
+
+# Must extract id via python3 JSON parsing
+if grep -q 'json.load(sys.stdin).get("id"' "$NOTARIZE_SCRIPT"; then
+    pass "notarize script extracts submission id via python3 JSON parsing"
+else
+    fail "notarize script missing python3 JSON id extraction"
+fi
+
+# Must keep the explicit empty-value FAIL guard (no silent set -e exit)
+NOTARIZE_ID_GUARD="$(grep -A8 'could not extract submission ID' "$NOTARIZE_SCRIPT")"
+if echo "$NOTARIZE_ID_GUARD" | grep -q 'exit 1'; then
+    pass "notarize script keeps explicit FAIL guard for missing submission ID"
+else
+    fail "notarize script missing explicit FAIL guard for missing submission ID"
+fi
+
+# Must check notarization status via JSON status field (not grep 'Accepted')
+if grep -q 'json.load(sys.stdin).get("status"' "$NOTARIZE_SCRIPT"; then
+    pass "notarize script checks status via python3 JSON status field"
+else
+    fail "notarize script missing JSON status field check"
+fi
+if grep -q "grep -q 'Accepted'" "$NOTARIZE_SCRIPT"; then
+    fail "notarize script still greps human-readable 'Accepted' text (B17 not fixed)"
+else
+    pass "notarize script does not grep human-readable 'Accepted' text"
+fi
+
+echo ""
+
 # ===========================================================================
 # Summary
 # ===========================================================================
