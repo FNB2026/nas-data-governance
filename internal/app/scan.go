@@ -439,11 +439,19 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		}
 	}
 	fullRunner := runner.New(in.Workers)
+fullHashSubmission:
 	for _, indexes := range bySizeQuick {
 		if len(indexes) < 2 {
 			continue
 		}
 		for _, i := range indexes {
+			// A remote source disappearing is a scan-level interruption. Stop
+			// queuing additional full hashes as soon as a worker confirms it,
+			// then let the already-running bounded set drain before persisting
+			// the resumable paused checkpoint below.
+			if networkUnavailable.Load() {
+				break fullHashSubmission
+			}
 			idx := i // capture for closure
 			fullRunner.Submit(ctx, func() error {
 				h, used, ferr := hashWithRetry(ctx, files[idx].Path, files[idx].Size, in.HashAttempts, in.HashRetryDelay, s.fullHash)

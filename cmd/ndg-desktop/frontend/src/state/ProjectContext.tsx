@@ -95,6 +95,14 @@ interface ProjectContextValue {
   setDefaultFullScan: (v: boolean) => void;
   setDefaultWorkers: (v: string) => void;
 
+  // First-run onboarding (global — persisted in the local settings store)
+  onboardingDone: boolean;
+  dismissOnboarding: () => void;
+  /** Re-show the first-run onboarding from Settings → 常规. */
+  restartOnboarding: () => void;
+  gettingStartedDone: boolean;
+  dismissGettingStarted: () => void;
+
   // Actions
   setProjectPath: (path: string) => void;
   openProject: (readWrite: boolean) => Promise<void>;
@@ -180,6 +188,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const setDefaultWorkers = useCallback((v: string) => {
     setDefaultWorkersState(v);
     saveSettings({ ...loadSettings(), defaultWorkers: v });
+  }, []);
+
+  // ---- First-run onboarding ----
+
+  const [onboardingDone, setOnboardingDone] = useState<boolean>(
+    () => loadSettings().onboardingDone,
+  );
+  const [gettingStartedDone, setGettingStartedDone] = useState<boolean>(
+    () => loadSettings().gettingStartedDone,
+  );
+
+  const dismissOnboarding = useCallback(() => {
+    setOnboardingDone(true);
+    saveSettings({ ...loadSettings(), onboardingDone: true });
+  }, []);
+
+  const restartOnboarding = useCallback(() => {
+    setOnboardingDone(false);
+    saveSettings({ ...loadSettings(), onboardingDone: false });
+  }, []);
+
+  const dismissGettingStarted = useCallback(() => {
+    setGettingStartedDone(true);
+    saveSettings({ ...loadSettings(), gettingStartedDone: true });
   }, []);
 
   const displayPath = useCallback(
@@ -690,6 +722,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     defaultWorkers,
     setDefaultFullScan,
     setDefaultWorkers,
+    onboardingDone,
+    dismissOnboarding,
+    restartOnboarding,
+    gettingStartedDone,
+    dismissGettingStarted,
     setProjectPath,
     openProject,
     openExisting,

@@ -1,0 +1,384 @@
+/*
+ * UI-P7: Settings information architecture, About identity page,
+ * first-run onboarding and the getting-started step rail.
+ * All colors and spacing reference the tokens in styles/tokens.css.
+ */
+
+/* ============================================================
+   Settings — five-group information architecture (UI-P7-A)
+   ============================================================ */
+
+.card h3 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+}
+
+.card-header-row h3 {
+  margin-bottom: 0;
+}
+
+.settings-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+}
+
+.settings-toc-item {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card-bg);
+}
+
+.settings-toc-item:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-section {
+  scroll-margin-top: var(--space-xl);
+}
+
+.settings-section-desc {
+  margin-bottom: var(--space-lg);
+}
+
+.settings-subhead {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin: var(--space-lg) 0 var(--space-sm);
+}
+
+.settings-subhead:first-child {
+  margin-top: 0;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+.settings-recent-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.settings-recent-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+}
+
+.settings-recent-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.settings-recent-path {
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.settings-guarantee-table {
+  margin-top: var(--space-md);
+}
+
+/* ============================================================
+   About — product identity (UI-P7-B)
+   ============================================================ */
+
+.about-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+}
+
+.about-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.about-identity-text {
+  min-width: 0;
+}
+
+.about-name {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.about-tagline {
+  font-size: var(--font-size-sm);
+}
+
+.about-links {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.about-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  margin-top: 0;
+  text-align: left;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  min-width: 9rem;
+}
+
+.about-link:hover {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.about-link-label {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.about-link-hint {
+  font-size: var(--font-size-xs);
+}
+
+/* ============================================================
+   Getting-started rail (UI-P7-C)
+   ============================================================ */
+
+.getting-started-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.getting-started-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 1 1 11rem;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.getting-started-step--done {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+.getting-started-index {
+  display: grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  flex-shrink: 0;
+}
+
+.getting-started-step--done .getting-started-index {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--text-on-accent);
+}
+
+.getting-started-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.getting-started-label {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.getting-started-hint {
+  font-size: var(--font-size-xs);
+}
+
+.getting-started-step .btn-sm {
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   First-run onboarding overlay (UI-P7-C)
+   ============================================================ */
+
+.onboarding-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  background: var(--scrim);
+  z-index: var(--z-modal);
+}
+
+.onboarding-panel {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--card-bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.onboarding-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.onboarding-title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.onboarding-close {
+  margin-top: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-size-xl);
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.onboarding-close:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.onboarding-lead {
+  margin: 0;
+}
+
+.onboarding-points,
+.onboarding-safety-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.onboarding-points li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: var(--space-md);
+  border-left: 2px solid var(--accent-bg-active);
+}
+
+.onboarding-point-title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.onboarding-point-body {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.onboarding-actions button {
+  margin-top: 0;
+}
+
+.onboarding-safety {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+}
+
+.onboarding-safety-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.onboarding-error {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--error-bg);
+  color: var(--error);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.onboarding-footnote {
+  margin: 0;
+  font-size: var(--font-size-xs);
+}
+
+/* Minimum supported window is 1180x720: the overlay must fit without
+   clipping the primary action. */
+@media (max-height: 780px) {
+  .onboarding-backdrop {
+    padding: var(--space-md);
+  }
+
+  .onboarding-panel {
+    padding: var(--space-lg);
+    gap: var(--space-sm);
+  }
+}

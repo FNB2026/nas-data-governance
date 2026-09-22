@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import CopyButton from "../components/CopyButton";
+import ErrorState from "../components/ErrorState";
+import LoadingState from "../components/LoadingState";
+import EmptyState from "../components/EmptyState";
+import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
@@ -62,6 +66,17 @@ export default function ExecutionCenterPage() {
   const { capabilities, isReadWrite, dataRevision, pushToast } = useProject();
 
   const [activeTab, setActiveTab] = useState<ExecTab>("plans");
+
+  // Write affordances (quarantine execute / purge) are gated by
+  // capability: read-only mode or an active recovery lock both block new
+  // writes while the recovery tab stays usable.
+  const execWriteDisabled =
+    !capabilities.can_execute_quarantine || !capabilities.can_execute_purge;
+  const execDisabledReason =
+    capabilities.disabled_reasons?.["execution-center"] ??
+    (!isReadWrite
+      ? "只读模式，无法执行写操作"
+      : "恢复锁激活中，请先处理未完成执行");
 
   // Plan execution data
   const [allPlans, setAllPlans] = useState<wails.PlanDTO[]>([]);
@@ -166,6 +181,7 @@ export default function ExecutionCenterPage() {
   // ---- Plan execution actions ----
 
   const approvedPlans = allPlans.filter((p) => p.state === "APPROVED");
+  const hasSelectedPlans = selectedPlanIds.size > 0;
 
   const handleTogglePlan = (planId: string) => {
     setSelectedPlanIds((prev) => {
@@ -467,6 +483,13 @@ export default function ExecutionCenterPage() {
         </button>
       </div>
 
+      <section className="exec-safety-flow" aria-label="隔离执行安全前置链">
+        <div className="exec-safety-step exec-safety-step--complete"><strong>1. 已批准</strong><span>{approvedPlans.length} 个计划可供选择</span></div>
+        <div className={`exec-safety-step ${hasSelectedPlans ? "exec-safety-step--complete" : ""}`}><strong>2. 执行前校验</strong><span>{hasSelectedPlans ? "已选择计划；仍需填写隔离与源根目录" : "先选择已批准计划"}</span></div>
+        <div className={`exec-safety-step ${dryRunCompleted ? "exec-safety-step--complete" : ""}`}><strong>3. 试运行</strong><span>{dryRunCompleted ? "已通过，可进入隔离执行" : "通过后才能隔离"}</span></div>
+        <div className={`exec-safety-step ${dryRunCompleted ? "exec-safety-step--ready" : ""}`}><strong>4. 隔离并验证</strong><span>隔离可恢复，绝不等同于删除</span></div>
+      </section>
+
       {/* ---- Plans execution tab ---- */}
       {activeTab === "plans" && (
         <div className="exec-tab-content">
@@ -498,15 +521,14 @@ export default function ExecutionCenterPage() {
               </div>
             )}
           </div>
+          <p className="exec-preflight-hint">隔离执行会先检查计划是否陈旧。试运行不写入源目录；通过后才可执行隔离。</p>
 
-          {plansError && <p className="error" role="alert">{plansError}</p>}
-
-          {approvedPlans.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">
-                {plansLoading ? "加载中…" : "暂无可执行的已批准计划。请在「治理复核」页面生成并批准计划。"}
-              </p>
-            </div>
+          {plansError ? (
+            <ErrorState message={plansError} />
+          ) : plansLoading && approvedPlans.length === 0 ? (
+            <LoadingState />
+          ) : approvedPlans.length === 0 ? (
+            <EmptyState title="暂无数据" hint="暂无可执行的已批准计划。请在「治理复核」页面生成并批准计划。" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -569,14 +591,14 @@ export default function ExecutionCenterPage() {
                 onClick={() => void handleExecutePlans(true)}
                 disabled={executingPlans || selectedPlanIds.size === 0 || !capabilities.can_execute_quarantine}
               >
-                {executingPlans ? "执行中…" : "试运行"}
+                {executingPlans ? "执行中…" : "执行前试运行"}
               </button>
               <button
                 className="btn-sm"
                 onClick={() => void handleExecutePlans(false)}
                 disabled={executingPlans || selectedPlanIds.size === 0 || !dryRunCompleted || !capabilities.can_execute_quarantine}
               >
-                {executingPlans ? "执行中…" : "执行选中计划"}
+                {executingPlans ? "执行中…" : "执行隔离"}
               </button>
               {!dryRunCompleted && selectedPlanIds.size > 0 && (
                 <span className="muted">请先完成试运行</span>
@@ -624,11 +646,12 @@ export default function ExecutionCenterPage() {
             </div>
           )}
 
-          {/* Read-only notice */}
-          {!isReadWrite && (
-            <div className="exec-readonly-notice">
-              只读模式 — 计划执行需要读写模式
-            </div>
+          {/* Write capability notice */}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="隔离执行与清理需要读写模式且无恢复锁；计划列表仍可查看。"
+            />
           )}
         </div>
       )}
@@ -636,6 +659,10 @@ export default function ExecutionCenterPage() {
       {/* ---- Quarantine tab ---- */}
       {activeTab === "quarantine" && (
         <div className="exec-tab-content">
+          <section className="exec-quarantine-notice">
+            <strong>隔离是默认的可恢复治理动作</strong>
+            <span>文件先进入隔离区并保留验证与恢复路径；这里不会直接删除源数据。</span>
+          </section>
           <div className="exec-toolbar">
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">全部状态</option>
@@ -666,12 +693,19 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {quarantineError && <p className="error" role="alert">{quarantineError}</p>}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="创建恢复草案、批准与执行需要读写模式且无恢复锁；隔离项查看不受影响。"
+            />
+          )}
 
-          {filteredItems.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">{quarantineLoading ? "加载中…" : "暂无隔离项"}</p>
-            </div>
+          {quarantineError ? (
+            <ErrorState message={quarantineError} />
+          ) : quarantineLoading && filteredItems.length === 0 ? (
+            <LoadingState />
+          ) : filteredItems.length === 0 ? (
+            <EmptyState title="暂无数据" hint="暂无隔离项" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -713,9 +747,9 @@ export default function ExecutionCenterPage() {
                               <button
                                 className="btn-sm"
                                 onClick={() => void handleCreateRestorePlan(item.id)}
-                                disabled={restoring}
+                                disabled={restoring || execWriteDisabled}
                               >
-                                创建恢复
+                                创建恢复草案
                               </button>
                             )}
                             {restorePlan && (
@@ -727,6 +761,7 @@ export default function ExecutionCenterPage() {
                                   <button
                                     className="btn-sm"
                                     onClick={() => void handleApproveRestore(restorePlan.id, restorePlan.approval_digest)}
+                                    disabled={execWriteDisabled}
                                   >
                                     批准
                                   </button>
@@ -736,14 +771,14 @@ export default function ExecutionCenterPage() {
                                     <button
                                       className="btn-sm secondary"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, true)}
-                                      disabled={restoring}
+                                      disabled={restoring || execWriteDisabled}
                                     >
                                       试运行
                                     </button>
                                     <button
                                       className="btn-sm"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, false)}
-                                      disabled={restoring}
+                                      disabled={restoring || execWriteDisabled}
                                     >
                                       执行
                                     </button>
@@ -766,11 +801,15 @@ export default function ExecutionCenterPage() {
       {/* ---- Purge tab ---- */}
       {activeTab === "purge" && (
         <div className="exec-tab-content">
+          <section className="exec-danger-zone" role="note">
+            <strong>永久清理危险区</strong>
+            <span>清理独立于隔离执行：只有到期隔离项才有资格进入草案。批准、试运行、逐字确认后才可不可逆清理。</span>
+          </section>
           <div className="exec-toolbar">
             <button
               className="btn-sm"
               onClick={() => void handleCreatePurgePlans()}
-              disabled={purging || !isReadWrite}
+              disabled={purging || !isReadWrite || !capabilities.can_execute_purge}
             >
               {purging ? "生成中…" : "生成清理草案"}
             </button>
@@ -785,12 +824,17 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {purgeError && <p className="error" role="alert">{purgeError}</p>}
+          {execWriteDisabled && (
+            <DisabledNotice
+              reason={execDisabledReason}
+              hint="生成、批准与执行清理计划需要读写模式且无恢复锁。"
+            />
+          )}
 
-          {purgePlans.length === 0 ? (
-            <div className="empty-state">
-              <p className="muted">点击「生成清理草案」为到期隔离项创建清理计划</p>
-            </div>
+          {purgeError ? (
+            <ErrorState message={purgeError} />
+          ) : purgePlans.length === 0 ? (
+            <EmptyState title="暂无数据" hint="点击「生成清理草案」为到期隔离项创建清理计划" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -828,6 +872,7 @@ export default function ExecutionCenterPage() {
                             <button
                               className="btn-sm"
                               onClick={() => void handleApprovePurge(plan.id, plan.approval_digest)}
+                              disabled={execWriteDisabled}
                             >
                               批准
                             </button>
@@ -837,7 +882,7 @@ export default function ExecutionCenterPage() {
                               <button
                                 className="btn-sm secondary"
                                 onClick={() => void handleExecutePurge(plan.id, plan.approval_digest, true)}
-                                disabled={purging}
+                                disabled={purging || execWriteDisabled}
                               >
                                 试运行
                               </button>
@@ -863,11 +908,12 @@ export default function ExecutionCenterPage() {
                                 )}
                                 disabled={
                                   purging ||
+                                  execWriteDisabled ||
                                   !plan.dry_run_verified_at ||
                                   purgeConfirmations[plan.id] !== plan.confirmation_text
                                 }
                               >
-                                执行
+                                永久清理
                               </button>
                               {!plan.dry_run_verified_at && <span className="muted">请先完成试运行</span>}
                             </>
@@ -910,7 +956,7 @@ export default function ExecutionCenterPage() {
 
             <div className="exec-recovery-actions">
               <h3>恢复操作</h3>
-              <p className="muted">以下操作会将卡住的计划恢复至安全终态（回滚或重置）</p>
+              <p className="muted">以下操作会将卡住的计划恢复至安全终态（回滚或重置）。恢复锁激活时，此路径仍保持可用。</p>
               <div className="exec-recovery-buttons">
                 <button
                   className="btn-sm"

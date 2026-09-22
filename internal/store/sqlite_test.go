@@ -401,6 +401,53 @@ func TestAppendAndListLogs(t *testing.T) {
 	}
 }
 
+func TestAuditQueriesAllPlansAndExactFilter(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"audit-a", "audit-b"} {
+		if err := s.CreateTask(ctx, domain.OperationTask{ID: id, RootPath: "/synthetic", State: "x", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		actions := []domain.PlannedAction{{Path: "/synthetic/" + id, Action: domain.OperationQuarantine}}
+		if err := s.SavePlans(ctx, id, []domain.OperationPlan{{ID: id, State: domain.PlanDraft, Risk: domain.RiskLow, Actions: actions}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AppendLog(ctx, id, "plan_started", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.BeginJournal(ctx, id, id, actions); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		filter string
+		count  int
+	}{{"", 2}, {"audit-a", 1}, {"missing", 0}} {
+		t.Run("filter="+tc.filter, func(t *testing.T) {
+			logs, err := s.ListLogs(ctx, tc.filter)
+			if err != nil || len(logs) != tc.count {
+				t.Fatalf("logs: count=%d err=%v", len(logs), err)
+			}
+			entries, err := s.ListJournalAll(ctx, tc.filter)
+			if err != nil || len(entries) != tc.count {
+				t.Fatalf("journal: count=%d err=%v", len(entries), err)
+			}
+			if tc.filter != "" {
+				for _, l := range logs {
+					if l.PlanID != tc.filter {
+						t.Fatalf("unexpected log plan %q", l.PlanID)
+					}
+				}
+				for _, e := range entries {
+					if e.PlanID != tc.filter {
+						t.Fatalf("unexpected journal plan %q", e.PlanID)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestSaveContextRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

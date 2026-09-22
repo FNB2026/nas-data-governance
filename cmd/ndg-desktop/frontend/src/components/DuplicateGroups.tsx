@@ -2,6 +2,9 @@ import { wails } from "../wailsjs/go/models";
 import { formatBytes, shortHash } from "../lib/utils";
 import { useProject } from "../state/ProjectContext";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import LoadingState from "./LoadingState";
+import ErrorState from "./ErrorState";
+import EmptyState from "./EmptyState";
 import {
   computeCapacity,
   deriveRiskLevel,
@@ -92,15 +95,19 @@ export default function DuplicateGroups({
 
       {/* Group list */}
       {groupsError ? (
-        <p className="error" role="alert">{groupsError}</p>
-      ) : groups.length === 0 && !groupsLoading ? (
+        <ErrorState message={groupsError} />
+      ) : groups.length === 0 && groupsLoading ? (
         <div className="empty-state">
-          <p className="muted">未检测到重复文件，或尚未扫描</p>
-          <p className="muted">完成扫描后，内容相同的文件将在此显示，附带目录语境与物理身份证据。</p>
+          <LoadingState />
         </div>
+      ) : groups.length === 0 ? (
+        <EmptyState
+          title="暂无数据"
+          hint="未检测到重复文件，或尚未扫描。完成扫描后，内容相同的文件将在此显示，附带目录语境与物理身份证据。"
+        />
       ) : (
         <>
-          <div className="dup-list-wrap">
+          <div className="dup-list-wrap table-wrap">
             <table className="data-table dup-table">
               <thead>
                 <tr>

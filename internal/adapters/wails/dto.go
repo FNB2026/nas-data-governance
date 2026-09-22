@@ -11,6 +11,7 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/events"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
+	"github.com/FNB2026/nas-data-governance/internal/planner"
 	"github.com/FNB2026/nas-data-governance/internal/query"
 	"github.com/FNB2026/nas-data-governance/internal/report"
 	"github.com/FNB2026/nas-data-governance/internal/store"
@@ -73,6 +74,12 @@ type FileItem struct {
 	// Format info
 	FormatKind string `json:"format_kind,omitempty"`
 	FormatMIME string `json:"format_mime,omitempty"`
+	// Directory context & retention (UI-P3): computed on the fly from the
+	// copy path by planner.ExplainGroup, mirroring the review-plan decision.
+	DirContext       *domain.DirectoryContext `json:"dir_context,omitempty"`
+	RetainScore      *domain.RetentionScore   `json:"retain_score,omitempty"`
+	RetainReason     string                   `json:"retain_reason,omitempty"`
+	IsRetainSelected bool                     `json:"is_retain_selected"`
 }
 
 // GroupDetailResponse is the output DTO for GetGroupDetail.
@@ -257,9 +264,26 @@ func mapFileItem(f domain.FileInstance) FileItem {
 }
 
 func mapGroupDetail(d query.GroupDetail) GroupDetailResponse {
+	group := domain.DuplicateGroup{
+		GroupID: d.GroupID,
+		SHA256:  d.SHA256,
+		Size:    d.Size,
+		Files:   d.Files,
+	}
+	exps := planner.ExplainGroup(group, time.Now())
 	files := make([]FileItem, len(d.Files))
 	for i, f := range d.Files {
-		files[i] = mapFileItem(f)
+		item := mapFileItem(f)
+		if i < len(exps) {
+			exp := exps[i]
+			ctx := exp.Context
+			score := exp.Score
+			item.DirContext = &ctx
+			item.RetainScore = &score
+			item.RetainReason = exp.RetainReason
+			item.IsRetainSelected = exp.RetainSelected
+		}
+		files[i] = item
 	}
 	return GroupDetailResponse{
 		GroupSummary: mapGroupSummary(d.DuplicateGroupSummary),

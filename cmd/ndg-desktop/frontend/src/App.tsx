@@ -6,9 +6,12 @@ import { ProjectProvider, useProject } from "./state/ProjectContext";
 import { isRouteEnabled } from "./app/capability";
 import { DEFAULT_ROUTE, type AppRoute } from "./app/routes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { hasWailsRuntime } from "./lib/utils";
+import { api } from "./api/client";
 import AppShell from "./components/AppShell";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ToastContainer from "./components/Toast";
+import OnboardingOverlay from "./components/OnboardingOverlay";
 import SourcesPage from "./pages/SourcesPage";
 import ScanJobsPage from "./pages/ScanJobsPage";
 import DuplicateResultsPage from "./pages/DuplicateResultsPage";
@@ -17,21 +20,31 @@ import ExecutionCenterPage from "./pages/ExecutionCenterPage";
 import AuditRecoveryPage from "./pages/AuditRecoveryPage";
 import SettingsPage from "./pages/SettingsPage";
 
-function renderPage(route: AppRoute) {
+function renderPage(route: AppRoute, onRouteChange: (route: AppRoute) => void) {
   switch (route) {
-    case "sources": return <SourcesPage />;
+    case "sources": return <SourcesPage onNavigate={onRouteChange} />;
     case "scan-jobs": return <ScanJobsPage />;
     case "duplicate-results": return <DuplicateResultsPage />;
-    case "governance-review": return <GovernanceReviewPage />;
+    case "governance-review": return <GovernanceReviewPage onNavigate={onRouteChange} />;
     case "execution-center": return <ExecutionCenterPage />;
     case "audit-recovery": return <AuditRecoveryPage />;
     case "settings": return <SettingsPage />;
-    default: return <SourcesPage />;
+    default: return <SourcesPage onNavigate={onRouteChange} />;
   }
 }
 
 function AppContent() {
-  const { capabilities, refreshProject, project, pendingScanRoot } = useProject();
+  const {
+    capabilities,
+    refreshProject,
+    project,
+    pendingScanRoot,
+    error,
+    busy,
+    onboardingDone,
+    dismissOnboarding,
+    createNewProject,
+  } = useProject();
   const [activeRoute, setActiveRoute] = useState<AppRoute>(DEFAULT_ROUTE);
 
   // Reset to default route if current route becomes disabled (e.g. project closed)
@@ -84,10 +97,47 @@ function AppContent() {
     onRefresh: project ? handleRefresh : undefined,
   });
 
+  // ---- First-run onboarding (UI-P7-C) ----
+  // Only ever shown when no project is open: once the user is inside a
+  // project the workflow rail takes over as the guide.
+
+  const handleOnboardingPick = useCallback(async (): Promise<string> => {
+    if (!hasWailsRuntime()) return "";
+    try {
+      return await api.project.pickDirectory("选择待扫描目录");
+    } catch {
+      return "";
+    }
+  }, []);
+
+  const handleOnboardingCreate = useCallback(
+    (scanRoot: string) => {
+      void createNewProject("", scanRoot);
+    },
+    [createNewProject],
+  );
+
+  const handleOnboardingUseExisting = useCallback(() => {
+    dismissOnboarding();
+    setActiveRoute("sources");
+  }, [dismissOnboarding]);
+
   return (
-    <AppShell activeRoute={activeRoute} onRouteChange={setActiveRoute}>
-      {renderPage(activeRoute)}
-    </AppShell>
+    <>
+      <AppShell activeRoute={activeRoute} onRouteChange={setActiveRoute}>
+        {renderPage(activeRoute, setActiveRoute)}
+      </AppShell>
+      {!project && !onboardingDone && (
+        <OnboardingOverlay
+          busy={busy}
+          error={error}
+          onPickDirectory={handleOnboardingPick}
+          onCreateProject={handleOnboardingCreate}
+          onUseExisting={handleOnboardingUseExisting}
+          onDismiss={dismissOnboarding}
+        />
+      )}
+    </>
   );
 }
 

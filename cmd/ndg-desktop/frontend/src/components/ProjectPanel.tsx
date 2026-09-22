@@ -5,6 +5,7 @@
 
 import { wails } from "../wailsjs/go/models";
 import { useProject } from "../state/ProjectContext";
+import ErrorState from "./ErrorState";
 
 export interface ProjectPanelProps {
   project: wails.ProjectInfo;
@@ -47,7 +48,7 @@ export default function ProjectPanel({
           <button className="secondary" disabled={busy} onClick={onCloseProject}>关闭项目</button>
         </div>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <ErrorState message={error} onRetry={onRefreshProject} />}
     </section>
   );
 }

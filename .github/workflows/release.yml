@@ -9,7 +9,7 @@ name: Release
 #   3. sign-notarize — Sign with Developer ID, notarize, staple, create DMG
 #   4. draft-release — Create GitHub Release with artifacts + SBOM
 #
-# Prerequisites (manual operations, see release-gates-v0.5.md R-09):
+# Prerequisites (manual operations and live status: docs/release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md):
 #   - GitHub Environment "release-macos" with required reviewers
 #   - Repository secrets configured in the release-macos environment:
 #     * DEVELOPER_ID_CERTIFICATE_P12  — base64-encoded .p12 certificate
@@ -163,6 +163,15 @@ jobs:
             -trimpath \
             -platform darwin/arm64 \
             -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME} -X ${VERSION_PKG}.Channel=${CHANNEL}"
+
+          # wails build runs from cmd/ndg-desktop. Return to the checkout root
+          # before comparing the tracked generated binding, or Git receives a
+          # nonexistent doubled path and silently sees no diff.
+          cd "$GITHUB_WORKSPACE"
+          git diff --exit-code -- cmd/ndg-desktop/frontend/src/wailsjs/go/models.ts || {
+            echo "FAIL — generated Wails bindings are out of sync with the tracked model" >&2
+            exit 1
+          }
 
       - name: Verify .app was created and executable
         run: |

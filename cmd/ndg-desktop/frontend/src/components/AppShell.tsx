@@ -18,7 +18,6 @@ export default function AppShell({
   children,
 }: AppShellProps) {
   const {
-    version,
     project,
     isReadWrite,
     capabilities,
@@ -26,6 +25,7 @@ export default function AppShell({
     scanProgress,
     connectionStatus,
     displayPath,
+    refreshProject,
   } = useProject();
 
   const modeLabel = !project
@@ -35,48 +35,58 @@ export default function AppShell({
       : "只读";
 
   const scanActive = activeJobId !== null;
+  const projectName = project
+    ? displayPath(project.path)?.split("/").pop() || "项目"
+    : "尚未打开项目";
 
   return (
     <div className="app-shell">
-      <header className="app-header" key="header">
+      {/* UI-P8-B: keyboard users can jump past the header/sidebar straight
+          into the page content. Visible only while focused. */}
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
+      <header className="app-header">
         <div className="app-header-left">
-          <h1>NDG 数据治理</h1>
-          {project && (
-            <span className="header-project-name">
-              {displayPath(project.path)?.split("/").pop() || "项目"}
-            </span>
-          )}
+          <div className="app-brand" aria-label="NDG 数据治理">
+            <span className="app-brand-mark" aria-hidden="true">N</span>
+            <span className="app-brand-name">NDG</span>
+          </div>
+          <span className="header-project-name" title={project ? displayPath(project.path) : undefined}>
+            {projectName}
+          </span>
           <span className={`mode-badge mode-badge--${capabilities.project_mode}`}>
             {modeLabel}
           </span>
           {scanActive && scanProgress && (
-            <span className="header-scan-indicator">
-              扫描中 {scanProgress.processed.toLocaleString()} /{" "}
+            <span className="header-scan-indicator" role="status">
+              扫描中 · 已处理 {scanProgress.processed.toLocaleString()} /{" "}
               {scanProgress.discovered.toLocaleString()}
+            </span>
+          )}
+          {capabilities.recovery_lock_active && (
+            <span className="header-recovery-indicator" role="status">
+              需要恢复处理
             </span>
           )}
           {connectionStatus === "reconnecting" && (
             <span className="header-conn-indicator header-conn-indicator--reconnecting" role="status">
-              重连中…
+              正在重新连接 NAS…
             </span>
           )}
           {connectionStatus === "disconnected" && (
-            <span className="header-conn-indicator header-conn-indicator--disconnected" role="status">
-              已断开
-            </span>
-          )}
-        </div>
-        <div className="app-header-right">
-          {version && (
-            <span className="version-badge">
-              v{version.version} ({version.commit})
-            </span>
+            <div className="header-connection-alert" role="status">
+              <span>NAS 连接中断</span>
+              <button type="button" className="header-status-action" onClick={() => void refreshProject()}>
+                重新检查
+              </button>
+            </div>
           )}
         </div>
       </header>
 
       <div className="app-body">
-        <nav className="app-sidebar">
+        <nav className="app-sidebar" aria-label="主导航">
           {NAV_ITEMS.map((item) => {
             const enabled = isRouteEnabled(item.id, capabilities);
             const reason = capabilities.disabled_reasons[item.id];
@@ -88,6 +98,8 @@ export default function AppShell({
                   !enabled ? "nav-item--disabled" : ""
                 }`}
                 disabled={!enabled}
+                aria-current={active ? "page" : undefined}
+                aria-label={`${item.label}：${item.description}${!enabled && reason ? `（${reason}）` : ""}`}
                 title={!enabled ? reason : undefined}
                 onClick={() => enabled && onRouteChange(item.id)}
               >
@@ -98,7 +110,9 @@ export default function AppShell({
           })}
         </nav>
 
-        <main className="app-content">{children}</main>
+        <main className="app-content" id="main-content" tabIndex={-1}>
+          {children}
+        </main>
       </div>
 
       <footer className="app-footer">

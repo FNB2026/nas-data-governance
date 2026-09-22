@@ -3,8 +3,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
-import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import {
+  hasWailsRuntime,
+  formatBytes,
+  shortHash,
+  formatDateTime,
+  friendlyError,
+  stateBadgeClass,
+} from "../lib/utils";
 import CopyButton from "../components/CopyButton";
+import ErrorState from "../components/ErrorState";
+import LoadingState from "../components/LoadingState";
+import EmptyState from "../components/EmptyState";
+import DisabledNotice from "../components/DisabledNotice";
 import { api } from "../api/client";
 import { wails } from "../wailsjs/go/models";
 
@@ -30,10 +41,202 @@ const LOG_EVENT_LABELS: Record<string, string> = {
   quarantine_registered: "隔离注册",
 };
 
+// Action type labels (aligned with domain OperationType in
+// internal/domain/model.go).
+export const ACTION_LABELS: Record<string, string> = {
+  KEEP: "保留",
+  MOVE: "移动",
+  COPY: "复制",
+  RENAME: "重命名",
+  DELETE: "删除",
+  QUARANTINE: "隔离",
+  SKIP: "跳过",
+  REVIEW: "复核",
+};
+
+// Action tone for badge coloring; only the destructive/notable ones are tinted.
+const ACTION_TONES: Record<string, string> = {
+  DELETE: "delete",
+  QUARANTINE: "quarantine",
+  KEEP: "keep",
+};
+
+const DETAIL_KEY_LABELS: Record<string, string> = {
+  status: "状态",
+  final_state: "最终状态",
+  error_type: "错误类型",
+  reason: "原因",
+  action: "动作",
+};
+
+// Known executor error category codes → user-facing labels. Unknown short
+// codes render as-is; values that look like full error messages go through
+// friendlyError — error type and error message are two different layers.
+export const ERROR_TYPE_LABELS: Record<string, string> = {
+  cancelled: "已取消",
+  preflight_failed: "预检失败",
+  unsafe_staging_path: "暂存路径不安全",
+  staging_collision: "暂存目录冲突",
+  staging_directory_failed: "暂存目录创建失败",
+  stage_move_failed: "暂存移动失败",
+  journal_begin_failed: "执行日志登记失败",
+  journal_staged_failed: "暂存登记失败",
+  journal_done_failed: "执行日志更新失败",
+  journal_commit_failed: "提交确认失败",
+  journal_commit_pending_failed: "提交待定登记失败",
+  journal_complete_failed: "完成登记失败",
+  staged_verification_failed: "暂存校验失败",
+  purge_remove_failed: "清理删除失败",
+};
+
+/** Keys that carry paths; any value under these keys must be masked. */
+const PATH_KEY_RE = /^(source|target|retain|root|.*path)$/i;
+
+/** Full error messages contain whitespace; short category codes do not. */
+const MESSAGE_LIKE_RE = /\s/;
+
+export type DetailRowKind = "badge" | "path" | "text";
+
+export interface DetailRow {
+  label: string;
+  kind: DetailRowKind;
+  text: string;
+  badgeClass?: string;
+}
+
+export function errorTypeLabel(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) return "—";
+  if (ERROR_TYPE_LABELS[value]) return ERROR_TYPE_LABELS[value];
+  // Full error message → friendly message; short code stays as-is.
+  return MESSAGE_LIKE_RE.test(value) ? friendlyError(value) : value;
+}
+
+/**
+ * Pure per-key rendering rule for one audit detail entry. The mask function
+ * is injected by the caller (the page passes displayPath), keeping this
+ * function free of component/chrome dependencies.
+ */
+export function renderDetailRow(
+  key: string,
+  value: unknown,
+  maskPathFn: (path: string) => string,
+): DetailRow {
+  const label = DETAIL_KEY_LABELS[key] ?? key;
+  if (typeof value === "object" && value !== null) {
+    return { label, kind: "text", text: "…" };
+  }
+  const raw = String(value);
+  if (key === "status" || key === "final_state") {
+    return { label, kind: "badge", text: raw, badgeClass: stateBadgeClass(raw) };
+  }
+  if (key === "error_type") {
+    return { label, kind: "text", text: errorTypeLabel(value) };
+  }
+  if (PATH_KEY_RE.test(key)) {
+    return { label, kind: "path", text: maskPathFn(raw) };
+  }
+  return { label, kind: "text", text: raw };
+}
+
+/**
+ * Recursive privacy choke for raw detail JSON: masks every path-semantic
+ * key's value and any string that looks like a path (contains / or \),
+ * no matter how deeply nested. Prefer over-masking over leaking a path.
+ */
+export function maskDetailJson(value: unknown, maskFn: (path: string) => string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskDetailJson(item, maskFn));
+  }
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] =
+        PATH_KEY_RE.test(key) && typeof item === "string"
+          ? maskFn(item)
+          : maskDetailJson(item, maskFn);
+    }
+    return out;
+  }
+  if (typeof value === "string" && /[/\\]/.test(value)) {
+    return maskFn(value);
+  }
+  return value;
+}
+
+// ---- Summary & recovery guidance (UI-P6) ----
+// The journal is the single source of truth for failure / rollback counts;
+// audit logs only explain events and never participate in the tallies.
+
+/** rollback_status values that mean a rollback actually occurred. */
+const ROLLBACK_OCCURRED: ReadonlySet<string> = new Set(["done", "completed", "rolled_back"]);
+
+export interface AuditSummary {
+  logCount: number;
+  journalCount: number;
+  failedCount: number;
+  rollbackCount: number;
+  restorePending: number;
+  purgeRecoverable: number;
+}
+
+export function computeSummary(
+  logs: readonly wails.OperationLogDTO[],
+  journal: readonly wails.JournalEntryDTO[],
+  recoveryStatus: wails.RecoveryStatusDTO | null,
+): AuditSummary {
+  return {
+    logCount: logs.length,
+    journalCount: journal.length,
+    failedCount: journal.filter((entry) => entry.status === "failed").length,
+    rollbackCount: journal.filter(
+      (entry) => !!entry.rollback_status && ROLLBACK_OCCURRED.has(entry.rollback_status),
+    ).length,
+    restorePending: recoveryStatus?.restore_pending_count ?? 0,
+    purgeRecoverable: recoveryStatus?.purge_recoverable_count ?? 0,
+  };
+}
+
+export interface RecoveryStep {
+  index: number;
+  label: string;
+  text: string;
+  ready: boolean;
+}
+
+export function recoverySteps(
+  recoveryStatus: wails.RecoveryStatusDTO | null,
+  quarantineRoot: string,
+  sourceRoots: string,
+): RecoveryStep[] {
+  if (!recoveryStatus) return [];
+  const hasBothRoots = quarantineRoot.trim().length > 0 && sourceRoots.trim().length > 0;
+  const hasQuarantineRoot = quarantineRoot.trim().length > 0;
+  return [
+    {
+      index: 1,
+      label: "恢复普通执行",
+      text: `${recoveryStatus.source_executing_count} 步待处理`,
+      ready: recoveryStatus.source_executing_count > 0,
+    },
+    {
+      index: 2,
+      label: "恢复隔离还原",
+      text: `${recoveryStatus.restore_pending_count} 步待处理`,
+      ready: recoveryStatus.restore_pending_count > 0 && hasBothRoots,
+    },
+    {
+      index: 3,
+      label: "恢复永久清理",
+      text: `${recoveryStatus.purge_recoverable_count} 步待处理`,
+      ready: recoveryStatus.purge_recoverable_count > 0 && hasQuarantineRoot,
+    },
+  ];
+}
+
 // ---- Component ----
 
 export default function AuditRecoveryPage() {
-  const { capabilities, dataRevision, isReadWrite, pushToast, refreshRecoveryLock } = useProject();
+  const { capabilities, dataRevision, isReadWrite, pushToast, refreshRecoveryLock, displayPath } = useProject();
 
   // Plan filter
   const [planFilter, setPlanFilter] = useState<string>("");
@@ -168,6 +371,10 @@ export default function AuditRecoveryPage() {
     ...journal.map((j) => j.plan_id),
   ])).sort();
 
+  // Summary & guidance (UI-P6): derived, read-only.
+  const summary = computeSummary(logs, journal, recoveryStatus);
+  const steps = recoverySteps(recoveryStatus, quarantineRoot, sourceRoots);
+
   // ---- Render ----
 
   if (!capabilities.project_open) {
@@ -188,11 +395,57 @@ export default function AuditRecoveryPage() {
         <p className="muted">操作审计日志、执行 Journal 与恢复状态</p>
       </div>
 
+      {/* Summary overview (UI-P6) — journal is the single source of truth */}
+      <div className="ek-summary-grid" aria-label="审计与恢复概览">
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{logsLoading ? "—" : summary.logCount}</span>
+          <span className="ek-summary-label">审计日志</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.journalCount}</span>
+          <span className="ek-summary-label">执行条目</span>
+        </div>
+        <div className={`ek-summary-card${summary.failedCount > 0 ? " ek-summary-card--danger" : ""}`}>
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.failedCount}</span>
+          <span className="ek-summary-label">失败</span>
+        </div>
+        <div className={`ek-summary-card${summary.rollbackCount > 0 ? " ek-summary-card--danger" : ""}`}>
+          <span className="ek-summary-value">{journalLoading ? "—" : summary.rollbackCount}</span>
+          <span className="ek-summary-label">已回滚</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{recoveryStatus ? summary.restorePending : "—"}</span>
+          <span className="ek-summary-label">待隔离还原</span>
+        </div>
+        <div className="ek-summary-card">
+          <span className="ek-summary-value">{recoveryStatus ? summary.purgeRecoverable : "—"}</span>
+          <span className="ek-summary-label">可永久清理</span>
+        </div>
+      </div>
+
       {/* Recovery lock banner */}
       {recoveryStatus?.lock_active && (
         <div className="exec-lock-banner" role="alert">
           <strong>恢复锁激活</strong> — 共 {recoveryStatus.executing_count} 条未完成写入，请在本页完成恢复
         </div>
+      )}
+
+      {/* Recovery guidance (UI-P6): read-only step flow */}
+      {recoveryStatus?.lock_active && (
+        <section className="gov-workflow" aria-label="恢复指引">
+          {steps.map((step) => (
+            <div
+              key={step.index}
+              className={`gov-workflow-step${step.ready ? " gov-workflow-step--ready" : ""}`}
+            >
+              <span className="gov-workflow-number">{step.index}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <span>{step.text}</span>
+              </div>
+            </div>
+          ))}
+        </section>
       )}
 
       {recoveryStatus?.lock_active && (
@@ -225,7 +478,10 @@ export default function AuditRecoveryPage() {
               {recoveryResult && <pre className="exec-recovery-log">{recoveryResult}</pre>}
             </>
           ) : (
-            <p className="muted">请以读写模式重新打开项目后执行恢复。</p>
+            <DisabledNotice
+              reason="只读模式，无法执行写操作"
+              hint="恢复操作需要读写模式，请以读写模式重新打开项目后执行恢复。"
+            />
           )}
         </section>
       )}
@@ -253,11 +509,12 @@ export default function AuditRecoveryPage() {
         {/* Audit logs panel */}
         <div className="audit-panel">
           <h3>操作审计 ({logs.length})</h3>
-          {logsError && <p className="error" role="alert">{logsError}</p>}
-          {logsLoading ? (
-            <p className="muted">加载中…</p>
+          {logsError ? (
+            <ErrorState message={logsError} />
+          ) : logsLoading ? (
+            <LoadingState />
           ) : logs.length === 0 ? (
-            <p className="muted">暂无审计日志</p>
+            <EmptyState title="暂无数据" hint="暂无审计日志" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -281,10 +538,24 @@ export default function AuditRecoveryPage() {
                           {LOG_EVENT_LABELS[log.event_type] || log.event_type}
                         </span>
                         {log.detail && Object.keys(log.detail).length > 0 && (
-                          <details className="audit-detail">
-                            <summary>详情</summary>
-                            <pre>{JSON.stringify(log.detail, null, 2)}</pre>
-                          </details>
+                          <div className="audit-detail-rows">
+                            {Object.entries(log.detail).map(([key, value]) => {
+                              if (typeof value === "object" && value !== null) return null;
+                              const row = renderDetailRow(key, value, displayPath);
+                              return (
+                                <div key={key} className="ek-detail-row">
+                                  <span className="ek-detail-key">{row.label}</span>
+                                  {row.kind === "badge" && row.badgeClass
+                                    ? <span className={row.badgeClass}>{row.text}</span>
+                                    : <span className={row.kind === "path" ? "ek-masked" : ""}>{row.text}</span>}
+                                </div>
+                              );
+                            })}
+                            <details className="audit-detail">
+                              <summary>详情（{Object.keys(log.detail).length} 项）</summary>
+                              <pre>{JSON.stringify(maskDetailJson(log.detail, displayPath), null, 2)}</pre>
+                            </details>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -301,11 +572,12 @@ export default function AuditRecoveryPage() {
         {/* Journal entries panel */}
         <div className="audit-panel">
           <h3>执行 Journal ({journal.length})</h3>
-          {journalError && <p className="error" role="alert">{journalError}</p>}
-          {journalLoading ? (
-            <p className="muted">加载中…</p>
+          {journalError ? (
+            <ErrorState message={journalError} />
+          ) : journalLoading ? (
+            <LoadingState />
           ) : journal.length === 0 ? (
-            <p className="muted">暂无 Journal 记录</p>
+            <EmptyState title="暂无数据" hint="暂无 Journal 记录" />
           ) : (
             <div className="table-wrap">
               <table className="data-table">
@@ -313,6 +585,8 @@ export default function AuditRecoveryPage() {
                   <tr>
                     <th>#</th>
                     <th>类型</th>
+                    <th>源路径</th>
+                    <th>目标路径</th>
                     <th>状态</th>
                     <th>回滚</th>
                     <th>大小</th>
@@ -325,7 +599,17 @@ export default function AuditRecoveryPage() {
                   {journal.slice(0, 100).map((entry, i) => (
                     <tr key={i}>
                       <td className="num">{entry.action_index}</td>
-                      <td className="mono">{entry.action_type}</td>
+                      <td>
+                        <span className={`ek-action-badge${ACTION_TONES[entry.action_type] ? ` ek-action-badge--${ACTION_TONES[entry.action_type]}` : ""}`}>
+                          {ACTION_LABELS[entry.action_type] || entry.action_type}
+                        </span>
+                      </td>
+                      <td className="path-cell" title={displayPath(entry.source_path)}>
+                        {displayPath(entry.source_path)}
+                      </td>
+                      <td className="path-cell" title={entry.target_path ? displayPath(entry.target_path) : undefined}>
+                        {entry.target_path ? displayPath(entry.target_path) : "—"}
+                      </td>
                       <td>
                         <span className={`journal-status journal-status--${entry.status}`}>
                           {JOURNAL_STATUS_LABELS[entry.status] || entry.status}
