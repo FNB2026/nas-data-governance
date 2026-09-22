@@ -68,11 +68,11 @@ type RetentionScore struct {
 // decision strings produced by planner.buildGroup so the UI never re-derives
 // policy.
 type CopyExplanation struct {
-	Path           string            `json:"path"`
-	Context        DirectoryContext  `json:"context"`
-	Score          RetentionScore    `json:"score"`
-	RetainReason   string            `json:"retain_reason"`
-	RetainSelected bool              `json:"retain_selected"`
+	Path           string           `json:"path"`
+	Context        DirectoryContext `json:"context"`
+	Score          RetentionScore   `json:"score"`
+	RetainReason   string           `json:"retain_reason"`
+	RetainSelected bool             `json:"retain_selected"`
 }
 
 // PhysicalIdentity captures the physical storage identity of a file instance.
