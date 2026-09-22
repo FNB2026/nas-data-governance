@@ -262,6 +262,10 @@ jobs:
       - name: Untar .app and verify executable permission
         run: |
           # B1: Untar the .app bundle and verify permissions were preserved.
+          # The cmd/ndg-desktop/build/bin directory is git-ignored, so it does
+          # not exist in a fresh checkout; create it before untar (tar -C
+          # fails with "could not chdir" when the target directory is absent).
+          mkdir -p cmd/ndg-desktop/build/bin/
           tar -xzf unsigned-app.tar.gz -C cmd/ndg-desktop/build/bin/
           rm -f unsigned-app.tar.gz
 
