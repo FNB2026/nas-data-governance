@@ -1,4 +1,6 @@
 import { wails } from "../wailsjs/go/models";
+import LoadingState from "./LoadingState";
+import ErrorState from "./ErrorState";
 import {
   formatDateTime,
   stateBadgeClass,
@@ -29,9 +31,9 @@ export default function JobDetail({
         <button className="btn-sm secondary" onClick={onClose}>关闭</button>
       </div>
       {jobDetailLoading ? (
-        <p className="muted">加载中…</p>
+        <LoadingState />
       ) : jobDetailError ? (
-        <p className="error" role="alert">{jobDetailError}</p>
+        <ErrorState message={jobDetailError} />
       ) : selectedJob ? (
         <>
           <div className="detail-summary">

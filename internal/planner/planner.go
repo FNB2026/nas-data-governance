@@ -27,6 +27,30 @@ func BuildAt(groups []domain.DuplicateGroup, now time.Time) []domain.OperationPl
 	return plans
 }
 
+// ExplainGroup returns per-copy directory context, retention score, and a
+// human-readable retention reason for one duplicate group. It reuses
+// buildGroup's decision strings so the group-detail view cannot fork from
+// review-plan policy. Pure function: no storage, no side effects.
+func ExplainGroup(group domain.DuplicateGroup, now time.Time) []domain.CopyExplanation {
+	plan := buildGroup(group, now)
+	exps := make([]domain.CopyExplanation, len(group.Files))
+	for i, file := range group.Files {
+		ctx := dircontext.Classify(file.Path)
+		reason := ""
+		if i < len(plan.Actions) {
+			reason = plan.Actions[i].Reason
+		}
+		exps[i] = domain.CopyExplanation{
+			Path:           file.Path,
+			Context:        ctx,
+			Score:          ScoreRetention(file, ctx, now),
+			RetainReason:   reason,
+			RetainSelected: plan.RetainPath != "" && filepath.Clean(file.Path) == filepath.Clean(plan.RetainPath),
+		}
+	}
+	return exps
+}
+
 func buildGroup(group domain.DuplicateGroup, now time.Time) domain.OperationPlan {
 	contexts := make([]domain.DirectoryContext, len(group.Files))
 	for i, file := range group.Files {

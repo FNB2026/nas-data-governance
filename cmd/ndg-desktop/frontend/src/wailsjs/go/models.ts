@@ -1218,6 +1218,10 @@ export namespace wails {
 	    physical_reliable: boolean;
 	    format_kind?: string;
 	    format_mime?: string;
+	    dir_context?: domain.DirectoryContext;
+	    retain_score?: domain.RetentionScore;
+	    retain_reason?: string;
+	    is_retain_selected: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileItem(source);
@@ -1239,7 +1243,29 @@ export namespace wails {
 	        this.physical_reliable = source["physical_reliable"];
 	        this.format_kind = source["format_kind"];
 	        this.format_mime = source["format_mime"];
+	        this.dir_context = this.convertValues(source["dir_context"], domain.DirectoryContext);
+	        this.retain_score = this.convertValues(source["retain_score"], domain.RetentionScore);
+	        this.retain_reason = source["retain_reason"];
+	        this.is_retain_selected = source["is_retain_selected"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class GroupDecisionDTO {
 	    id: string;
@@ -1945,11 +1971,11 @@ export namespace wails {
 	    physical_identity_reliable: boolean;
 	    latency_ms: number;
 	    recommended_workers: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SourcePreflightDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
@@ -2030,3 +2056,4 @@ export namespace wails {
 	}
 
 }
+

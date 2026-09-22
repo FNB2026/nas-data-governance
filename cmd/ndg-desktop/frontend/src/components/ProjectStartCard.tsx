@@ -13,6 +13,7 @@ import { wails } from "../wailsjs/go/models";
 import { hasWailsRuntime } from "../lib/utils";
 import { useProject } from "../state/ProjectContext";
 import { api } from "../api/client";
+import ErrorState from "./ErrorState";
 
 export interface ProjectStartCardProps {
   busy: boolean;
@@ -206,7 +207,7 @@ export default function ProjectStartCard({
         )}
       </div>
 
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <ErrorState message={error} />}
     </section>
   );
 }

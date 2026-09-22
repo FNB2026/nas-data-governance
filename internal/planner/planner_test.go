@@ -148,6 +148,69 @@ func TestAnchorsDivergeDetectsDifferentAnchors(t *testing.T) {
 	}
 }
 
+func TestExplainGroupMarksProtectedCopy(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	exps := ExplainGroup(group("/家庭/医疗/报告.pdf", "/家庭/临时/报告.pdf")[0], now)
+	if len(exps) != 2 {
+		t.Fatalf("expected 2 explanations, got %d", len(exps))
+	}
+	if !exps[0].Context.Protected {
+		t.Fatalf("expected protected context for 医疗 path, got %#v", exps[0].Context)
+	}
+	if !strings.Contains(exps[0].RetainReason, "人工复核") {
+		t.Fatalf("expected manual-review reason, got %q", exps[0].RetainReason)
+	}
+	if exps[0].RetainSelected {
+		t.Fatalf("protected group must not auto-select a retain copy: %#v", exps[0])
+	}
+}
+
+func TestExplainGroupDivergentAnchors(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	exps := ExplainGroup(group("/data/项目/2023/report.pdf", "/data/项目/2024/report.pdf")[0], now)
+	for _, exp := range exps {
+		if exp.RetainSelected {
+			t.Fatalf("anchor divergence must not select a copy: %#v", exp)
+		}
+		if !strings.Contains(exp.RetainReason, "业务锚点不同") {
+			t.Fatalf("expected anchor-divergence reason, got %q", exp.RetainReason)
+		}
+	}
+}
+
+func TestExplainGroupTemporaryQuarantine(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	exps := ExplainGroup(group("/download/temp/a.iso", "/download/temp/b.iso")[0], now)
+	selected := 0
+	for _, exp := range exps {
+		if exp.Score.Total == 0 {
+			t.Fatalf("expected non-zero retention score, got %#v", exp)
+		}
+		if exp.RetainSelected {
+			selected++
+		}
+		if !exp.RetainSelected && !strings.Contains(exp.RetainReason, "隔离") {
+			t.Fatalf("expected quarantine reason for non-retained copy, got %q", exp.RetainReason)
+		}
+	}
+	if selected != 1 {
+		t.Fatalf("expected exactly one retained copy, got %d", selected)
+	}
+}
+
+func TestExplainGroupRawArchiveBonusPositive(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	f := domain.FileInstance{Path: "/data/归档/a.pdf", ModifiedAt: now.Add(-24 * time.Hour)}
+	raw := ScoreRetention(f, domain.DirectoryContext{Role: domain.RoleRaw, AuthorityLevel: 80}, now)
+	if raw.RoleBonus != 20 {
+		t.Fatalf("raw role should get +20 bonus, got %d", raw.RoleBonus)
+	}
+	temp := ScoreRetention(f, domain.DirectoryContext{Role: domain.RoleTemporary, AuthorityLevel: 10}, now)
+	if temp.RoleBonus != -20 {
+		t.Fatalf("temporary role should get -20 bonus, got %d", temp.RoleBonus)
+	}
+}
+
 func TestAnchorsDivergeAllowsSameAnchor(t *testing.T) {
 	c1 := domain.DirectoryContext{BusinessAnchor: "PRJ-2024-001"}
 	c2 := domain.DirectoryContext{BusinessAnchor: "PRJ-2024-001"}

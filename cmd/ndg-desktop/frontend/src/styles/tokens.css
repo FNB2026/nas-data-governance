@@ -2,6 +2,15 @@
  * Design tokens: single source of truth for colors, spacing, typography,
  * and motion. All component styles should reference these variables
  * instead of hardcoding values.
+ *
+ * UI-P8-C: every status/brand tint that used to be a literal in
+ * styles.css now lives here. If you need a new shade, add a token —
+ * do not inline a hex value in a component rule.
+ *
+ * UI-P8-B contrast note: --text-muted, --error and --success are the
+ * TEXT tier and are tuned to meet WCAG AA (>= 4.5:1) against --card-bg
+ * and --bg. The *-bg / *-line tokens are wash/fill tiers and are not
+ * used as text colors.
  */
 
 :root {
@@ -12,24 +21,69 @@
 
   /* ---- Color: text ---- */
   --text: #1d1d1f;
-  --text-muted: #86868b;
+  /* 5.07:1 on --card-bg, 4.65:1 on --bg (previously #86868b = 3.5:1, below AA). */
+  --text-muted: #6e6e73;
+  /* Text drawn on top of an --accent / status fill. */
+  --text-on-accent: #ffffff;
 
   /* ---- Color: borders ---- */
   --border: #d2d2d7;
 
   /* ---- Color: brand / accent ---- */
   --accent: #0071e3;
+  --accent-muted: rgba(0, 113, 227, 0.7);
+  --accent-secondary: #5856d6;
+
+  /* Accent wash tiers (backgrounds, low alpha -> higher alpha). */
+  --accent-bg-faint: rgba(0, 113, 227, 0.03);
+  --accent-bg-soft: rgba(0, 113, 227, 0.04);
+  --accent-bg-tint: rgba(0, 113, 227, 0.06);
   --accent-bg: rgba(0, 113, 227, 0.08);
   --accent-bg-hover: rgba(0, 113, 227, 0.1);
   --accent-bg-active: rgba(0, 113, 227, 0.12);
+  --accent-secondary-bg: rgba(88, 86, 214, 0.12);
 
-  /* ---- Color: status ---- */
-  --error: #ff3b30;
-  --error-bg: rgba(255, 59, 48, 0.12);
-  --success: #248a3d;
-  --success-bg: rgba(52, 199, 89, 0.15);
+  /* Accent border tiers. */
+  --accent-line: rgba(0, 113, 227, 0.2);
+  --accent-line-strong: rgba(0, 113, 227, 0.25);
+  --accent-line-emphasis: rgba(0, 113, 227, 0.32);
+  --accent-line-focus: rgba(0, 113, 227, 0.45);
+
+  /* ---- Color: status (text tier) ---- */
+  /* 5.39:1 on --card-bg, 4.64:1 on --error-bg (previously #ff3b30 = 3.55:1). */
+  --error: #d70015;
+  /* 5.40:1 on --card-bg, 4.80:1 on --success-bg (previously #248a3d = 4.40:1). */
+  --success: #1d7a35;
+  /* 4.62:1 on --card-bg. */
   --warning: #bf5600;
+
+  /* ---- Color: status (wash / fill / line tiers) ---- */
+  --error-bg-soft: rgba(255, 59, 48, 0.06);
+  --error-bg: rgba(255, 59, 48, 0.12);
+  --error-bg-strong: rgba(255, 59, 48, 0.15);
+  --error-line: rgba(255, 59, 48, 0.5);
+
+  --success-bg-soft: rgba(52, 199, 89, 0.05);
+  --success-bg-tint: rgba(52, 199, 89, 0.06);
+  --success-bg: rgba(52, 199, 89, 0.15);
+  --success-line: rgba(52, 199, 89, 0.3);
+  --success-line-strong: rgba(52, 199, 89, 0.42);
+  --success-line-emphasis: rgba(52, 199, 89, 0.55);
+
+  --warning-bg-soft: rgba(255, 149, 0, 0.08);
   --warning-bg: rgba(255, 149, 0, 0.12);
+  --warning-bg-strong: rgba(255, 149, 0, 0.15);
+  --warning-line: rgba(255, 149, 0, 0.25);
+
+  /* ---- Focus ---- */
+  /* Single focus treatment for every interactive element. Never remove
+     this without providing an equivalent visible indicator. */
+  --focus-ring: #0071e3;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* ---- Overlay ---- */
+  --scrim: rgba(0, 0, 0, 0.35);
 
   /* ---- Radius ---- */
   --radius: 12px;
@@ -39,6 +93,7 @@
 
   /* ---- Shadow ---- */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
 
   /* ---- Spacing scale ---- */
   --space-xs: 0.25rem;

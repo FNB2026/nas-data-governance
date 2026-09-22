@@ -12,11 +12,13 @@ describe("settings persistence", () => {
     });
   });
 
-  it("persists privacy and scan defaults together", () => {
+  it("persists privacy, scan defaults and onboarding state together", () => {
     const settings = {
       pathPrivacyMode: true,
       defaultFullScan: true,
       defaultWorkers: "8",
+      onboardingDone: true,
+      gettingStartedDone: false,
     };
 
     saveSettings(settings);
@@ -30,6 +32,29 @@ describe("settings persistence", () => {
       pathPrivacyMode: true,
       defaultFullScan: false,
       defaultWorkers: "",
+      onboardingDone: false,
+      gettingStartedDone: false,
     });
+  });
+
+  it("defaults onboarding state to not-seen for a first launch", () => {
+    expect(loadSettings()).toEqual({
+      pathPrivacyMode: false,
+      defaultFullScan: false,
+      defaultWorkers: "",
+      onboardingDone: false,
+      gettingStartedDone: false,
+    });
+  });
+
+  it("treats a non-boolean onboarding flag as not seen", () => {
+    values.set(
+      "ndg-settings",
+      JSON.stringify({ onboardingDone: "yes", gettingStartedDone: 1 }),
+    );
+
+    const loaded = loadSettings();
+    expect(loaded.onboardingDone).toBe(false);
+    expect(loaded.gettingStartedDone).toBe(false);
   });
 });

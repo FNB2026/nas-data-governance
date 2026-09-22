@@ -63,6 +63,18 @@ type RetentionScore struct {
 	Reasons   []string `json:"reasons"`
 }
 
+// CopyExplanation is the per-copy view shown in the group detail's
+// "directory context & retention" section (UI-P3). It reuses the exact
+// decision strings produced by planner.buildGroup so the UI never re-derives
+// policy.
+type CopyExplanation struct {
+	Path           string           `json:"path"`
+	Context        DirectoryContext `json:"context"`
+	Score          RetentionScore   `json:"score"`
+	RetainReason   string           `json:"retain_reason"`
+	RetainSelected bool             `json:"retain_selected"`
+}
+
 // PhysicalIdentity captures the physical storage identity of a file instance.
 // Multiple file paths that share the same Device+Inode are hardlinks to a
 // single physical data object; deleting one path does not free the data

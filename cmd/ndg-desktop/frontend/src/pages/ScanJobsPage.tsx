@@ -33,6 +33,8 @@ export default function ScanJobsPage() {
     defaultWorkers,
     pendingScanRoot,
     clearPendingScanRoot,
+    connectionStatus,
+    refreshProject,
   } = useProject();
 
   // Form state (page-local) — initialized from global scan defaults
@@ -48,6 +50,22 @@ export default function ScanJobsPage() {
 
   // Derived: whether a scan is currently active (polled globally in context).
   const scanActive = activeJobId !== null;
+
+  // Disabled-reason text for the scan form: recovery-lock reason wins when
+  // present; otherwise read-only mode falls back to the standard reason.
+  const canScanReason =
+    capabilities.disabled_reasons?.["scan-jobs"] ??
+    (!capabilities.can_scan ? "只读模式，无法执行写操作" : null);
+
+  // NAS disconnect only gates the form when it targets a registered
+  // storage — i.e., an operation dependent on that disconnected data source.
+  const nasDisconnected =
+    connectionStatus === "disconnected" &&
+    storages.some((storage) => storage.root_path === scanRoot);
+
+  const recheckConnection = () => {
+    void refreshProject();
+  };
 
   // Consume a pending scan root set by the start card's "new project"
   // flow: prefill the root, then clear it so it only applies once.
@@ -183,6 +201,9 @@ export default function ScanJobsPage() {
         jobDetailLoading={jobDetailLoading}
         hasMoreJobs={hasMoreJobs}
         canScan={capabilities.can_scan}
+        canScanReason={canScanReason}
+        nasDisconnected={nasDisconnected}
+        onRecheckConnection={recheckConnection}
         canRetryScan={canRetryScan}
         canResumeScan={checkpointInfo?.available ?? false}
         resumeCheckpointCount={checkpointInfo?.scanned_count ?? 0}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -185,6 +186,49 @@ func TestNetworkHashDisappearancePausesWithoutAdvancingCheckpoint(t *testing.T) 
 	}
 	if cp.Status != "paused_network" || cp.ScannedCount != 0 || cp.LastScannedPath != "" {
 		t.Fatalf("unsafe checkpoint advance: %#v", cp)
+	}
+}
+
+func TestNetworkFullHashDisappearanceStopsSubmittingWork(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "source")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("duplicate-%02d.txt", i)), []byte("same content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(ctx, filepath.Join(tmp, "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	fullCalls := 0
+	svc := NewScanServiceWithHashFunc(st,
+		func(path string, size int64) (string, error) { return fingerprint.Quick(path, size) },
+		func(string, int64) (string, error) {
+			fullCalls++
+			return "", os.ErrNotExist
+		})
+	result, err := svc.Scan(ctx, ScanInput{
+		Root:          root,
+		StorageID:     "network-full-hash-disappeared",
+		NetworkSource: true,
+		Workers:       1,
+		HashAttempts:  1,
+	})
+	if !errors.Is(err, ErrNetworkSourceUnavailable) {
+		t.Fatalf("scan error = %v, want ErrNetworkSourceUnavailable", err)
+	}
+	if result == nil || result.CoverageState != "partial" {
+		t.Fatalf("result = %#v, want partial coverage", result)
+	}
+	if fullCalls > 2 {
+		t.Fatalf("full hash calls = %d, want bounded work after network loss", fullCalls)
 	}
 }
 
