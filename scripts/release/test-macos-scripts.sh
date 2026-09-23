@@ -523,6 +523,74 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Test 12: syft source argument form (B18 regression)
+# Reproduces the Draft Release failure in generate-sbom.sh:
+#   syft dir "$ROOT" --output ...
+# syft 1.x removed the `dir` subcommand, so "dir" and the path are both
+# treated as positional source arguments and syft fails with
+#   accepts at most 1 arg(s), received 2
+# The fix is a single positional source plus an explicit source type:
+#   syft "$ROOT" --from dir --output ...
+# This test models syft's positional-argument rule and asserts both the
+# broken and fixed forms, plus that the real script uses the fixed form.
+# ---------------------------------------------------------------------------
+echo "--- Test 12: syft source argument form (B18) ---"
+
+# Model syft's rule: at most one positional (non-flag) argument is allowed.
+# `--from` consumes the next token as its value, so it is not positional.
+count_syft_positionals() {
+    local count=0
+    local expect_value=0
+    local tok
+    for tok in "$@"; do
+        if [[ $expect_value -eq 1 ]]; then
+            expect_value=0
+            continue
+        fi
+        case "$tok" in
+            --from|--output|--exclude|--source-name|--source-version) expect_value=1 ;;
+            --*) : ;;
+            *) count=$((count + 1)) ;;
+        esac
+    done
+    echo "$count"
+}
+
+# --- 1. Old (broken) form: `dir "$ROOT"` yields two positionals ---
+OLD_FORM_COUNT="$(count_syft_positionals dir /repo/root --output cyclonedx-json=out.json)"
+if [[ "$OLD_FORM_COUNT" -eq 2 ]]; then
+    pass "Old form 'syft dir <path>' yields 2 positionals (reproduces 'accepts at most 1 arg(s)')"
+else
+    fail "Old form positional count was $OLD_FORM_COUNT, expected 2"
+fi
+
+# --- 2. New (fixed) form: `"$ROOT" --from dir` yields one positional ---
+NEW_FORM_COUNT="$(count_syft_positionals /repo/root --from dir --output cyclonedx-json=out.json)"
+if [[ "$NEW_FORM_COUNT" -eq 1 ]]; then
+    pass "New form 'syft <path> --from dir' yields exactly 1 positional"
+else
+    fail "New form positional count was $NEW_FORM_COUNT, expected 1"
+fi
+
+# --- 3. The real script must not contain the broken form ---
+SBOM_SCRIPT_B18="$ROOT/scripts/release/generate-sbom.sh"
+if grep -qE '"\$TMP_DIR/syft" +dir' "$SBOM_SCRIPT_B18"; then
+    fail "generate-sbom.sh still uses 'syft dir <path>' (B18 not fixed)"
+else
+    pass "generate-sbom.sh does not use the broken 'syft dir <path>' form"
+fi
+
+# --- 4. The real script must use source + --from dir for both outputs ---
+B18_FIXED_COUNT="$(grep -c -- '"$ROOT" --from dir' "$SBOM_SCRIPT_B18" || true)"
+if [[ "$B18_FIXED_COUNT" -ge 2 ]]; then
+    pass "generate-sbom.sh uses 'syft <path> --from dir' for both CycloneDX and SPDX"
+else
+    fail "generate-sbom.sh fixed form used $B18_FIXED_COUNT time(s), expected 2"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo "========================================"

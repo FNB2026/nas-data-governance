@@ -14,6 +14,10 @@
 # It does NOT use any syft found in PATH, to ensure supply-chain integrity
 # and reproducible SBOM generation.
 #
+# B18: syft is invoked as `syft <source> --from dir`, not `syft dir <source>`.
+# syft 1.x removed the `dir` subcommand, so the old form passes two
+# positional arguments and fails with "accepts at most 1 arg(s), received 2".
+#
 # Usage:
 #   ./scripts/release/generate-sbom.sh
 #   ./scripts/release/generate-sbom.sh --output dist
@@ -150,8 +154,12 @@ chmod +x "$TMP_DIR/syft"
 echo "generate-sbom: running syft..."
 
 # B3: No fail-open — syft errors must propagate.
+# B18: syft 1.x removed the `dir` subcommand. The source must be a single
+# positional argument with the source type given via `--from dir`; the old
+# `syft dir "$ROOT"` form passes two positionals and fails with
+# "accepts at most 1 arg(s), received 2".
 # Generate CycloneDX format
-if ! "$TMP_DIR/syft" dir "$ROOT" \
+if ! "$TMP_DIR/syft" "$ROOT" --from dir \
     --output cyclonedx-json="$OUTPUT_DIR/sbom.cyclonedx.json" \
     --exclude '**/.git/**' \
     --exclude '**/node_modules/**' \
@@ -162,7 +170,7 @@ if ! "$TMP_DIR/syft" dir "$ROOT" \
 fi
 
 # Generate SPDX format
-if ! "$TMP_DIR/syft" dir "$ROOT" \
+if ! "$TMP_DIR/syft" "$ROOT" --from dir \
     --output spdx-json="$OUTPUT_DIR/sbom.spdx.json" \
     --exclude '**/.git/**' \
     --exclude '**/node_modules/**' \
