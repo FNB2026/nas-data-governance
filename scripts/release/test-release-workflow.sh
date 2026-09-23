@@ -729,6 +729,56 @@ fi
 
 echo ""
 
+# ---------------------------------------------------------------------------
+# Check 20: B18 — generate-sbom.sh passes a single positional syft source
+# ---------------------------------------------------------------------------
+echo "--- Check 20: B18 — syft single positional source ---"
+
+SBOM_SCRIPT="$ROOT/scripts/release/generate-sbom.sh"
+
+# B18: Must NOT use the removed `syft dir <path>` subcommand form.
+# That form passes two positionals ("dir" and the path) and syft 1.x fails
+# with "accepts at most 1 arg(s), received 2".
+if grep -qE '"\$TMP_DIR/syft" +dir' "$SBOM_SCRIPT"; then
+    fail "generate-sbom.sh still uses 'syft dir <path>' (B18 not fixed: two positional args)"
+else
+    pass "generate-sbom.sh does not use the removed 'syft dir <path>' form"
+fi
+
+# B18: Must declare the source type explicitly via `--from dir`.
+if grep -q -- '"$ROOT" --from dir' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh passes source as single positional with '--from dir'"
+else
+    fail "generate-sbom.sh missing single positional source with '--from dir'"
+fi
+
+# B18: Both format invocations must use the corrected form (CycloneDX + SPDX).
+B18_CORRECT_COUNT="$(grep -c -- '"$ROOT" --from dir' "$SBOM_SCRIPT" || true)"
+if [[ "$B18_CORRECT_COUNT" -ge 2 ]]; then
+    pass "generate-sbom.sh uses corrected syft form for both CycloneDX and SPDX"
+else
+    fail "generate-sbom.sh corrected syft form used $B18_CORRECT_COUNT time(s), expected 2"
+fi
+
+# B18: Preserve the existing pinned-version / checksum / dual-output contract.
+if grep -q 'SYFT_VERSION=.*v1\.20\.0' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh still pins syft v1.20.0"
+else
+    fail "generate-sbom.sh lost pinned SYFT_VERSION"
+fi
+if grep -q 'checksum verified' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh still verifies syft checksum"
+else
+    fail "generate-sbom.sh lost checksum verification"
+fi
+if grep -q 'cyclonedx-json=' "$SBOM_SCRIPT" && grep -q 'spdx-json=' "$SBOM_SCRIPT"; then
+    pass "generate-sbom.sh still emits CycloneDX + SPDX outputs"
+else
+    fail "generate-sbom.sh lost dual-format SBOM output"
+fi
+
+echo ""
+
 # ===========================================================================
 # Summary
 # ===========================================================================
