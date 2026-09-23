@@ -489,8 +489,18 @@ jobs:
 
           # Extract release notes from CHANGELOG.md (section matching the version)
           # Falls back to auto-generated notes if no matching section found.
+          # B19: Match the heading by literal prefix plus a boundary instead of
+          # exact equality. CHANGELOG headings carry a descriptive suffix
+          # (e.g. "## 0.5.0-beta.4 — 发布链修复候选"), so the previous
+          # `$0 == ver` never matched and every release fell through to the
+          # placeholder fallback. The boundary check keeps the match anchored:
+          # it prevents "## 0.5.0-beta.4" from matching "## 0.5.0-beta.40".
           RELEASE_NOTES=$(awk -v ver="## ${VERSION}" '
-            /^## / { if (found) exit; if ($0 == ver) found=1; next }
+            /^## / {
+              if (found) exit
+              if (index($0, ver) == 1 && (length($0) == length(ver) || substr($0, length(ver) + 1, 1) ~ /[[:space:]]/)) found=1
+              next
+            }
             found { print }
           ' CHANGELOG.md)
 
