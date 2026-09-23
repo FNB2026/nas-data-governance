@@ -779,6 +779,78 @@ fi
 
 echo ""
 
+# ---------------------------------------------------------------------------
+# Check 21: B19 — CHANGELOG release-notes extraction matches suffixed headings
+# ---------------------------------------------------------------------------
+echo "--- Check 21: B19 — CHANGELOG notes extraction ---"
+
+# B19: Must NOT use exact equality ($0 == ver); CHANGELOG headings carry a
+# descriptive suffix, so exact equality never matched and every release fell
+# back to the placeholder notes.
+# Strip comment lines first — the fix documents the old form in a comment.
+DRAFT_RELEASE_CODE="$(echo "$DRAFT_RELEASE_SECTION" | grep -v '^[[:space:]]*#')"
+if echo "$DRAFT_RELEASE_CODE" | grep -q '\$0 == ver'; then
+    fail "release notes extraction still uses exact match '\$0 == ver' (B19 not fixed)"
+else
+    pass "release notes extraction does not use exact match '\$0 == ver'"
+fi
+
+# B19: Must anchor the match on a literal prefix.
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'index(\$0, ver) == 1'; then
+    pass "release notes extraction anchors match with index(\$0, ver) == 1"
+else
+    fail "release notes extraction missing index(\$0, ver) == 1 anchor"
+fi
+
+# B19: Must enforce a boundary so a shorter version cannot match a longer one
+# (e.g. "## 0.5.0-beta.4" must not match "## 0.5.0-beta.40").
+if echo "$DRAFT_RELEASE_SECTION" | grep -q 'substr(\$0, length(ver) + 1, 1)'; then
+    pass "release notes extraction enforces a heading boundary after the version"
+else
+    fail "release notes extraction missing boundary check after the version"
+fi
+
+# B19: Behavioral check — replicate the workflow awk against fixtures.
+B19_AWK='/^## / {
+  if (found) exit
+  if (index($0, ver) == 1 && (length($0) == length(ver) || substr($0, length(ver) + 1, 1) ~ /[[:space:]]/)) found=1
+  next
+}
+found { print }'
+
+# 1) Suffixed heading (the real-world case) must be extracted.
+B19_SUFFIXED="$(printf '## 0.5.0-beta.4 — 发布链修复候选\n\n- bullet one\n- bullet two\n\n## 0.5.0-beta.3 — older\n- not this\n' \
+    | awk -v ver="## 0.5.0-beta.4" "$B19_AWK")"
+if echo "$B19_SUFFIXED" | grep -q 'bullet one' && echo "$B19_SUFFIXED" | grep -q 'bullet two'; then
+    pass "Suffixed heading is extracted (no longer falls back to placeholder)"
+else
+    fail "Suffixed heading was not extracted"
+fi
+if echo "$B19_SUFFIXED" | grep -q 'not this'; then
+    fail "Extraction leaked into the next CHANGELOG section"
+else
+    pass "Extraction stops at the next '## ' heading"
+fi
+
+# 2) Prefix collision must NOT match: beta.4 must not match beta.40.
+B19_COLLIDE="$(printf '## 0.5.0-beta.40 — different release\n- wrong\n' \
+    | awk -v ver="## 0.5.0-beta.4" "$B19_AWK")"
+if [[ -z "$B19_COLLIDE" ]]; then
+    pass "Version prefix collision rejected (beta.4 does not match beta.40)"
+else
+    fail "Version prefix collision matched: '$B19_COLLIDE'"
+fi
+
+# 3) Heading with no suffix must still match.
+B19_PLAIN="$(printf '## 0.5.0-beta.9\n- plain\n' | awk -v ver="## 0.5.0-beta.9" "$B19_AWK")"
+if echo "$B19_PLAIN" | grep -q 'plain'; then
+    pass "Unsuffixed heading still matches"
+else
+    fail "Unsuffixed heading failed to match"
+fi
+
+echo ""
+
 # ===========================================================================
 # Summary
 # ===========================================================================
