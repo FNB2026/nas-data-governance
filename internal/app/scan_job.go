@@ -31,11 +31,13 @@ func NewScanJobRunner(scan *ScanService, mgr *jobs.JobManager) *ScanJobRunner {
 
 // scanStageMap maps ScanService internal stage strings to JobStage values.
 var scanStageMap = map[string]jobs.JobStage{
-	"traversal":  jobs.StageDiscovering,
-	"quick_hash": jobs.StageQuickHashing,
-	"full_hash":  jobs.StageFullHashing,
-	"persisting": jobs.StageFinalizing,
-	"completed":  jobs.StageFinalizing,
+	"preparing_resume": jobs.StagePreparingResume,
+	"seeking_resume":   jobs.StageSeekingResume,
+	"traversal":        jobs.StageDiscovering,
+	"quick_hash":       jobs.StageQuickHashing,
+	"full_hash":        jobs.StageFullHashing,
+	"persisting":       jobs.StageFinalizing,
+	"completed":        jobs.StageFinalizing,
 }
 
 // RunScanAsJob creates a scan job, starts it, and executes the scan

@@ -76,6 +76,8 @@ const DETERMINATE_STAGES = new Set(["QUICK_HASHING"]);
 
 // Stages where we show an indeterminate bar (activity without percentage).
 const INDETERMINATE_STAGES = new Set([
+  "PREPARING_RESUME",
+  "SEEKING_RESUME",
   "DISCOVERING",
   "FULL_HASHING",
   "METADATA_INDEXING",
@@ -375,6 +377,16 @@ export default function ScanPanel({
               <div className="progress-bar-fill progress-bar-fill--indeterminate" />
             </div>
           ) : null}
+
+          {scanActive && ["PREPARING_RESUME", "SEEKING_RESUME"].includes(scanProgress.stage) && (
+            <p role="status">
+              {scanProgress.stage === "PREPARING_RESUME"
+                ? "正在读取本机保存的扫描信息。"
+                : "正在定位已保存的进度，已完成目录将被跳过。"}
+              {resumeCheckpointCount > 0 && ` 已保存进度：${resumeCheckpointCount.toLocaleString()} 项。`}
+              下方计数仅表示本轮新增发现和处理的文件；当前尚未进入未扫描区域。
+            </p>
+          )}
 
           {/* Stats: always show stage + counts */}
           <div className="progress-stats">

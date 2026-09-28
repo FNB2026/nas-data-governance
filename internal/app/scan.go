@@ -235,7 +235,11 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	s.discovered.Store(0)
 	s.processed.Store(0)
 	s.failed.Store(0)
-	s.setStage(in, "traversal")
+	if in.Resume && !in.FullScan {
+		s.setStage(in, "preparing_resume")
+	} else {
+		s.setStage(in, "traversal")
+	}
 
 	rootPath, err := filepath.Abs(in.Root)
 	if err != nil {
@@ -287,6 +291,12 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 				return nil, err
 			}
 		}
+	}
+
+	if result.ResumedFrom != "" {
+		s.setStage(in, "seeking_resume")
+	} else {
+		s.setStage(in, "traversal")
 	}
 
 	// Scan with incremental hash reuse.
@@ -353,7 +363,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			if networkUnavailable.Load() {
 				// Do not advance past files whose content was not readable after
 				// the network mount disappeared. Resume must revisit them.
-				return nil
+				return ErrNetworkSourceUnavailable
 			}
 			if err := persistPending(ctx); err != nil {
 				return errors.New("persist directory scan checkpoint failed")
@@ -367,7 +377,14 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		},
 	}
 	stats, err := scanner.Scan(ctx, scanOpts, func(file domain.FileInstance) error {
-		s.discovered.Add(1)
+		// Once content access is lost, further traversal cannot advance the
+		// durable checkpoint. Stop queuing work and finalize a resumable pause.
+		if networkUnavailable.Load() {
+			return ErrNetworkSourceUnavailable
+		}
+		if s.discovered.Add(1) == 1 && result.ResumedFrom != "" {
+			s.setStage(in, "traversal")
+		}
 		// Incremental reuse is allowed only when both the previous and current
 		// scan report a reliable physical identity. SMB/NFS/WebDAV/FUSE may
 		// expose synthetic or unstable inode values; those values must never
@@ -400,6 +417,13 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	s.setStage(in, "quick_hash")
 	hashErrs := hashRunner.Wait()
 	_ = hashErrs // already recorded as hashFailures
+	if networkUnavailable.Load() {
+		stats.SourceUnavailable = true
+		if errors.Is(err, ErrNetworkSourceUnavailable) {
+			// This is a controlled network pause, not a traversal failure.
+			err = nil
+		}
+	}
 	// Cancellation may leave an incomplete directory prefix in memory. Do not
 	// force that batch into the project database or advance its checkpoint:
 	// retain the last already-durable directory boundary and mark it aborted.

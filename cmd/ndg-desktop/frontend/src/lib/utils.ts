@@ -3,6 +3,8 @@
 export const TERMINAL_STATES = new Set(["PAUSED_NETWORK", "COMPLETED", "FAILED", "CANCELLED"]);
 
 export const STAGE_LABELS: Record<string, string> = {
+  PREPARING_RESUME: "读取已保存的扫描进度",
+  SEEKING_RESUME: "定位已保存的进度",
   DISCOVERING: "发现文件",
   METADATA_INDEXING: "索引元数据",
   QUICK_HASHING: "快速哈希",
