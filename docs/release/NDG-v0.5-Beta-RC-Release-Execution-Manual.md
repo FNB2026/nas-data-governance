@@ -3,7 +3,8 @@
 > 项目：NAS Data Governance（NDG）
 > 当前阶段：首个 Public Beta 发布前验收（Resume 与事件隐私修复已随 #48 入主干）
 > 文档性质：唯一实时执行基线；下方状态表管理当前进度
-> 最新核对：2026-10-02（#49 合并、隐私验收后）；远端 `main=499022b04ae57b9d82bfd58743aee214cc7d7c4c`，仓库 `VERSION=0.5.0-beta.4`
+> 最新验收产品代码基线：`499022b04ae57b9d82bfd58743aee214cc7d7c4c`（#49 squash 合并后，含 #48 隐私修复）；`VERSION=0.5.0-beta.4`
+> 说明：该基线**只反映产品/依赖代码身份**，仅在合并产品代码时推进；纯文档合并（含本手册更新）不改变它，避免出现"文档 PR 更新 main SHA、合并又改变 main SHA"的递归。
 > 已冻结候选：`v0.5.0-beta.4` → `9484ad46188c69f8ea97b8cc5db71eb67061b2e5`；Release 仍为 Draft / Pre-release，本轮不做任何改动
 > 修复源码：已随 #48 合入主干 `79bbc05`（远端分支 `fix/resume-prefix-traversal` 已删除）；真实完成证据来自独立 `dev / 31d693857939` App
 
@@ -53,7 +54,7 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 
 1. `[x]` 已完成（2026-10-02）：主干新构建（`499022b`）事件隐私与失败摘要验收通过——job:created 载荷仅 `{"job_type":"scan"}`，失败摘要只含计数，启动窗口 stdout/stderr 零路径锚点，历史泄漏 10+8 条原样保留、修复后新增为 0。见 [验收报告](privacy-acceptance-499022b-2026-10-02.md)。GUI 真机复核并入最终发行物验收。
 2. 封口"失败解释"最终口径：明确区分「遍历完成 / 文件存在状态 / 内容哈希覆盖率」；active=2,957,765、unavailable=26、missing=0（26 条代表探针均 ENOENT）按现状验收；3 条历史哈希失败未留单项原因，作为已知限制记录。Public Beta 不得宣称"全部内容均完成校验"，也不为数字清零改动扫描逻辑。
-3. 依赖处置：#47（仅 package-lock.json，undici 8.9.0→8.11.2，开发依赖）先更新到 `79bbc05` 重跑 CI，再做独立 diff 审查后收口；#45（Wails 2.13→2.16、modernc/sqlite、x/sys、x/text 等一组 Go 依赖）与 #46（npm 工具链组，lockfile 变化大）独立判定，不因 PR 存在而并入首个 Public Beta，尤其 #45 不在冻版末期顺手并入。
+3. 依赖处置：#47（仅 package-lock.json，undici 8.9.0→8.11.2，开发依赖）先更新到最新 main 重跑 CI，再做独立 diff 审查后收口；#45（Wails 2.13→2.16、modernc/sqlite、x/sys、x/text 等一组 Go 依赖）与 #46（npm 工具链组，lockfile 变化大）独立判定，不因 PR 存在而并入首个 Public Beta，尤其 #45 不在冻版末期顺手并入。
 4. 上述收口后决定新的 RC 身份（按版本序列自然为 v0.5.0-beta.5，届时再改 VERSION 并打标签，当前不提前创建），随后完整 Gate、签名 / 公证 / Staple / SHA / SBOM、Clean Install 与真实 NAS 最终发行物验收，再进入 Public Beta。beta.4 的 tag、Draft 与资产全程不动，作为固定历史候选。
 
 核对 annotated tag 时使用 `^{commit}` 或 peeled `^{}引用`，不要把 tag object 当源码 SHA。

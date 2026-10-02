@@ -36,7 +36,7 @@ seq=12 type=job:completed stage=FINALIZING    state=COMPLETED  payload={}
 断言全部通过：
 
 - `job:created` 载荷**恰为** `{"job_type":"scan"}` —— 历史泄漏向量（`project_id`=项目 DB 完整路径）已封闭；
-- 12 条载荷对以下锚点**全部 0 命中**：临时目录路径、项目 DB 路径、源目录路径、`Application Support`、`governance.db`、`/Users/`、`project_id`、三个源文件名；
+- 12 条载荷对以下锚点**全部 0 命中**：临时目录路径、项目 DB 路径、源目录路径、`Application Support`、`governance.db`、用户主目录绝对路径前缀、`project_id`、三个源文件名；
 - 真实哈希失败（EACCES）被计数（`failed=1`、`quick_hash_failures=1`）且任务 `COMPLETED`、`warning_count=1`；
 - 失败摘要**只含计数**，无路径、无文件名、无原始错误文本。
 
@@ -45,7 +45,7 @@ seq=12 type=job:completed stage=FINALIZING    state=COMPLETED  payload={}
 方法：真实 `.app` 二进制直接启动，`HOME` 重定向到全新隔离目录（不接触真实项目数据），运行 8 秒后终止，全量捕获 stdout/stderr。
 
 - 输出总量 **35 字节**，内容仅为一行关闭提示（`Ctrl+C detected. Shutting down...`）；
-- 六类路径锚点 0 命中：`/Users/<user>`、`/Volumes/`、`governance.db`、`Application Support`、`project_id`、`.db`；
+- 六类路径锚点 0 命中：macOS 用户主目录绝对路径前缀、挂载卷绝对路径前缀、`governance.db`、`Application Support`、`project_id`、`.db`；
 - 隔离 HOME 内应用仅创建 `recent.json.lock`，未触碰任何真实项目数据。
 
 ## 4. 历史 DB 基线（已取证 — 只读聚合，不输出载荷）
@@ -57,7 +57,7 @@ seq=12 type=job:completed stage=FINALIZING    state=COMPLETED  payload={}
 | 验证副本（`resume-fix-validation-20260928/governance.db`，6.3 GB） | 522,085 | **10**，全部为 `job:created`，时间跨 2026-09-24 → 09-30（最后一条即 09-30 18:25 CST Resume 任务创建事件，由修复前 dev 构建产生） | 10 个任务：5 CANCELLED / 1 COMPLETED / 4 PAUSED_NETWORK |
 | 原始 NAS 只读验收项目库 | 250,974 | **8**，同类历史 `job:created` | 5 CANCELLED / 3 PAUSED_NETWORK |
 
-- 含 `/Users/`、`/Volumes/` 样式的载荷共 2 条，**全部**落在上述 10 条 `project_id` 事件内（其 `project_id` 值本身即路径）；泄漏集合之外为 0；
+- 含用户主目录/挂载卷绝对路径样式的载荷共 2 条，**全部**落在上述 10 条 `project_id` 事件内（其 `project_id` 值本身即路径）；泄漏集合之外为 0；
 - 修复提交落地时刻之后新增泄漏事件：**0**；
 - 历史记录**原样保留、不做清洗** —— 与手册口径一致（正确的证据治理方式；历史泄漏的存在不构成对新代码的 FAIL 判定）。
 - 注：Resume 验收报告中"136,354 条事件"指单个历史任务（`job-6027…`）的事件数；本文 522,085 / 250,974 为全库各任务总和，两者不矛盾。
