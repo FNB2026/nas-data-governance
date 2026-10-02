@@ -1,11 +1,11 @@
 # NDG v0.5 Beta — RC / Release Execution & UI Final Polish 执行操作手册
 
 > 项目：NAS Data Governance（NDG）
-> 当前阶段：Resume 修复验证收口 / 首个 Public Beta 发布前验收
+> 当前阶段：首个 Public Beta 发布前验收（Resume 与事件隐私修复已随 #48 入主干）
 > 文档性质：唯一实时执行基线；下方状态表管理当前进度
-> 最新核对：2026-10-02；同步前远端 `main=2990322`，仓库 `VERSION=0.5.0-beta.4`
-> 已冻结候选：`v0.5.0-beta.4` → `9484ad46188c69f8ea97b8cc5db71eb67061b2e5`；Release 仍为 Draft / Pre-release
-> 修复源码：`fix/resume-prefix-traversal`；真实完成证据来自独立 `dev / 31d693857939` App
+> 最新核对：2026-10-02（#48 合并后复核）；远端 `main=79bbc05ba7ed196e364671543c88c064e2be1ab6`，仓库 `VERSION=0.5.0-beta.4`
+> 已冻结候选：`v0.5.0-beta.4` → `9484ad46188c69f8ea97b8cc5db71eb67061b2e5`；Release 仍为 Draft / Pre-release，本轮不做任何改动
+> 修复源码：已随 #48 合入主干 `79bbc05`（远端分支 `fix/resume-prefix-traversal` 已删除）；真实完成证据来自独立 `dev / 31d693857939` App
 
 ## 执行入口与优先级
 
@@ -25,8 +25,8 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 - beta.4 固定源码是 `9484ad4`；#43 / #44 的 release tooling 修复已进入主干，
   不改变 beta.4 的源码身份。其失败 Actions 记录保留为历史证据。
 - 独立 Resume Fix 开发 App 和验证副本的结果，不归入 beta.4 安装包验收。
-- 如首个公开 Beta 要包含 Resume 与事件隐私修复，须先合并源码、构建并验收新的
-  候选身份。后续候选版本尚未决定，当前不提升 VERSION，不创建新标签。
+- Resume 与事件隐私修复已随 #48 合入主干 `79bbc05`；如首个公开 Beta 要包含这些修复，
+  须在主干上构建并验收新的候选身份。后续候选版本尚未决定，当前不提升 VERSION，不创建新标签。
 - 发布仍需最终资产安装验收、真实数据安全证据、隐私和依赖判定全部收口。
   当前不发布 Draft，也不替换其已有 DMG。
 
@@ -36,26 +36,25 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 |---|---|---|
 | UI Final Polish | `[x]` 开发阶段完成 | P1–P8 已随 [#36](https://github.com/FNB2026/nas-data-governance/pull/36) 合入；P8-D 真实场景与窗口豁免见下文历史证据。不能替代新候选构建验收。 |
 | 标签与版本 | `[x]` 身份核对 | beta.1=`4bade771`、beta.2=`7ebe7f0`、beta.3=`244b4a8`、beta.4=`9484ad4`；VERSION 为 beta.4。后续修复候选版本未定。 |
-| 发布工程 | `[x]` 源码已同步 | #39/#41/#43/#44 已合入；远端 main `2990322` 的 CI / Security 成功。 |
+| 发布工程 | `[x]` 源码已同步 | #39/#41/#43/#44/#48 已合入；远端 main `79bbc05` 的 CI 成功（run 36963924777，headSha 与该提交严格绑定）。 |
 | beta.4 签名与公证 | `[x]` 历史资产证据 | 前轮发布工程已记录签名、公证 Accepted、staple 和 DMG。2026-10-02 本次核对只确认 Draft 中四项资产存在，未重复执行密码或签名验证。 |
 | Draft 资产 | `[x]` 平台核对 | beta.4 Draft / Pre-release 包含 DMG、DMG.sha256、CycloneDX、SPDX；尚未公开。 |
 | Resume 核心修复 | `[x]` 开发版自然完成 | 独立 dev `31d6938` 于 2026-10-02 08:33 CST 完成；发现/处理 1,648,814，failed=3；checkpoint completed，原前缀 1,308,951 条全部 active，Resume 入口消失。见 [验收报告](resume-fix-validation-2026-10-02.md)。 |
 | 文件覆盖与失败解释 | `[ ]` 待收口 | active=2,957,765、unavailable=26、missing=0；26 条分三个父目录组，代表探针均 ENOENT。3 项历史哈希失败未留单项原因，不得与遍历错误混同，也不得宣称全部内容已校验。 |
 | 重复结果与目录语境 | `[x]` 开发版抽样 | 52,319 组可读取；一组目录语境、文件证据、物理身份不可靠提示和路径脱敏已复核。 |
-| 事件隐私与失败摘要 | `[ ]` 源码修复完成，部署待验 | `33594b9` 删除 creation event 项目路径并在持久化层禁止 project_id，增加脱敏失败/覆盖摘要；全量 Go race、vet 通过。历史 DB 保留，新代码尚未部署到已完成 App。 |
+| 事件隐私与失败摘要 | `[ ]` 修复已入主干，新构建验收待做 | `33594b9`（已随 #48 进入主干 `79bbc05`）删除 creation event 项目路径并在持久化层禁止 project_id，增加脱敏失败/覆盖摘要；全量 Go race、vet 通过。历史 DB 旧记录保留不清洗；下一步在主干新构建的 App 上完成验收。 |
 | 运行日志隐私 | `[ ] BLOCKED` 证据缺失 | 历史 creation event 有本机 DB 完整路径；当前 stdout/stderr 无可读日志文件，不能宣布运行隐私全部通过。 |
 | 依赖与安全告警 | `[ ]` 当前告警待判定 | 2026-10-02 GitHub 有 6 项 undici 开放告警（1 high / 2 medium / 3 low，development scope）；#47 修复 PR 的 Verify/Desktop Build/Gitleaks/Govulncheck 全绿，但尚未合并。#45/#46 也是开放依赖 PR，须独立审查。旧“npm audit=0”只属当时快照。 |
-| 源码与文档同步 | `[x]` 分支已同步；主干见 PR | 修复与文档已推送 `origin/fix/resume-prefix-traversal`，[#48](https://github.com/FNB2026/nas-data-governance/pull/48) 负责主干校验与合并；以该 PR 的检查和合并状态为准。旧本地 main 已保存在本地及远端 `archive/main-before-sync-20261002`，不覆盖历史提交。 |
+| 源码与文档同步 | `[x]` 已合并入主干 | [#48](https://github.com/FNB2026/nas-data-governance/pull/48) 已合并，merge commit = `79bbc05`；main CI SUCCESS（run 36963924777，headSha 绑定该提交）。远端修复分支已删除；旧本地 main 保留在本地及远端 `archive/main-before-sync-20261002`，不覆盖历史提交。 |
 | 最终发行物验收 | `[ ] BLOCKED` | beta.4 完整 Resume 与最终隐私验收未封口；开发副本完成不能解除固定发行物的所有门槛。 |
 | Public Beta | `[ ] BLOCKED` | Draft 保持未发布，待候选身份决策及最终验收。 |
 
 ### 当前下一步
 
-1. 通过 PR 同步 Resume 与事件隐私修复及文档；保留旧本地主干归档，检查工作树干净。
-2. 在新的独立开发构建上验证脱敏事件和失败摘要；保留历史 DB，不回写或清洗历史证据。
-3. 判定当前 unreadable 条目与历史哈希失败的验收边界，补齐运行日志隐私证据。
-4. 独立审查 #45–#47 及开放漏洞；绿色 CI 不替代依赖适用性与风险判定。
-5. 收口后决定新的 RC 身份，再进行完整 Gate、构建和发行物验收；保持现有标签和资产可追溯。
+1. 在主干 `79bbc05` 上构建新候选 App，验收：新 creation event 不再记录项目数据库完整路径、失败摘要不泄露路径、运行期 stdout/stderr 及其他可获得日志无新的原始路径泄漏；历史 DB 旧记录保留，不清洗、不回写。
+2. 封口"失败解释"最终口径：明确区分「遍历完成 / 文件存在状态 / 内容哈希覆盖率」；active=2,957,765、unavailable=26、missing=0（26 条代表探针均 ENOENT）按现状验收；3 条历史哈希失败未留单项原因，作为已知限制记录。Public Beta 不得宣称"全部内容均完成校验"，也不为数字清零改动扫描逻辑。
+3. 依赖处置：#47（仅 package-lock.json，undici 8.9.0→8.11.2，开发依赖）先更新到 `79bbc05` 重跑 CI，再做独立 diff 审查后收口；#45（Wails 2.13→2.16、modernc/sqlite、x/sys、x/text 等一组 Go 依赖）与 #46（npm 工具链组，lockfile 变化大）独立判定，不因 PR 存在而并入首个 Public Beta，尤其 #45 不在冻版末期顺手并入。
+4. 上述收口后决定新的 RC 身份（按版本序列自然为 v0.5.0-beta.5，届时再改 VERSION 并打标签，当前不提前创建），随后完整 Gate、签名 / 公证 / Staple / SHA / SBOM、Clean Install 与真实 NAS 最终发行物验收，再进入 Public Beta。beta.4 的 tag、Draft 与资产全程不动，作为固定历史候选。
 
 核对 annotated tag 时使用 `^{commit}` 或 peeled `^{}引用`，不要把 tag object 当源码 SHA。
 
