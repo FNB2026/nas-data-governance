@@ -1,51 +1,67 @@
 # NDG v0.5 Beta — RC / Release Execution & UI Final Polish 执行操作手册
 
 > 项目：NAS Data Governance（NDG）
-> 首个公开 Beta 候选版本：`v0.5.0-beta.2`（UI 收口及 RC 冻结后创建）
-> 阶段：Beta RC / Release Execution
-> 文档性质：首个公开 Beta 发布前唯一执行基线；本文中的清单负责实时进度管理
-> 仓库核对：2026-09-22，依赖处置后的 `main` = `23b8a218a8a135d5629431ceaf942d6544609f41`
-> 当前候选版本：`0.5.0-beta.2`；版本元数据与 `BUNDLE_BUILD_NUMBER=2` 已同步，尚未冻结 RC SHA 或创建标签
-> 已锁定路线：**UI Final Polish → `VERSION` 提升至 beta.2 → RC 冻结 → 新标签发行 → 实机验收 → 首个 Public Beta**
+> 当前阶段：Resume 修复验证收口 / 首个 Public Beta 发布前验收
+> 文档性质：唯一实时执行基线；下方状态表管理当前进度
+> 最新核对：2026-10-02；同步前远端 `main=2990322`，仓库 `VERSION=0.5.0-beta.4`
+> 已冻结候选：`v0.5.0-beta.4` → `9484ad46188c69f8ea97b8cc5db71eb67061b2e5`；Release 仍为 Draft / Pre-release
+> 修复源码：`fix/resume-prefix-traversal`；真实完成证据来自独立 `dev / 31d693857939` App
 
 ## 执行入口与优先级
 
-本手册是本次发布的**唯一实时进度表和执行决策记录**。`readiness-audit-v0.5.md` 和 `release-gates-v0.5.md` 是 2026-07-30 的历史审计快照，保留原文作为证据，不更新其中的状态，也不得把其旧状态当作当前事实。本文与 `AGENTS.md`、已接受 ADR、实际代码或发布平台状态冲突时，先遵守安全边界并重新取证，在下方“执行状态与证据”记录修正。
+本手册是发布前的**唯一实时进度表和执行决策记录**。
+`readiness-audit-v0.5.md`、`release-gates-v0.5.md` 保留为历史审计，
+Resume 专题报告只保存其日期对应的证据，不另行管理实时发布状态。
+发生冲突时先遵守 `AGENTS.md` 与已接受 ADR，再核验代码、构建和平台事实。
 
-每个关口依次记录：负责人、目标提交/产物、检查日期、证据链接或本地记录、PASS/FAIL/BLOCKED、待办。没有证据的项目保持 `[ ]`。`[x]` 只表示已在所列证据层验证；自动化测试、GitHub CI、签名产物、实机体验彼此不能替代。发布、NAS 写操作、真实数据隔离/恢复应分别按相应权限和安全流程执行。
+自动化测试、GitHub CI、签名资产和真实 App 验收分别记录，不能互相代替。
+下文第 0–40 节保留 2026-09-22 的 beta.2 执行稿，属于历史操作参考；
+其中“当前”、旧状态、版本提升及创建标签命令均不代表现在的授权或状态。
+当前行动以本页状态表和版本规则为准，**不得直接执行旧 beta.2 创建标签命令**。
 
-### 版本决策（2026-09-21 锁定）
+### 当前版本与发布规则（2026-10-02）
 
-首个公开 Beta **选择 UI Final Polish 后发行 `v0.5.0-beta.2`**。`v0.5.0-beta.1` 保留为不可变的历史 RC/发布尝试；不补凭据后重跑它来作为首个公开 Beta，不移动、不删除该标签。UI 和必要的 Release Blocker 修复进入新提交，`VERSION`、应用版本元数据和发行说明在新候选构建前同步为 `0.5.0-beta.2`。只有 UI 验收及全部发布门槛通过后，才冻结 RC SHA、创建并推送 `v0.5.0-beta.2`。若代码变更迫使 RC 重新冻结，须重新跑相关关口；已推送的新标签同样不得移动。
+- beta.1、beta.2、beta.3、beta.4 标签都已存在，全部保持不可变。
+- beta.4 固定源码是 `9484ad4`；#43 / #44 的 release tooling 修复已进入主干，
+  不改变 beta.4 的源码身份。其失败 Actions 记录保留为历史证据。
+- 独立 Resume Fix 开发 App 和验证副本的结果，不归入 beta.4 安装包验收。
+- 如首个公开 Beta 要包含 Resume 与事件隐私修复，须先合并源码、构建并验收新的
+  候选身份。后续候选版本尚未决定，当前不提升 VERSION，不创建新标签。
+- 发布仍需最终资产安装验收、真实数据安全证据、隐私和依赖判定全部收口。
+  当前不发布 Draft，也不替换其已有 DMG。
 
-六项 Apple/GitHub 发布 Secret 仍是签名发行硬门槛。凭据只由有权限的持有人配置在 `release-macos` Environment；文档仅记录配置状态和验证结果，不记录值。UI/Release 修复和依赖处置已进入候选提交，`VERSION` 已按仓库同步脚本提升为 `0.5.0-beta.2`；下一步是完整 RC Gate、冻结 SHA 与新标签。
-
-### 执行状态与证据（2026-09-22；后续只在此处更新实时状态）
+### 执行状态与证据（2026-10-02）
 
 | 关口 | 状态 | 当前证据 / 下一动作 |
 |---|---|---|
-| 首发版本决策 | `[x]` | 2026-09-21：选择 UI Final Polish 后以 `v0.5.0-beta.2` 首发；`beta.1` 仅保留历史 RC/失败发布尝试。 |
-| 历史版本与来源 | `[x]` | `v0.5.0-beta.1` 固定指向 `4bade771`，是历史 RC/失败发布尝试。标签不可覆盖，也不作为首个公开 Beta。 |
-| beta.2 版本与 RC | `[ ]` | `VERSION=0.5.0-beta.2`、应用元数据和 `BUNDLE_BUILD_NUMBER=2` 已同步；尚须在该候选提交完成全量 Gate、冻结 RC SHA 并创建标签。 |
-| 依赖告警处置 | `[x]` | #31（Echo）、#33（Vitest）与 #37（transitive Nano ID）已分别审查、远端 CI 通过并合入；#34/#35 已关闭。`npm audit --audit-level=high` 为 0。 |
-| 仓库发布能力 | `[x]` | `scripts/release/`、`.github/workflows/release.yml`、`make version-check`、`make desktop-build` 已存在；须以标签提交中的实现为准。 |
-| 标签工作流 Verify | `[x]` | [GitHub Actions run 31780920930](https://github.com/FNB2026/nas-data-governance/actions/runs/31780920930)：Verify 成功。 |
-| 标签工作流 Build Unsigned | `[x]` | 同一 run 的 `Build Unsigned .app` 成功；只证明未签名构建。 |
-| 签名与公证 | `[ ] BLOCKED` | beta.1 run 在 `Verify required secrets` 失败；六项 `release-macos` Environment Secrets 均报告缺失。配置后在 **beta.2 新标签工作流**中验证实际签名、公证与 staple；不要记录凭据值。 |
-| Release / DMG / SHA-256 / SBOM | `[ ]` | `gh release view v0.5.0-beta.1` 返回 `release not found`；目标为 beta.2 标签生成的 DMG、校验和、SBOM 与 Draft Release。 |
-| GitHub 防护 | `[ ]` | `release-macos` 环境及 required reviewer 存在；REST branch protection 查询返回 `Branch not protected`。还需核查仓库 ruleset、Secret Scanning、Push Protection 等的实际生效情况。 |
-| UI Final Polish 与 RC 冻结 | `[ ]` | P1–P8 与 P8-D 的 K1–K6 已验收；1180×720 与全屏有真实桌面证据，1440×900、1728×1117 由项目负责人按记录豁免且不作为 PASS。尚须在版本候选上完成全量 Gate 并冻结 beta.2 RC。 |
-| Clean Install / 真实 NAS / 治理恢复 | `[ ]` | 尚无签名发行物及实机验收证据；只在隔离测试数据与可恢复路径上验证写操作。 |
-| Public Beta | `[ ]` | 以上所有阻断关口通过、记录发布决策后才能公开。 |
+| UI Final Polish | `[x]` 开发阶段完成 | P1–P8 已随 [#36](https://github.com/FNB2026/nas-data-governance/pull/36) 合入；P8-D 真实场景与窗口豁免见下文历史证据。不能替代新候选构建验收。 |
+| 标签与版本 | `[x]` 身份核对 | beta.1=`4bade771`、beta.2=`7ebe7f0`、beta.3=`244b4a8`、beta.4=`9484ad4`；VERSION 为 beta.4。后续修复候选版本未定。 |
+| 发布工程 | `[x]` 源码已同步 | #39/#41/#43/#44 已合入；远端 main `2990322` 的 CI / Security 成功。 |
+| beta.4 签名与公证 | `[x]` 历史资产证据 | 前轮发布工程已记录签名、公证 Accepted、staple 和 DMG。2026-10-02 本次核对只确认 Draft 中四项资产存在，未重复执行密码或签名验证。 |
+| Draft 资产 | `[x]` 平台核对 | beta.4 Draft / Pre-release 包含 DMG、DMG.sha256、CycloneDX、SPDX；尚未公开。 |
+| Resume 核心修复 | `[x]` 开发版自然完成 | 独立 dev `31d6938` 于 2026-10-02 08:33 CST 完成；发现/处理 1,648,814，failed=3；checkpoint completed，原前缀 1,308,951 条全部 active，Resume 入口消失。见 [验收报告](resume-fix-validation-2026-10-02.md)。 |
+| 文件覆盖与失败解释 | `[ ]` 待收口 | active=2,957,765、unavailable=26、missing=0；26 条分三个父目录组，代表探针均 ENOENT。3 项历史哈希失败未留单项原因，不得与遍历错误混同，也不得宣称全部内容已校验。 |
+| 重复结果与目录语境 | `[x]` 开发版抽样 | 52,319 组可读取；一组目录语境、文件证据、物理身份不可靠提示和路径脱敏已复核。 |
+| 事件隐私与失败摘要 | `[ ]` 源码修复完成，部署待验 | `33594b9` 删除 creation event 项目路径并在持久化层禁止 project_id，增加脱敏失败/覆盖摘要；全量 Go race、vet 通过。历史 DB 保留，新代码尚未部署到已完成 App。 |
+| 运行日志隐私 | `[ ] BLOCKED` 证据缺失 | 历史 creation event 有本机 DB 完整路径；当前 stdout/stderr 无可读日志文件，不能宣布运行隐私全部通过。 |
+| 依赖与安全告警 | `[ ]` 当前告警待判定 | 2026-10-02 GitHub 有 6 项 undici 开放告警（1 high / 2 medium / 3 low，development scope）；#47 修复 PR 的 Verify/Desktop Build/Gitleaks/Govulncheck 全绿，但尚未合并。#45/#46 也是开放依赖 PR，须独立审查。旧“npm audit=0”只属当时快照。 |
+| 源码与文档同步 | `[ ]` 同步执行中 | 本轮正在将 Resume 修复、证据和当前执行基线提交到 GitHub，通过 PR / CI 后同步 main；不会强推或移动标签。 |
+| 最终发行物验收 | `[ ] BLOCKED` | beta.4 完整 Resume 与最终隐私验收未封口；开发副本完成不能解除固定发行物的所有门槛。 |
+| Public Beta | `[ ] BLOCKED` | Draft 保持未发布，待候选身份决策及最终验收。 |
 
-### 已存在标签的处理规则
+### 当前下一步
 
-`v0.5.0-beta.1` 已在远端，不再执行本文任何“创建/推送同名标签”的旧命令，也不将其失败工作流重跑结果作为本轮首发候选。UI、安全或发布代码修复进入新提交并使用 `v0.5.0-beta.2`；同步 `VERSION` 和发行说明。不得删除、移动或强推 `beta.1` 标签，也不得把新提交的手工构建冒充 `beta.1` 标签产物。本手册在 `main` 上管理执行，不改变已固定的标签内容。
+1. 通过 PR 同步 Resume 与事件隐私修复及文档；保留旧本地主干归档，检查工作树干净。
+2. 在新的独立开发构建上验证脱敏事件和失败摘要；保留历史 DB，不回写或清洗历史证据。
+3. 判定当前 unreadable 条目与历史哈希失败的验收边界，补齐运行日志隐私证据。
+4. 独立审查 #45–#47 及开放漏洞；绿色 CI 不替代依赖适用性与风险判定。
+5. 收口后决定新的 RC 身份，再进行完整 Gate、构建和发行物验收；保持现有标签和资产可追溯。
 
-> 核验标签指向时，`v0.5.0-beta.*` 是 **annotated tag**，必须用 `^{commit}` 或 `git rev-list -n1` 取 commit，
-> 不要比较 tag object —— 详见 §27.1。
+核对 annotated tag 时使用 `^{commit}` 或 peeled `^{}引用`，不要把 tag object 当源码 SHA。
 
 ---
+
+## 历史操作参考（2026-09-22 beta.2 执行稿；不管理实时状态）
 
 # 0. 本轮工作的最终目标
 
