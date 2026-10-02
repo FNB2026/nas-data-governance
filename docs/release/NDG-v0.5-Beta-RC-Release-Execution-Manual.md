@@ -3,9 +3,9 @@
 > 项目：NAS Data Governance（NDG）
 > 当前阶段：首个 Public Beta 发布前验收（Resume 与事件隐私修复已随 #48 入主干）
 > 文档性质：唯一实时执行基线；下方状态表管理当前进度
-> 最新验收产品代码基线：`99207659532c7e5bcdf79d7220e64fc86e063625`（#47 合并后）；`VERSION=0.5.0-beta.4`
-> 自 `499022b` 起的差异 = 纯文档提交（#49/#50/#51）+ 仅开发依赖 lockfile（frontend 的 undici 8.9.0→8.11.2，即 #47）；运行时依赖集合不变（208 条 package 条目无增删），该 dev 依赖不进入发布产物。
-> 说明：该基线**只反映产品/依赖代码身份**，仅在合并产品/依赖代码时推进；纯文档合并（含本手册更新）不改变它，避免出现"文档 PR 更新 main SHA、合并又改变 main SHA"的递归。
+> 最新验收产品代码基线：`83d0807f42aa4bb6a2af7d83a6777d0d6aeaa5bc`（**进入最终 RC Freeze 的代码基线**，9 项门禁在此全绿）；`VERSION=0.5.0-beta.5`（RC 身份 PR）
+> 自 `499022b` 起的差异 = 纯文档提交（#49/#50/#51/#52/#53）+ 仅开发依赖 lockfile（undici 8.9.0→8.11.2，#47）+ 发布门禁测试脚本修复（#54，零产品代码改动）；运行时依赖集合不变（208 条 package 条目无增删），dev 依赖不进入发布产物。
+> 说明：该基线**只反映产品/依赖代码身份**，仅在合并产品/依赖代码时推进；纯文档合并（含本手册更新）不改变它。**最终 RC SHA 是本 RC 身份 PR 合并后的提交**（`83d0807` 不是标签目标），tag 创建后回填。
 > 已冻结候选：`v0.5.0-beta.4` → `9484ad46188c69f8ea97b8cc5db71eb67061b2e5`；Release 仍为 Draft / Pre-release，本轮不做任何改动
 > 修复源码：已随 #48 合入主干 `79bbc05`（远端分支 `fix/resume-prefix-traversal` 已删除）；真实完成证据来自独立 `dev / 31d693857939` App
 
@@ -27,8 +27,8 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 - beta.4 固定源码是 `9484ad4`；#43 / #44 的 release tooling 修复已进入主干，
   不改变 beta.4 的源码身份。其失败 Actions 记录保留为历史证据。
 - 独立 Resume Fix 开发 App 和验证副本的结果，不归入 beta.4 安装包验收。
-- Resume 与事件隐私修复已随 #48 合入主干 `79bbc05`；如首个公开 Beta 要包含这些修复，
-  须在主干上构建并验收新的候选身份。后续候选版本尚未决定，当前不提升 VERSION，不创建新标签。
+- **RC 身份已提升（2026-10-02）**：`VERSION=0.5.0-beta.5`、`BUNDLE_BUILD_NUMBER=5`，由 `scripts/release/sync-version.sh` 派生到 wails.json / package.json / package-lock.json（两处）/ Info.plist / Info.dev.plist；CHANGELOG 新增 `0.5.0-beta.5` 段作为 release notes 提取源。**尚未创建标签**；`beta.4` 的 tag / Draft / 资产保持不动。
+- 冻版外待办（**不进入 beta.5**）：① release script tests 目前只在 Ubuntu 作业运行，**BSD/GNU 方言漂移在 CI 中不可见**（本次以本地 macOS 真实 Gate 覆盖）→ Release Infrastructure Hardening；② `Sign .app` / `Verify artifacts` 的 empty-value 断言与 ambiguous-match 断言的 **mutation coverage 未穷尽**（无证据表明实际保障缺失）；③ `#45`/`#46` 依赖升级 → Beta Stabilization。
 - 发行表述门槛（强制）：公开 Beta 的发行说明必须区分「遍历完成 / 文件存在状态 / 内容哈希覆盖率」三项，写明"扫描完成 ≠ 每个文件内容都完成哈希校验"，并把 3 条历史哈希失败原因不可追溯、26 条 unavailable 原始错误不可回溯列为已知限制。见 [口径封口报告](coverage-and-failure-criteria-2026-10-02.md)。
 - 发布仍需最终资产安装验收、真实数据安全证据、隐私和依赖判定全部收口。
   当前不发布 Draft，也不替换其已有 DMG。
@@ -38,7 +38,8 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 | 关口 | 状态 | 当前证据 / 下一动作 |
 |---|---|---|
 | UI Final Polish | `[x]` 开发阶段完成 | P1–P8 已随 [#36](https://github.com/FNB2026/nas-data-governance/pull/36) 合入；P8-D 真实场景与窗口豁免见下文历史证据。不能替代新候选构建验收。 |
-| 标签与版本 | `[x]` 身份核对 | beta.1=`4bade771`、beta.2=`7ebe7f0`、beta.3=`244b4a8`、beta.4=`9484ad4`；VERSION 为 beta.4。后续修复候选版本未定。 |
+| 标签与版本 | `[x]` RC 身份已提升 | beta.1=`4bade771`、beta.2=`7ebe7f0`、beta.3=`244b4a8`、beta.4=`9484ad4`（均保持不可变）；**VERSION 已提升为 `0.5.0-beta.5`（BUNDLE_BUILD_NUMBER=5）**，标签待创建。 |
+| RC Freeze 门禁 | `[x]` 已在基线全绿 | 9 项门禁在 `83d0807` 上**从头执行**（不与上一轮拼接）：go test -race ✓ / go vet ✓ / frontend-check ✓ / public-check ✓ / version-check ✓ / desktop-build ✓ / test-version-mapping 11-0 ✓ / test-macos-scripts 0 FAIL ✓ / test-release-workflow **85-0** ✓；`GATE_HEAD=83d0807…`，工作树 0 改动。版本提升后在同一分支复跑（见 RC 身份 PR）。 |
 | 发布工程 | `[x]` 源码已同步 | #39/#41/#43/#44/#48 已合入；远端 main `79bbc05` 的 CI 成功（run 36963924777，headSha 与该提交严格绑定）。 |
 | beta.4 签名与公证 | `[x]` 历史资产证据 | 前轮发布工程已记录签名、公证 Accepted、staple 和 DMG。2026-10-02 本次核对只确认 Draft 中四项资产存在，未重复执行密码或签名验证。 |
 | Draft 资产 | `[x]` 平台核对 | beta.4 Draft / Pre-release 包含 DMG、DMG.sha256、CycloneDX、SPDX；尚未公开。 |
@@ -58,7 +59,7 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 2. `[x]` 已完成（2026-10-02）：失败解释 / 覆盖率口径已冻结为三个互不混淆的维度（遍历完成 / 文件存在状态 / 内容哈希覆盖）；未新增扫描、未改扫描逻辑、未清洗历史。见 [口径封口报告](coverage-and-failure-criteria-2026-10-02.md)。
 3. `[x]` 已完成（2026-10-02）：#47（undici 8.9.0→8.11.2，仅 frontend lockfile 的 dev 依赖）已重基到最新 main、独立核对后合并；新 main `9920765` 的主干 CI SUCCESS（headSha 绑定），Dependabot 面板 open=0（10 条 undici 告警全部转 fixed）。Step 3 CLOSED。
 4. `[x]` 已完成（2026-10-02）：#45 与 #46 **先重基到最新 main 再取证**后独立判定，**两者均不进首个 Public Beta**（延后到 Beta Stabilization / post-beta dependency maintenance；PR 保持 OPEN）。依据：#45 直接升级项全部进入发布二进制（wails/v2 17 包、modernc/sqlite+libc 26 包、x/sys、x/text），且与 `WAILS_VERSION := v2.13.0` 的 CLI pin 形成三方一致性义务，回归面覆盖运行时与数据层；#46 全部落在 devDependencies（无生产依赖变动）但抬高 Node 下限，属维护窗口事项。两者均未被 CI 绿"绑定"为应合并。见 [判定报告](dependency-prs-45-46-judgment-2026-10-02.md)。
-5. 上述判定收口后决定新的 RC 身份（按版本序列自然为 v0.5.0-beta.5，届时再改 VERSION 并打标签，当前不提前创建），随后完整 Gate、签名 / 公证 / Staple / SHA / SBOM、Clean Install 与真实 NAS 最终发行物验收，再进入 Public Beta。beta.4 的 tag、Draft 与资产全程不动，作为固定历史候选。
+5. `[~]` 进行中（2026-10-02）：RC 身份已提升为 `0.5.0-beta.5`（build 5）并随本 RC 身份 PR 提交；**合并后创建 annotated tag `v0.5.0-beta.5`** → Release workflow 产出签名 / 公证 / Staple / SHA-256 / SBOM 与 Draft Release → 最终发行物验收（Clean Install + 真实 NAS + GUI 隐私与长时日志 + Quarantine / Restore / Crash Recovery）。beta.4 的 tag、Draft 与资产全程不动，作为固定历史候选。
 
 核对 annotated tag 时使用 `^{commit}` 或 peeled `^{}引用`，不要把 tag object 当源码 SHA。
 
