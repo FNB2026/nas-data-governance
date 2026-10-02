@@ -642,10 +642,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setActiveJobId(resp.job_id);
       setScanProgress(null);
       setConnectionStatus("connected");
+      void loadJobs();
     } catch (e: unknown) {
       pushToast("error", "启动扫描失败", (e as Error).message);
     }
-  }, [pushToast]);
+  }, [pushToast, loadJobs]);
 
   const retryLastScan = useCallback(async () => {
     if (!lastScanParams) {

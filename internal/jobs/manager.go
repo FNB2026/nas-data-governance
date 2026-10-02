@@ -125,8 +125,7 @@ func (m *JobManager) Create(ctx context.Context, projectID string, jobType JobTy
 		return "", fmt.Errorf("jobs: create: %w", err)
 	}
 	_, err := m.store.AppendEvent(ctx, id, events.EventCreated, string(StageDiscovering), string(StateQueued), map[string]any{
-		"job_type":   string(jobType),
-		"project_id": projectID,
+		"job_type": string(jobType),
 	})
 	if err != nil {
 		return "", fmt.Errorf("jobs: emit created event: %w", err)

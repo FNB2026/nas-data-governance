@@ -60,8 +60,9 @@ export default function AppShell({
           </span>
           {scanActive && scanProgress && (
             <span className="header-scan-indicator" role="status">
-              扫描中 · 已处理 {scanProgress.processed.toLocaleString()} /{" "}
-              {scanProgress.discovered.toLocaleString()}
+              {["PREPARING_RESUME", "SEEKING_RESUME"].includes(scanProgress.stage)
+                ? "恢复扫描中 · 正在读取和定位已保存的进度"
+                : `扫描中 · 已处理 ${scanProgress.processed.toLocaleString()} / ${scanProgress.discovered.toLocaleString()}`}
             </span>
           )}
           {capabilities.recovery_lock_active && (

@@ -22,8 +22,9 @@ type Options struct {
 	CrossMounts   bool
 	ExcludedNames map[string]bool
 	// ResumePath, if non-empty, skips files whose path sorts at or before
-	// this value (path <= ResumePath). Directories are still entered so that
-	// files beyond the boundary are discovered. Used by incremental scan to
+	// this value (path <= ResumePath). Completed directory subtrees are
+	// pruned before metadata reads; ancestors of the boundary are entered to
+	// discover later siblings. Used by incremental scan to
 	// resume from a checkpoint.
 	//
 	// Correctness depends on Scan visiting files in ascending global
@@ -97,6 +98,11 @@ type scanPathKey struct {
 //     path — are distinct instances and are NOT deduplicated, because the key
 //     excludes inode by design.
 func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) error) (Stats, error) {
+	return scan(ctx, opts, visit, os.ReadDir)
+}
+
+// readDir is injected only by package tests to verify the I/O boundary.
+func scan(ctx context.Context, opts Options, visit func(domain.FileInstance) error, readDir func(string) ([]os.DirEntry, error)) (Stats, error) {
 	root, err := filepath.Abs(opts.Root)
 	if err != nil {
 		return Stats{}, err
@@ -134,7 +140,7 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 		}
 		stats.DirsVisited++
 
-		entries, err := os.ReadDir(dirPath)
+		entries, err := readDir(dirPath)
 		if err != nil {
 			stats.Errors = append(stats.Errors, ErrorEntry{Path: dirPath, Error: err})
 			checkpointBlocked = true
@@ -163,6 +169,22 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			// Exclusion check (root itself is never excluded).
 			if path != root && opts.ExcludedNames[entry.Name()] {
 				continue
+			}
+
+			// No metadata lookup or enumeration is needed for an already durable
+			// prefix. A directory's descendants all share path + separator:
+			// prune only when that prefix sorts before the boundary AND does
+			// not contain it. Comparing the bare directory name is unsafe
+			// (e.g. "a" vs "a.txt"), and would skip unvisited descendants.
+			if opts.ResumePath != "" {
+				if entry.IsDir() {
+					prefix := path + string(filepath.Separator)
+					if prefix <= opts.ResumePath && !strings.HasPrefix(opts.ResumePath, prefix) {
+						continue
+					}
+				} else if path <= opts.ResumePath {
+					continue
+				}
 			}
 
 			info, err := entry.Info()
@@ -194,13 +216,6 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 				if err := walkDir(path, dev); err != nil {
 					return err
 				}
-				continue
-			}
-
-			// Resume checkpoint: skip files at or before the resume path.
-			// The checkpoint's last_scanned_path is the most recently
-			// scanned file; resume continues strictly after it.
-			if opts.ResumePath != "" && path <= opts.ResumePath {
 				continue
 			}
 

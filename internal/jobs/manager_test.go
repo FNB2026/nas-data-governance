@@ -80,6 +80,30 @@ func TestCreate_PersistsQueuedJobAndEvent(t *testing.T) {
 // Run — successful completion
 // ---------------------------------------------------------------------------
 
+func TestCreateDoesNotExposeProjectDatabasePathInEvents(t *testing.T) {
+	mgr, st := newTestManager(t)
+	ctx := context.Background()
+	projectPath := filepath.Join(t.TempDir(), "private-project.db")
+	jobID, err := mgr.Create(ctx, projectPath, jobs.JobScan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.GetJob(ctx, jobID)
+	if err != nil || run.ProjectID != projectPath {
+		t.Fatal("private job identity must remain available for project queries")
+	}
+	evts, err := st.ListEvents(ctx, jobID)
+	if err != nil || len(evts) != 1 {
+		t.Fatal("expected a persisted creation event")
+	}
+	if _, ok := evts[0].Payload["project_id"]; ok {
+		t.Fatal("creation event exposed private project identity")
+	}
+	if len(evts[0].Payload) != 1 || evts[0].Payload["job_type"] != "scan" {
+		t.Fatal("creation event should contain only job type")
+	}
+}
+
 func TestRun_SuccessfulCompletion(t *testing.T) {
 	mgr, st := newTestManager(t)
 	ctx := context.Background()

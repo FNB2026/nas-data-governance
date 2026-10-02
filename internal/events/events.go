@@ -79,6 +79,7 @@ type Recorder interface {
 // event payloads because they may contain paths, filenames, or other
 // location-identifying data.
 var sensitiveKeys = map[string]bool{
+	"project_id":      true, // desktop project identity may be a database path
 	"path":            true,
 	"file":            true,
 	"filename":        true,

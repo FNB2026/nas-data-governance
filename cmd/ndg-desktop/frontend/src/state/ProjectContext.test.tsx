@@ -64,6 +64,7 @@ function ContextHarness() {
       })}>start scan</button>
       <span data-testid="project">{ctx.project?.path ?? "closed"}</span>
       <span data-testid="storages">{ctx.storages.map((storage) => storage.id).join(",")}</span>
+      <span data-testid="jobs">{ctx.jobs.map((job) => job.job_id).join(",")}</span>
       <span data-testid="active-job">{ctx.activeJobId ?? "none"}</span>
       <span data-testid="can-execute">{String(ctx.capabilities.can_execute_quarantine)}</span>
       <span data-testid="toasts">{ctx.toasts.map((toast) => toast.title).join(",")}</span>
@@ -127,6 +128,14 @@ describe("ProjectContext safety and scan wiring", () => {
       });
     });
     expect(screen.getByTestId("active-job")).toHaveTextContent("job-1");
+  });
+
+  it("refreshes task history immediately when a new scan starts", async () => {
+    renderContext();
+    await openReadWriteProject();
+    apiMock.scan.listJobs.mockResolvedValue([{ job_id: "job-1", state: "RUNNING" }]);
+    fireEvent.click(screen.getByRole("button", { name: "start scan" }));
+    await waitFor(() => expect(screen.getByTestId("jobs")).toHaveTextContent("job-1"));
   });
 
   it("derives a blocked execution capability from the recovery lock", async () => {

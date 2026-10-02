@@ -26,7 +26,7 @@ const { projectState } = vi.hoisted(() => ({
       },
     },
     activeJobId: null as string | null,
-    scanProgress: null as { processed: number; discovered: number } | null,
+    scanProgress: null as { processed: number; discovered: number; stage?: string } | null,
     connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
     displayPath: (path: string) => path,
     refreshProject: vi.fn(),
@@ -84,6 +84,14 @@ describe("AppShell", () => {
     expect(screen.getByText("NAS 连接中断")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
     expect(projectState.refreshProject).toHaveBeenCalledOnce();
+  });
+
+  it.each(["PREPARING_RESUME", "SEEKING_RESUME"])("explains %s in the global header", (stage) => {
+    projectState.activeJobId = "job-resume";
+    projectState.scanProgress = { stage, processed: 0, discovered: 0 };
+    render(<AppShell activeRoute="sources" onRouteChange={vi.fn()}><div /></AppShell>);
+    expect(screen.getByText("恢复扫描中 · 正在读取和定位已保存的进度")).toBeInTheDocument();
+    expect(screen.queryByText("扫描中 · 已处理 0 / 0")).not.toBeInTheDocument();
   });
 
   it("prioritizes active scan progress in the header", () => {

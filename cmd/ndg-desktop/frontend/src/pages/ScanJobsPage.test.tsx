@@ -151,6 +151,18 @@ describe("ScanJobsPage scan defaults", () => {
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
   });
 
+  it.each(["PREPARING_RESUME", "SEEKING_RESUME"])("explains zero counters during %s", (stage) => {
+    contextMock.activeJobId = "job-resume";
+    contextMock.scanProgress = {
+      job_id: "job-resume", state: "RUNNING", stage,
+      discovered: 0, processed: 0, failed: 0, warning_count: 0,
+      error_code: "", created_at: "", started_at: "", completed_at: "",
+    };
+    render(<ScanJobsPage />);
+    expect(screen.getByText(/下方计数仅表示本轮新增发现和处理的文件/)).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  });
+
   it("labels finalization as saving the index", () => {
     contextMock.activeJobId = "job-1";
     contextMock.scanProgress = {

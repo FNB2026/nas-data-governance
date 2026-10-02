@@ -98,6 +98,8 @@ var ErrInvalidTransition = errors.New("jobs: invalid state transition")
 type JobStage string
 
 const (
+	StagePreparingResume    JobStage = "PREPARING_RESUME"
+	StageSeekingResume      JobStage = "SEEKING_RESUME"
 	StageDiscovering        JobStage = "DISCOVERING"
 	StageMetadataIndexing   JobStage = "METADATA_INDEXING"
 	StageQuickHashing       JobStage = "QUICK_HASHING"

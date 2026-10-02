@@ -67,12 +67,27 @@ func TestScanResumeFromAbortedCheckpoint(t *testing.T) {
 
 	// Run scan with Resume=true.
 	svc := NewScanService(st)
+	var resumeStages []string
 	result, err := svc.Scan(ctx, ScanInput{
 		Root: root, StorageID: storageID, Resume: true,
 		Workers: 1, HashAttempts: 1, HashRetryDelay: 0,
+		onStageChanged: func(stage string) {
+			resumeStages = append(resumeStages, stage)
+			progress := svc.Progress()
+			if (stage == "preparing_resume" || stage == "seeking_resume") && progress.Discovered != 0 {
+				t.Errorf("resume preparation must precede new discoveries: %+v", progress)
+			}
+			if stage == "traversal" && progress.Discovered != 1 {
+				t.Errorf("resume traversal should begin at first new file: %+v", progress)
+			}
+		},
 	})
 	if err != nil {
 		t.Fatalf("Scan with resume: %v", err)
+	}
+
+	if len(resumeStages) < 3 || resumeStages[0] != "preparing_resume" || resumeStages[1] != "seeking_resume" || resumeStages[2] != "traversal" {
+		t.Fatalf("unexpected resume stages: %v", resumeStages)
 	}
 
 	// The scan should have reused the aborted checkpoint.
@@ -514,5 +529,43 @@ func TestScanResumeCumulativeCountNoRegression(t *testing.T) {
 	}
 	if !foundFinal {
 		t.Errorf("expected final directory checkpoint with count %d, got: %+v", totalFiles, updates2)
+	}
+}
+
+// A single network hash failure used to leave checkpoint advancement blocked
+// while the entire remaining tree kept hashing for hours.
+func TestNetworkQuickHashFailureBoundsWorkAndPreservesResume(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	for i := 0; i < 100; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("%03d.txt", i)), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var calls atomic.Int64
+	svc := NewScanServiceWithHashFunc(st, func(string, int64) (string, error) { calls.Add(1); return "", os.ErrNotExist }, func(string, int64) (string, error) {
+		t.Error("full hashing after source loss")
+		return "", os.ErrNotExist
+	})
+	result, err := svc.Scan(ctx, ScanInput{Root: root, StorageID: "quick-loss", NetworkSource: true, Workers: 1, HashAttempts: 1})
+	if !errors.Is(err, ErrNetworkSourceUnavailable) || result == nil || result.FullTraversal || result.Missing != 0 {
+		t.Fatalf("unsafe result: %+v err=%v", result, err)
+	}
+	if calls.Load() > 2 {
+		t.Fatalf("hashed %d files after source loss", calls.Load())
+	}
+	cp, err := st.LastCheckpoint(ctx, "quick-loss")
+	if err != nil || cp.Status != "paused_network" || cp.ScannedCount != 0 {
+		t.Fatalf("checkpoint: %+v err=%v", cp, err)
+	}
+	// Remount/retry uses the same checkpoint and can finish all files.
+	resumed, err := NewScanService(st).Scan(ctx, ScanInput{Root: root, StorageID: "quick-loss", NetworkSource: true, Resume: true, Workers: 1, HashAttempts: 1})
+	if err != nil || resumed.CheckpointID != cp.ID || len(resumed.Files) != 100 || !resumed.FullTraversal {
+		t.Fatalf("resume failed: %+v err=%v", resumed, err)
 	}
 }

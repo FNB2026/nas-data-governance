@@ -14,13 +14,14 @@ func TestSanitizePayload_RemovesSensitiveKeys(t *testing.T) {
 		"error":       "open /secret/path: permission denied",
 		"quarantine":  "/var/quarantine/abc",
 		"db_path":     "<db_path_placeholder>",
+		"project_id":  "/private/project/governance.db",
 		"processed":   int64(50),
 	}
 
 	result := SanitizePayload(payload)
 
 	// Sensitive keys must be removed.
-	for _, key := range []string{"path", "filename", "source_path", "target_path", "error", "quarantine", "db_path"} {
+	for _, key := range []string{"path", "filename", "source_path", "target_path", "error", "quarantine", "db_path", "project_id"} {
 		if _, ok := result[key]; ok {
 			t.Errorf("SanitizePayload: sensitive key %q should be removed", key)
 		}
