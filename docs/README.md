@@ -9,7 +9,7 @@
 ## 规范基线
 
 - [白皮书](whitepaper.md)：领域模型、安全边界与治理方法。
-- [NDG v0.5 Beta RC / Release Execution 执行操作手册](release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)：首个公开 Beta 发布前唯一执行基线；当前为 beta.4 Draft 与 Resume 修复验证收口，后续候选身份未定，实时进度、阻断原因和决策在此维护。
+- [NDG v0.5 Beta RC / Release Execution 执行操作手册](release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)：首个公开 Beta 发布前唯一执行基线；当前为 beta.5 正式 Draft DMG 最终验收，RC / Tag / 资产已冻结，实时进度、阻断原因和决策在此维护。
 - [桌面端前端架构与后端协同推进方案](desktop-frontend-architecture.md)：七域页面、Binding/DTO、执行安全接线、Phase 0—7、测试矩阵与 DoD；当前桌面实施主文档。
 - [桌面信息架构](ui/information-architecture.md)：七域导航与页面职责摘要。
 
@@ -25,6 +25,8 @@
 - [本地语义学习提案](proposals/local-semantic-learning.md)。
 
 ## 发布验收证据
+
+- [beta.5 最终发行物验收](release/beta.5-final-artifact-acceptance-2026-10-02.md)：正式 Draft DMG 身份与逐场景证据；未实测项目明确标记。实时决策仍由执行手册管理。
 
 - [Resume 修复证据（2026-09-29）](release/resume-prefix-repair-2026-09-29.md)：开发修复及早期验证快照。
 - [Resume 完成验收（2026-10-02）](release/resume-fix-validation-2026-10-02.md)：开发版自然完成、前缀保留、失败与隐私边界。

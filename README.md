@@ -4,7 +4,7 @@
 
 面向个人、家庭和组织 NAS 数字资产的本地数据治理与归档工具。在你的 Mac 上安全扫描、识别重复文件、生成可审计的治理计划，全程只读分析，仅在明确批准后才执行可恢复的文件操作。
 
-> **发布候选状态**：仓库版本为 `0.5.0-beta.4`，对应签名候选资产仍保留在 GitHub Draft Release，尚未公开。独立开发构建已完成真实 NAS Resume 验证；事件隐私修复、失败解释及最终候选安装包验收仍待收口。当前进度以[发布执行手册](docs/release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)为准；普通用户请等待正式公开的 Beta 安装包。
+> **发布候选状态**：`v0.5.0-beta.5`（build 5）的 RC / Tag / 正式 DMG 已冻结，签名、公证与 Draft Release workflow 成功；当前进行正式发行物最终验收，尚未公开。开发版、CI 与资产静态验证不能替代真机 GUI / NAS 验收。当前进度以[发布执行手册](docs/release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)为准；普通用户请等待正式公开的 Beta 安装包。
 
 ## 产品界面
 
