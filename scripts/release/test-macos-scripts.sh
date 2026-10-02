@@ -130,7 +130,7 @@ echo ""
 echo "--- Test 4: notarize script rejects password mode ---"
 
 # Verify --apple-id and --password are NOT in the script's case statement
-if grep -q '\-\-apple-id\|\-\-password' "$ROOT/scripts/release/notarize-macos-app.sh"; then
+if grep -q -E '\-\-apple-id|\-\-password' "$ROOT/scripts/release/notarize-macos-app.sh"; then
     # Check if they're in case statement (accepted args) vs comments
     if grep -E '^\s+--apple-id\)|--password\)' "$ROOT/scripts/release/notarize-macos-app.sh" >/dev/null 2>&1; then
         fail "notarize script still accepts --apple-id or --password as arguments"
