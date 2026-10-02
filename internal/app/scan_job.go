@@ -116,6 +116,31 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 		wg.Wait()
 
 		if result != nil {
+			// Keep partial coverage and non-fatal failures explainable after the
+			// in-memory result is gone. Persist counts only, never source paths
+			// or raw filesystem errors.
+			if result.ScanErrors > 0 || len(result.HashFailures) > 0 || result.CoverageState == "partial" {
+				quickFailures, fullFailures := 0, 0
+				for _, failure := range result.HashFailures {
+					switch failure.Stage {
+					case "quick":
+						quickFailures++
+					case "full":
+						fullFailures++
+					}
+				}
+				if err := reporter.Warn(context.Background(), map[string]any{
+					"category":            "scan_summary",
+					"scan_errors":         result.ScanErrors,
+					"quick_hash_failures": quickFailures,
+					"full_hash_failures":  fullFailures,
+					"coverage_state":      result.CoverageState,
+					"missing":             result.Missing,
+					"unavailable":         result.Unavailable,
+				}); err != nil && scanErr == nil {
+					scanErr = errors.New("app: persist scan summary failed")
+				}
+			}
 			// Preserve the last aggregate snapshot for completed, paused, and
 			// partially processed scans without exposing any source paths.
 			_ = reporter.SetProgress(context.Background(), jobs.ProgressPayload{
