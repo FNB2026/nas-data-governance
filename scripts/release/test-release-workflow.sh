@@ -153,7 +153,7 @@ else
     fail "Untar step missing 'mkdir -p' for git-ignored build/bin directory"
 fi
 
-if grep -q 'test -x\|\[\[ ! -x' "$WORKFLOW"; then
+if grep -q -E 'test -x|\[\[ ! -x' "$WORKFLOW"; then
     pass "Executable permission is verified after untar"
 else
     fail "Executable permission verification not found after untar"
@@ -239,7 +239,7 @@ else
     fail "generate-sbom.sh missing JSON validation function"
 fi
 
-if grep -q 'sha256\|SHA256\|checksum' "$SBOM_SCRIPT"; then
+if grep -q -E 'sha256|SHA256|checksum' "$SBOM_SCRIPT"; then
     pass "generate-sbom.sh has SHA256 checksum verification for syft download"
 else
     fail "generate-sbom.sh missing SHA256 checksum verification for syft download"
@@ -398,7 +398,7 @@ else
 fi
 
 # B10: The "Sign .app" step must have an empty-value check
-if echo "$SIGN_STEP" | grep -q 'SIGNING_IDENTITY.*empty\|GITHUB_ENV propagation failed'; then
+if echo "$SIGN_STEP" | grep -q -E 'SIGNING_IDENTITY.*empty|GITHUB_ENV propagation failed'; then
     pass "Sign .app step has empty-value check for SIGNING_IDENTITY"
 else
     fail "Sign .app step missing empty-value check for SIGNING_IDENTITY"
@@ -413,7 +413,7 @@ else
 fi
 
 # B10: The "Verify release artifacts" step must have an empty-value check
-if echo "$VERIFY_STEP" | grep -q 'APPLE_TEAM_ID.*empty\|GITHUB_ENV propagation failed'; then
+if echo "$VERIFY_STEP" | grep -q -E 'APPLE_TEAM_ID.*empty|GITHUB_ENV propagation failed'; then
     pass "Verify artifacts step has empty-value check for APPLE_TEAM_ID"
 else
     fail "Verify artifacts step missing empty-value check for APPLE_TEAM_ID"
@@ -422,7 +422,7 @@ fi
 # B10/B13: Signing identity verification must filter by APPLE_TEAM_ID using
 # grep -F for exact parenthesized match (not substring grep)
 IDENTITY_STEP="$(grep -A 50 'Verify signing identity matches APPLE_TEAM_ID' "$WORKFLOW")"
-if echo "$IDENTITY_STEP" | grep -q 'grep -F.*APPLE_TEAM_ID\|grep -F "(\$APPLE_TEAM_ID)"'; then
+if echo "$IDENTITY_STEP" | grep -q -E 'grep -F.*APPLE_TEAM_ID|grep -F "\(\$APPLE_TEAM_ID\)"'; then
     pass "Signing identity verification uses grep -F for exact match"
 else
     fail "Signing identity verification does not use grep -F for exact match"
@@ -480,7 +480,7 @@ else
 fi
 
 # B10: Must check for multiple matches (ambiguous identity)
-if echo "$IDENTITY_STEP" | grep -q 'multiple.*Developer ID\|MATCHING_IDENTITIES'; then
+if echo "$IDENTITY_STEP" | grep -q -E 'multiple.*Developer ID|MATCHING_IDENTITIES'; then
     pass "Signing identity verification checks for ambiguous matches"
 else
     fail "Signing identity verification missing ambiguous match check"
@@ -502,9 +502,13 @@ else
     fail "Release update missing --json isDraft,isPrerelease,isImmutable query"
 fi
 
-# B11: Must check IS_DRAFT == true
-if echo "$DRAFT_RELEASE_SECTION" | grep -q 'IS_DRAFT.*true\|isDraft.*true'; then
-    pass "Release update checks IS_DRAFT is true"
+# B11: Must check IS_DRAFT == true inside a real test construct.
+# The assertion must not be satisfiable by a comment or a log line: an earlier
+# form ('IS_DRAFT.*true|isDraft.*true') was matched by the comment
+# "# isDraft must be true", so the guard could be deleted while the check still
+# passed (found by mutation testing, 2026-10-02).
+if echo "$DRAFT_RELEASE_SECTION" | grep -q -E '\[\[[^]]*IS_DRAFT[^]]*true'; then
+    pass "Release update checks IS_DRAFT is true in a test construct"
 else
     fail "Release update missing IS_DRAFT check"
 fi
@@ -517,7 +521,7 @@ else
 fi
 
 # B11: Must fail closed when not draft or immutable
-if echo "$DRAFT_RELEASE_SECTION" | grep -q 'refusing to modify\|already published or immutable'; then
+if echo "$DRAFT_RELEASE_SECTION" | grep -q -E 'refusing to modify|already published or immutable'; then
     pass "Release update fails closed for published/immutable releases"
 else
     fail "Release update missing fail-closed for published/immutable releases"
@@ -639,9 +643,13 @@ else
     fail "Stable release path missing --prerelease=false (B14 not fixed)"
 fi
 
-# B14: Must verify final prerelease state after edit
-if echo "$DRAFT_RELEASE_SECTION" | grep -q 'FINAL_PRERELEASE\|prerelease state mismatch'; then
-    pass "Release update verifies final prerelease state after edit"
+# B14: Must compare the final prerelease state against the expected value.
+# The assertion must not be satisfiable by the failure message text: an earlier
+# form ('FINAL_PRERELEASE|prerelease state mismatch') was matched by the echoed
+# string "Release prerelease state mismatch", so the comparison could be deleted
+# while the check still passed (found by mutation testing, 2026-10-02).
+if echo "$DRAFT_RELEASE_SECTION" | grep -q -E '"\$FINAL_PRERELEASE" != "\$EXPECTED_PRERELEASE"'; then
+    pass "Release update compares FINAL_PRERELEASE against EXPECTED_PRERELEASE"
 else
     fail "Release update missing final prerelease state verification"
 fi
