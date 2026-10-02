@@ -45,7 +45,7 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 | 事件隐私与失败摘要 | `[ ]` 源码修复完成，部署待验 | `33594b9` 删除 creation event 项目路径并在持久化层禁止 project_id，增加脱敏失败/覆盖摘要；全量 Go race、vet 通过。历史 DB 保留，新代码尚未部署到已完成 App。 |
 | 运行日志隐私 | `[ ] BLOCKED` 证据缺失 | 历史 creation event 有本机 DB 完整路径；当前 stdout/stderr 无可读日志文件，不能宣布运行隐私全部通过。 |
 | 依赖与安全告警 | `[ ]` 当前告警待判定 | 2026-10-02 GitHub 有 6 项 undici 开放告警（1 high / 2 medium / 3 low，development scope）；#47 修复 PR 的 Verify/Desktop Build/Gitleaks/Govulncheck 全绿，但尚未合并。#45/#46 也是开放依赖 PR，须独立审查。旧“npm audit=0”只属当时快照。 |
-| 源码与文档同步 | `[ ]` 同步执行中 | 本轮正在将 Resume 修复、证据和当前执行基线提交到 GitHub，通过 PR / CI 后同步 main；不会强推或移动标签。 |
+| 源码与文档同步 | `[x]` 分支已同步；主干见 PR | 修复与文档已推送 `origin/fix/resume-prefix-traversal`，[#48](https://github.com/FNB2026/nas-data-governance/pull/48) 负责主干校验与合并；以该 PR 的检查和合并状态为准。旧本地 main 已保存在本地及远端 `archive/main-before-sync-20261002`，不覆盖历史提交。 |
 | 最终发行物验收 | `[ ] BLOCKED` | beta.4 完整 Resume 与最终隐私验收未封口；开发副本完成不能解除固定发行物的所有门槛。 |
 | Public Beta | `[ ] BLOCKED` | Draft 保持未发布，待候选身份决策及最终验收。 |
 
