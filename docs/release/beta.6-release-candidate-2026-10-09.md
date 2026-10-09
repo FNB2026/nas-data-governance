@@ -20,8 +20,8 @@
 | 全新 Mac 离线首次安装启动 | 新 DMG 在未运行该候选的 Mac 上，无“仍要打开”/清除 quarantine 的绕过；需要独立机器实际证据 | BLOCKED — 缺 beta.6 独立机器实际证据 |
 | SMB 基线/网络暂停/恢复 | 独立 disposable 共享、新 DB，实际状态链、候选覆盖、计数与源一致性 | PASS — 实际 FULL_HASHING / PAUSED_NETWORK / Resume COMPLETED |
 | 异常运行日志隐私 | GUI events、stdout/stderr、统一日志；合成路径/文件名/业务锚点零泄漏 | PASS — 本轮限定异常窗口；长时门禁另列 |
-| Disposable Quarantine / Restore | SMB 与必要隐私 PASS 后进入 | NOT RUN |
-| Crash Recovery / Recovery Lock | 前置 Gate 完成后进入 | NOT RUN |
+| Disposable Quarantine / Restore | SMB 与必要隐私 PASS 后进入 | FAIL — [正式 GUI 验收与修复任务](beta.6-quarantine-restore-acceptance-2026-10-10.md)，文件闭环通过但计划状态/陈旧结果不一致 |
+| Crash Recovery / Recovery Lock | 前置 Gate 完成后进入 | NOT RUN — Quarantine / Restore FAIL 阻断 |
 | 长时隐私与其他发布门禁 | 独立保留逐项实际结论 | NOT RUN |
 | Public Beta | 全部剩余 Gate 完成后独立判定 | BLOCKED |
 
