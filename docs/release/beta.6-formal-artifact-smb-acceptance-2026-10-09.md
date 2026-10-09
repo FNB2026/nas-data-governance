@@ -115,4 +115,4 @@ beta.5 的 object `3b519f6b8c38f5f35ed313ef9fac1d8f0feac2ec` / peel `8473dd630c4
 
 ## 下一道 Gate
 
-正式发行物的 SMB Resume 与本次限定异常窗口隐私已经具备 PASS 证据，可以准备下一轮 **Disposable Quarantine / Restore**。该操作本轮未运行；随后还需 Crash Recovery / Recovery Lock、零接触 Mac 离线首装、长时隐私及剩余发布门禁。新候选保持 Draft，不直接发布 Public Beta，不重生成/替换这份 DMG。
+正式发行物的 SMB Resume 与本次限定异常窗口隐私已经具备 PASS 证据。随后独立执行的 [Disposable Quarantine / Restore](beta.6-quarantine-restore-acceptance-2026-10-10.md) 总体 **FAIL**：文件闭环通过，但计划持久化终态及陈旧拒绝结果不一致，修复任务 [#62](https://github.com/FNB2026/nas-data-governance/issues/62)。该后续结果不改写本记录的 SMB PASS。Crash Recovery / Recovery Lock 未运行且被前置 FAIL 阻断；零接触 Mac 离线首装、长时隐私及剩余门禁仍待完成。新候选保持 Draft，不直接发布 Public Beta，不重生成/替换这份 DMG。
