@@ -33,7 +33,7 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 - 发布仍需最终资产安装验收、真实数据安全证据、隐私和依赖判定全部收口。
   当前不发布 Draft，也不替换其已有 DMG。
 
-### 执行状态与证据（2026-10-02）
+### 执行状态与证据（初始 2026-10-02；更新 2026-10-09）
 
 | 关口 | 状态 | 当前证据 / 下一动作 |
 |---|---|---|
@@ -45,12 +45,12 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 | Draft 资产 | `[x]` 平台核对 | beta.5 Release ID=`401795345`，Draft / Pre-release，published_at=null；DMG、DMG.sha256、CycloneDX、SPDX 共四项。DMG asset ID=`605556564`，6,342,011 bytes，SHA-256=`e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5`。 |
 | Resume 核心修复 | `[x]` 开发版自然完成 | 独立 dev `31d6938` 于 2026-10-02 08:33 CST 完成；发现/处理 1,648,814，failed=3；checkpoint completed，原前缀 1,308,951 条全部 active，Resume 入口消失。见 [验收报告](resume-fix-validation-2026-10-02.md)。 |
 | 文件覆盖与失败解释 | `[x]` 已封口（2026-10-02） | 三维度冻结：① 遍历完成（checkpoint `completed`，scanned_count=1,308,951）② 文件存在状态（active=2,957,765 / unavailable=26 / missing=0，本轮只读复核一致；26 条代表探针 ENOENT）③ 内容校验覆盖（快速哈希 100% of active；完整 SHA-256 = 197,170 ≈ 6.67%，按分层设计仅作用于重复候选；3 条历史哈希失败原因不可追溯 = 已知限制）。不得宣称"全部内容均完成校验"。见 [口径封口报告](coverage-and-failure-criteria-2026-10-02.md)。 |
-| 重复结果与目录语境 | `[x]` 开发版抽样 | 52,319 组可读取；一组目录语境、文件证据、物理身份不可靠提示和路径脱敏已复核。 |
+| 重复结果与目录语境 | `[x]` 正式 beta.5 只读抽样（2026-10-09） | Computer Use 只读打开已有 NAS 项目，原共享重新挂载且注册根目录可读。52,319 组可读取；受保护 backup 组的目录语境、文件证据、物理身份待确认和路径 / 业务锚点脱敏均可见；扫描与执行写操作被禁用。已有索引读取不等于本轮完成 NAS 扫描。 |
 | 事件隐私与失败摘要 | `[x]` 新构建验收通过（代码级 + 启动窗口） | 主干 `499022b` 构建：job:created 载荷恰为 `{"job_type":"scan"}`，12 条持久化事件无 project_id / DB 路径 / 源路径；真实哈希失败被计数且失败摘要只含计数（quick=1/full=0/scan_errors=0/missing=0/unavailable=0/coverage=complete）。历史 DB 只读核验：泄漏 10 条（副本）/ 8 条（原始）原样保留不清洗，修复后新增为 0。见 [验收报告](privacy-acceptance-499022b-2026-10-02.md)。GUI 真机复核并入最终发行物验收。 |
-| 运行日志隐私 | `[ ]` 启动窗口已取证，长时运行待真机 | 历史 creation event 有本机 DB 完整路径（保留不清洗）。`499022b` 构建隔离 HOME 启动 8 秒：stdout/stderr 仅 35 字节关闭提示，六类路径锚点 0 命中；GUI 打开项目/扫描期间的运行日志仍待真机取证（并入最终发行物验收）。 |
+| 运行日志隐私 | `[ ]` GUI 操作窗口已取证，长时 / 网络异常待验收 | 正式 beta.5 的 252 秒 GUI 窗口覆盖合成项目创建、扫描、重复结果、审计与数据库包含拒绝：stdout/stderr=0 bytes，2,872 条统一日志的测试锚点 0 命中。仍需长时 / SMB 中断场景；历史泄漏原样保留，有限锚点检查不代表全日志零泄漏。 |
 | 依赖与安全告警 | `[x]` undici 已收口；#45/#46 独立判定 | #47 已合并（新 main=`9920765`；主干 CI run 36971522573 SUCCESS，headSha 绑定）。undici 8.9.0→8.11.2 仅改 `cmd/ndg-desktop/frontend/package-lock.json`（dev 依赖；重基前后 diff 指纹逐字一致；lockfile 剔除该条目后全等 = 零额外漂移）。**告警 reconciliation：open=0**——10 条 undici 告警于 2026-10-02T06:00:52–54Z 全部转为 `fixed`（2 high / 5 medium / 3 low；脆弱区间均 `< 8.10.2`，8.11.2 已在区间外）。此前"6 项开放"为 push 时面板快照，已被平台实际状态取代（旧"npm audit=0"亦只属当时快照）。**#45/#46 已于 2026-10-02 独立判定（先重基到最新 main 再取证）：两者均不进首个 Public Beta，延后到 Beta Stabilization / post-beta dependency maintenance，PR 保持 OPEN**（#45 触及发布二进制 17+26 包并与 wails CLI pin 存在三方一致性义务；#46 纯 devDependencies 但抬高 Node 下限）。见 [判定报告](dependency-prs-45-46-judgment-2026-10-02.md)。 |
 | 源码与文档同步 | `[x]` 已合并入主干 | [#48](https://github.com/FNB2026/nas-data-governance/pull/48) 已合并，merge commit = `79bbc05`；main CI SUCCESS（run 36963924777，headSha 绑定该提交）。远端修复分支已删除；旧本地 main 保留在本地及远端 `archive/main-before-sync-20261002`，不覆盖历史提交。 |
-| 最终发行物验收 | `[ ] BLOCKED` | 唯一对象为 beta.5 正式 Draft DMG；2026-10-09 用户在未运行过 beta.5 的 Mac 上完成断网首次安装 / 启动，未绕过 Gatekeeper，About 完整 RC SHA 匹配：Clean Install 与离线首启 PASS。真实 NAS、GUI 隐私与长时日志、小范围网络 Resume、disposable 写操作 / 恢复仍 NOT RUN。见 [最终发行物验收记录](beta.5-final-artifact-acceptance-2026-10-02.md)。 |
+| 最终发行物验收 | `[ ] BLOCKED` | 唯一对象为 beta.5 正式 Draft DMG；Clean Install 与离线首启 PASS。2026-10-09 Computer Use 补齐已有 NAS 索引只读 UI、正式 App 合成扫描新增 11 条事件隐私与 252 秒 GUI 日志窗口。长时 / 网络异常日志、小范围网络 Resume、disposable 写操作 / 恢复仍 NOT RUN。见 [最终发行物验收记录](beta.5-final-artifact-acceptance-2026-10-02.md)。 |
 | Public Beta | `[ ] BLOCKED` | beta.5 身份已冻结，Draft 保持未发布；全部必需发行物场景通过后，才可提出人工 Publish。 |
 
 ### 当前下一步
@@ -61,7 +61,8 @@ Resume 专题报告只保存其日期对应的证据，不另行管理实时发�
 4. `[x]` 已完成（2026-10-02）：#45 与 #46 **先重基到最新 main 再取证**后独立判定，**两者均不进首个 Public Beta**（延后到 Beta Stabilization / post-beta dependency maintenance；PR 保持 OPEN）。依据：#45 直接升级项全部进入发布二进制（wails/v2 17 包、modernc/sqlite+libc 26 包、x/sys、x/text），且与 `WAILS_VERSION := v2.13.0` 的 CLI pin 形成三方一致性义务，回归面覆盖运行时与数据层；#46 全部落在 devDependencies（无生产依赖变动）但抬高 Node 下限，属维护窗口事项。两者均未被 CI 绿"绑定"为应合并。见 [判定报告](dependency-prs-45-46-judgment-2026-10-02.md)。
 5. `[x]` 发行身份与资产完成（2026-10-02）：#54 发布脚本可移植性修复与 #55 RC 身份提交已合并；`v0.5.0-beta.5` → `8473dd630c4165389b32ffc85ae062145546a766`，Release run `37005096647` SUCCESS，正式签名 DMG 已在 Draft。Tag 创建时的规则 bypass warning 保留为后续治理项，不改写历史。
 6. `[x]` 安装 / 离线首启完成（2026-10-09）：用户人工反馈确认全新 beta.5 环境、下载后未在线启动、断网首次安装 / 打开、无 Gatekeeper 绕过，About 截图 Version / 完整 Commit / Build time / Channel 匹配正式发行身份。Mac 根目录范围的数据库包含拒绝属于预期保护，不等于合法扫描完成。
-7. `[~]` 当前唯一动作：正式 beta.5 App 以“只读打开”进入已有真实 NAS 项目，开启路径脱敏并查看一组重复结果的目录语境 / 文件证据；不重新扫描百万级源。之后依次补 GUI 隐私与长时日志 → 小范围网络 Resume → disposable Quarantine / Restore → Crash Recovery。所有场景分别取证；不改产品、版本、Tag、流水线或资产，不发布 Draft。
+7. `[x]` 只读 UI 与有界 GUI 隐私完成（2026-10-09）：正式 beta.5 App 在原 SMB 挂载下只读读取 52,319 组，受保护组目录语境 / 文件证据 / 脱敏均得到实际 GUI 证据；独立合成项目扫描 3/3/0、checkpoint completed、新增 11 条事件测试锚点 0 命中，252 秒运行日志窗口同样 0 命中。未重新扫描百万级源；不把旧开发版扫描归入正式构建成绩。
+8. `[~]` 当前唯一动作：准备安全小范围 SMB 中断 / remount / Resume 验收并采集全程运行日志，先确认不会影响其他共享会话；之后 disposable Quarantine / Restore → Crash Recovery。长时 / 异常隐私仍未封口；所有场景分别取证，不改产品、版本、Tag、流水线或资产，不发布 Draft。
 
 核对 annotated tag 时使用 `^{commit}` 或 peeled `^{}引用`，不要把 tag object 当源码 SHA。
 

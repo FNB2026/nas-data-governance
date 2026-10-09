@@ -41,9 +41,10 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 | QA-1：Clean Install / 首次 Gatekeeper GUI 路径 | PASS | 2026-10-09 用户人工验收：未运行过 beta.5 的 Mac，下载后未在线启动，断网首次安装并打开正常，未使用“仍要打开”或清除隔离属性；[About 截图](evidence/beta5-offline-first-launch-about-20261009.png) 身份严格匹配正式 RC。 | 用户实际操作反馈与截图，非代理现场操作；未在该 Mac 单独读取 quarantine 属性或复算下载文件 checksum。2026-10-02 CLI 下载与已使用环境的启动证据不用于替代本场景。 |
 | 全新环境断网首次启动 | PASS | 2026-10-09 用户确认全新 beta.5 环境、下载后无在线启动、断网首次安装 / 打开、无 Gatekeeper 绕过；About 版本=0.5.0-beta.5，Commit=`8473dd630c4165389b32ffc85ae062145546a766`，构建时间=2026-10-02T12:13:59Z，通道=beta。 | 用户人工验收与身份截图共同支持本场景；不替代 NAS、事件 / 运行日志隐私、Resume 或恢复场景。 |
 | Release notes / SBOM 资产读取 | PASS | GitHub Release body 去首尾空白后与 CHANGELOG beta.5 段正文逐字相等；未使用占位回退。CycloneDX JSON 可读取，59 components；SPDX-2.3 JSON 可读取，55 packages。 | JSON 读取不代表穷尽 SBOM 完整性审计。 |
-| 正式 App：真实 NAS 项目、索引、重复结果、目录语境与路径脱敏 | NOT RUN | 本阶段未在正式 App 打开真实项目或重新扫描 NAS。 | 开发版与历史 beta.4 证据不能替代此行。 |
-| 正式 App：GUI 操作期间新增事件隐私 | NOT RUN | 尚未执行安全小范围扫描并检查新增持久化事件。 | 旧 creation event / 历史数据库原样保留；不推断新增事件合规。 |
-| 正式 App：GUI 操作期间长时 stdout / stderr 与统一日志隐私 | NOT RUN | 当前仅正常 GUI 启动，没有本轮长时操作日志采集证据。 | 既有 8 秒启动窗口不能替代；不宣称零泄漏。 |
+| 正式 App：真实 NAS 项目、索引、重复结果、目录语境与路径脱敏 | PASS | 2026-10-09 Computer Use：正式安装 App 只读打开已有 NAS 验证项目；Finder 重挂载原共享后，注册根目录可读且位于 SMB。52,319 组可读取；抽样两副本组显示 backup / 受保护 / 必须人工复核，业务锚点已隐藏，物理身份不可靠并保守估算。 | 本行只覆盖已有项目读取与 UI 抽样；不是正式 beta.5 新扫描、网络 Resume 或完整写操作闭环。截图在本轮对话可见，未另存图片。 |
+| 正式 App：GUI 操作期间新增事件隐私 | PASS | 2026-10-09 正式 App GUI 创建独立本机合成项目并扫描 3 文件：COMPLETED，discovered=processed=3，failed=0，checkpoint completed / 3；新增 11 条事件的测试锚点命中 0，job:created 仅含 {"job_type":"scan"}。 | 仅覆盖本轮成功扫描新增事件；失败摘要、网络异常等未在此场景触发。历史数据库不清洗、不回填。 |
+| 正式 App：GUI 操作窗口 stdout / stderr 与统一日志隐私 | PASS | 2026-10-09 捕获 252 秒真实 GUI 创建项目、扫描、重复结果、审计与错误保护路径；stdout=stderr=0 bytes；log show exit=0，2,872 条统一日志，测试路径 / 文件名等锚点命中 0。 | 有界操作窗口，不宣称全日志零泄漏或长时压力验收通过；详细范围见下节。 |
+| 正式 App：长时 / 网络异常 stdout / stderr 与统一日志隐私 | NOT RUN | 尚未覆盖长时扫描及 SMB 中断操作期间的日志。 | 本轮 252 秒 GUI 窗口与既有 8 秒启动窗口均不能代替本行。 |
 | 小范围 SMB 中断 → PAUSED_NETWORK → remount → Resume → COMPLETED | NOT RUN | 本阶段未卸载共享卷或发起扫描。 | 需安全小范围与明确中断时点；不得开展百万级扫描或把未见文件误判 missing。 |
 | Disposable Dry Run → Quarantine → 校验 → Restore | NOT RUN | 本阶段未执行写操作。 | 只可使用明确可丢弃夹具，不能使用真实唯一资料。 |
 | Disposable Crash Recovery / Recovery Lock | NOT RUN | 本阶段未执行恢复夹具。 | 历史 K6 不能替代正式 beta.5 发行物验证。 |
@@ -69,9 +70,9 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 
 ## 发布结论与下一动作
 
-**Public Beta：BLOCKED。** 静态资产、安装身份、Clean Install 与全新环境离线首启已通过；真实 NAS、GUI 事件 / 长时运行日志隐私、小范围 SMB Resume、disposable Quarantine / Restore 与 Crash Recovery 仍未验收。本次解除安装 / 离线首启两项阻断，不解除整体发布门槛。
+**Public Beta：BLOCKED。** 静态资产、安装身份、Clean Install、全新环境离线首启、已有 NAS 索引只读 UI 与本轮新增扫描事件隐私已通过；长时 / 网络异常日志、小范围 SMB Resume、disposable Quarantine / Restore 与 Crash Recovery 仍未验收。不解除整体发布门槛。
 
-下一唯一动作：在正式 beta.5 App 中以“只读打开”进入已有真实 NAS 项目，开启路径脱敏，查看重复结果中的一组目录语境和文件证据；不重新启动大目录扫描，不执行隔离、删除或恢复。
+下一唯一动作：准备安全小范围 SMB 中断 / Resume 验收，同时采集全程运行日志；必须先确认中断不会影响其他任务或用户共享会话，不重新扫描百万级源。
 
 
 ## 2026-10-09 人工反馈与身份闭环
@@ -85,4 +86,28 @@ About 原始截图按字节一致复制保存，图片只含产品身份，没�
 
 2026-10-02 的 BLOCKED 来自 CLI 下载及已使用环境；2026-10-09 的人工反馈和身份截图补齐全新环境证据，现按场景关闭。Tag / RC / 发行资产不变，Draft 不发布。
 
-下一唯一动作：正式 beta.5 App 只读打开已有 NAS 项目，检查一组重复结果 / 目录语境 / 文件证据，并以路径脱敏状态提供截图。
+## 2026-10-09 Computer Use：NAS 只读 UI 与合成扫描隐私
+
+实际操作对象为 `/Applications/NDG.app` 正式安装 App。GUI About 再次显示版本 `0.5.0-beta.5`、完整 Commit `8473dd630c4165389b32ffc85ae062145546a766`、构建时间 `2026-10-02T12:13:59Z`、通道 beta；路径脱敏已开启，外部 AI / 遥测 / 云上传显示关闭。
+
+### 已有 NAS 项目：只读证据
+
+- 从高级入口点击“只读打开”，页首与页尾均显示只读；扫描页禁止新扫描，执行中心禁用且给出只读原因。未点击最近项目的读写快捷入口。
+- 初始无 SMB 挂载时，只把页面结果视为缓存索引。之后通过 Finder 重挂载原共享，再以低负载只读检查确认原注册根目录可读且位于 SMB；没有遍历或完整哈希大文件。
+- 只读 SQLite 聚合：active=2,957,765，unavailable=26，missing=0；checkpoint 1 为 completed / 1,308,951，updated_at=`2026-10-02T00:33:09.249256Z`。这是历史开发版扫描的持久化结果，不归入本轮正式 App 扫描成绩。
+- 重复结果总数 52,319；两副本抽样组显示受保护 backup、人工复核理由与保留得分，业务锚点显示“已隐藏”；物理证据为不可靠 / 待确认，未被表达成可靠硬链接或可直接删除。截图可见目录语境与物理证据同时存在，未弱化物理证据区。
+- 审计页无恢复锁且零审计 / Journal；本轮对 NAS 源未执行扫描、隔离、清理或恢复写操作。
+
+### 独立本机合成项目：GUI 与持久化事件
+
+临时目录由程序自行创建，包含一对相同内容文件与一个唯一文件。正式 App GUI 选择该目录、创建独立项目、点击开始扫描并自然完成，随后查看重复结果、证据检查器、审计与设置；未使用 mock、测试 binding 或开发 App。
+
+- 任务自然 COMPLETED / FINALIZING，发现 3、处理 3、失败 0；active=3，checkpoint completed / 3，生成 1 个重复组；合成源三文件内容保持不变。
+- 新增 11 条持久化事件；creation payload 精确为 `{"job_type":"scan"}`；载荷对临时源 / DB 路径、文件名 canary、用户主目录、挂载卷前缀、project_id 与 Application Support 等锚点为 0 命中。检查只读取聚合，不输出载荷中的私密数据。
+- 脱敏后的扫描根输入、重复组路径与文件名正确遮蔽；目录语境仍能表达保护规则。系统目录选择器与主动编辑路径输入不作为分享截图，未将其内容公开。
+- 在合成项目尝试以包含其自身数据库的目录开始扫描，真实 GUI 拒绝，错误仅为 `project: scan source must not contain the current project database or its WAL/SHM files`，不带实际路径；没有启动该扫描。
+- 同一正式二进制的 252 秒 GUI 操作采集窗口：stdout/stderr 均 0 bytes；统一日志读取 exit=0，JSON 2,872 条 / 3,638,391 bytes；上述测试锚点为 0 命中。原始日志与本机测试 DB 留在本机私有临时目录，不纳入公共仓库。
+
+**范围限制：** 本轮新增事件只有成功扫描；没有触发 hash failure 摘要或 SMB 中断。252 秒是有界 GUI 操作窗口，不等于长时扫描 / 异常压力测试，也不能证明未列入锚点的所有数据绝无泄漏。NAS 只读视图与合成扫描分别取证；不把本机合成扫描当作真实 SMB 扫描闭环。操作结束后，App 已恢复到已有 NAS 项目的只读模式。
+
+下一唯一动作：安全小范围 SMB 中断 / Resume 及对应运行日志验收；随后 disposable Quarantine / Restore 与 Crash Recovery。Draft 保持未发布，产品 / VERSION / Tag / 正式资产均不改动。
