@@ -14,12 +14,12 @@
 
 | Gate | beta.6 要求 | 当前状态 |
 |---|---|---|
-| 版本、最终 SHA、构建号与通道 | PR/CI/独立复核；Tag peel、About 完整 Commit 一致 | PENDING |
-| GitHub 最终 DMG | 从新 Draft 下载，SHA256、Developer ID、Notarization Accepted、DMG staple、Gatekeeper | NOT RUN |
-| 实际安装启动 | 新发行物安装、GUI About、最小只读项目验证 | NOT RUN |
-| 全新 Mac 离线首次安装启动 | 新 DMG 在未运行该候选的 Mac 上，无“仍要打开”/清除 quarantine 的绕过；需要独立机器实际证据 | NOT RUN |
-| SMB 基线/网络暂停/恢复 | 独立 disposable 共享、新 DB，实际状态链、候选覆盖、计数与源一致性 | NOT RUN |
-| 异常运行日志隐私 | GUI events、stdout/stderr、统一日志；合成路径/文件名/业务锚点零泄漏 | NOT RUN |
+| 版本、最终 SHA、构建号与通道 | PR/CI/独立复核；Tag peel、About 完整 Commit 一致 | PASS — PR #59 / RC 42397a9 / About 实测 |
+| GitHub 最终 DMG | 从新 Draft 下载，SHA256、Developer ID、Notarization Accepted、DMG staple、Gatekeeper | PASS — [正式发行物验收](beta.6-formal-artifact-smb-acceptance-2026-10-09.md) |
+| 实际安装启动 | 新发行物安装、GUI About、最小只读项目验证 | PASS — 正式 App 安装启动及 About |
+| 全新 Mac 离线首次安装启动 | 新 DMG 在未运行该候选的 Mac 上，无“仍要打开”/清除 quarantine 的绕过；需要独立机器实际证据 | BLOCKED — 缺 beta.6 独立机器实际证据 |
+| SMB 基线/网络暂停/恢复 | 独立 disposable 共享、新 DB，实际状态链、候选覆盖、计数与源一致性 | PASS — 实际 FULL_HASHING / PAUSED_NETWORK / Resume COMPLETED |
+| 异常运行日志隐私 | GUI events、stdout/stderr、统一日志；合成路径/文件名/业务锚点零泄漏 | PASS — 本轮限定异常窗口；长时门禁另列 |
 | Disposable Quarantine / Restore | SMB 与必要隐私 PASS 后进入 | NOT RUN |
 | Crash Recovery / Recovery Lock | 前置 Gate 完成后进入 | NOT RUN |
 | 长时隐私与其他发布门禁 | 独立保留逐项实际结论 | NOT RUN |
@@ -48,3 +48,7 @@
 ## 历史记录
 
 beta.5 发行物 `8473dd630c4165389b32ffc85ae062145546a766` 的 SMB Resume **FAIL** 永久保留；源保护/网络状态链 PASS 与 full 2/6、重复组 1/3 的内容完成缺陷分开。根因与修复：[修复报告](resume-full-hash-recovery-fix-2026-10-09.md)。原数据库、日志和夹具不作为本次执行对象。
+
+## 已执行记录
+
+正式 RC SHA `42397a9196ae5c0621aacec3913970b7269bae24`；[不可变发行物与真实 SMB 验收记录](beta.6-formal-artifact-smb-acceptance-2026-10-09.md)列出签名、公证、资产身份、两次 INCONCLUSIVE 尝试、最终 PASS 链和未完成门禁。本记录只更新文档，不改变 Tag 或资产。
