@@ -59,7 +59,7 @@ beta.5 的 object `3b519f6b8c38f5f35ed313ef9fac1d8f0feac2ec` / peel `8473dd630c4
 2. 正确七文件小夹具正常 baseline 为 7/7、full 6/6、groups 3/3、single full 0。中断尝试的 FULL_HASHING 太快，自然完成前未实际触发故障：**INCONCLUSIVE**，DB/源保留。
 3. 另建七文件目录（三对各 32 MiB + 7,500-byte 普通单例），独立 baseline DB 正常完成：7/7、full 6/6、groups 3/3、single full 0。再创建零缓存的新中断 DB；先卸载/重挂专用卷清除基线客户端缓存，仅对测试服务 read 加 50 ms 延迟并使用 1 worker，以观察真实 FULL_HASHING。全量扫描开关保持关闭。
 
-所有成功链证据对应第三项。七文件的匿名标签、源预期 SHA-256、真实路径/文件名/业务 canary、各 DB 与未脱敏截图仅保存在本机私有证据档案，未上传普通文档或日志。
+所有成功链证据对应第三项。七文件的匿名标签、中断前正常基线与最终文件哈希、真实路径/文件名/业务 canary、各 DB 与未脱敏截图仅保存在本机私有证据档案，未上传普通文档或日志。
 
 ## 实际网络中断与恢复链（UTC）
 
@@ -77,9 +77,9 @@ beta.5 的 object `3b519f6b8c38f5f35ed313ef9fac1d8f0feac2ec` / peel `8473dd630c4
 ### 最终一致性与 GUI
 
 - 原 durable prefix **7 → 7**，原 checkpoint ID **1** 复用；7 个预期匿名文件精确覆盖；quick **7/7**。
-- 六个重复候选 full **6/6**，每个 SHA-256 与夹具创建时的源预期值匹配；重复组 **3/3**；普通单例 full **0/1**，未退化为全量强制完整哈希。
+- 六个重复候选 full **6/6**，每个 SHA-256 与中断前正常扫描基线及归档保留源字节匹配；重复组 **3/3**；普通单例 full **0/1**，未退化为全量强制完整哈希。
 - file_status：active **7**，missing **0**，unavailable **0**；仅有 scan jobs，没有执行/隔离/删除任务。没有未解释的完整哈希候选待办。
-- 源文件前后 SHA-256 一致；只读服务和只读挂载阻止源写入。本次源保护结论限于合成夹具，未在真实 NAS 执行操作。
+- 六个重复候选的中断前基线 / 恢复后完整 SHA-256 / 归档源字节一致；七文件 size 与 quick hash 在基线及恢复后均一致。只读服务和只读挂载阻止源写入。没有保存成功大夹具创建时七文件的独立 SHA-256 清单，不能将旧小夹具 manifest 的 expected_hashes 用作该证据；普通单例没有独立的创建时完整 SHA-256，源保护证据限于只读边界、size 与 quick hash 一致。本次结论限于合成夹具，未在真实 NAS 执行操作。
 - GUI Resume 入口消失；COMPLETED 可见，PAUSED_NETWORK 的历史任务保留。
 - Duplicate Results 显示 **3** 个组；打开一组实际看到 SHA-256、两份 32 MiB 文件证据与目录语境。网络物理身份显示“不可靠”，目录角色 unknown 与人工确认要求保留，没有自动授予删除许可。
 - 完成后正常卸载专用测试卷并停止其服务；其他 mount session 核对未变。源文件、项目 DB、历史不确定尝试及最终一致性快照保留。
