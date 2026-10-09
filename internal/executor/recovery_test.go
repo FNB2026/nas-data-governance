@@ -2,9 +2,12 @@ package executor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,10 +378,10 @@ func TestRecover_RollsBackDoneActions(t *testing.T) {
 	}
 }
 
-// TestRecover_ResetsToApprovedWhenNoDoneActions simulates a crash where
+// TestRecover_PendingRemainsLocked simulates a crash where
 // the plan was in EXECUTING but no actions had completed. Recover()
-// should reset it to APPROVED for re-execution.
-func TestRecover_ResetsToApprovedWhenNoDoneActions(t *testing.T) {
+// must retain its recovery lock because pending can follow a completed write.
+func TestRecover_PendingRemainsLocked(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -408,14 +411,14 @@ func TestRecover_ResetsToApprovedWhenNoDoneActions(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].Action != RecoveryResetToApproved {
-		t.Fatalf("expected reset_to_approved, got %s", results[0].Action)
+	if results[0].Action != RecoverySkipped || len(results[0].Errors) == 0 {
+		t.Fatalf("unknown pending must remain locked: %+v", results[0])
 	}
 
-	// Plan should be APPROVED.
+	// Plan must remain locked.
 	updated, _ := st.GetPlan(ctx, plan.ID)
-	if updated.State != domain.PlanApproved {
-		t.Fatalf("expected APPROVED, got %s", updated.State)
+	if updated.State != domain.PlanExecuting {
+		t.Fatalf("expected EXECUTING, got %s", updated.State)
 	}
 
 	// Source should be untouched.
@@ -428,10 +431,10 @@ func TestRecover_ResetsToApprovedWhenNoDoneActions(t *testing.T) {
 	}
 }
 
-// TestRecover_NoJournalEntriesResetsToApproved verifies that a plan in
+// TestRecover_NoJournalReturnsToDraft verifies that a plan in
 // EXECUTING with NO journal entries (crash before BeginJournal) is reset
-// to APPROVED.
-func TestRecover_NoJournalEntriesResetsToApproved(t *testing.T) {
+// to DRAFT for fresh review.
+func TestRecover_NoJournalReturnsToDraft(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
@@ -448,8 +451,8 @@ func TestRecover_NoJournalEntriesResetsToApproved(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].Action != RecoveryResetToApproved {
-		t.Fatalf("expected reset_to_approved, got %s", results[0].Action)
+	if results[0].Action != RecoveryResetToDraft {
+		t.Fatalf("expected reset_to_draft, got %s", results[0].Action)
 	}
 }
 
@@ -541,5 +544,125 @@ func TestExecuteWithoutJournal_BackwardCompatible(t *testing.T) {
 	}
 	if plan.State != domain.PlanVerified {
 		t.Fatalf("expected VERIFIED, got %s", plan.State)
+	}
+}
+
+func TestRecoverCopyChangedTargetRetainsBytesAndLock(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "input.txt")
+	target := filepath.Join(t.TempDir(), "copy.txt")
+	if err := os.WriteFile(src, []byte("original content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Snapshot(src, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := domain.PlannedAction{Path: src, TargetPath: target, Action: domain.OperationCopy, File: domain.FileInstance{Path: src, Size: snap.Size, ContentSHA256: snap.Hash}}
+	p, task := seedPlanWithTask(t, st, "changed-copy", []domain.PlannedAction{action})
+	if err := st.BeginJournal(ctx, task, p.ID, p.Actions); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("changed by user after crash"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkJournalDone(ctx, p.ID, 0, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdatePlanState(ctx, p.ID, domain.PlanExecuting); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		r := NewForRecovery().Recover(ctx, st)
+		if len(r) != 1 || r[0].Action != RecoverySkipped || len(r[0].Errors) == 0 {
+			t.Fatalf("changed copy was recovered: %+v", r)
+		}
+		got, err := os.ReadFile(target)
+		if err != nil || string(got) != "changed by user after crash" {
+			t.Fatal("changed target deleted")
+		}
+		actual, err := st.GetPlan(ctx, p.ID)
+		if err != nil || actual.State != domain.PlanExecuting {
+			t.Fatal("recovery lock released")
+		}
+	}
+}
+
+func TestRecoverStaleCheckedNoJournalRequiresFreshApproval(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	p, _ := seedPlanWithTask(t, st, "reserved", nil)
+	if err := st.UpdatePlanState(ctx, p.ID, domain.PlanStaleChecked); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := st.ListExecutingPlans(ctx)
+	if err != nil || len(ids) != 1 {
+		t.Fatal("reserved crash window not locked")
+	}
+	r := NewForRecovery().Recover(ctx, st)
+	if len(r) != 1 || r[0].Action != RecoveryResetToDraft || len(r[0].Errors) != 0 {
+		t.Fatalf("reservation recovery: %+v", r)
+	}
+	actual, err := st.GetPlan(ctx, p.ID)
+	if err != nil || actual.State != domain.PlanDraft {
+		t.Fatal("old approval reused")
+	}
+}
+
+func TestRecoverRollbackPersistenceFailureRetainsLock(t *testing.T) {
+	ctx := context.Background()
+	db := filepath.Join(t.TempDir(), "recovery.db")
+	st, openErr := store.Open(ctx, db)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer st.Close()
+	src := filepath.Join(t.TempDir(), "original.txt")
+	target := filepath.Join(t.TempDir(), "isolated.txt")
+	if err := os.WriteFile(src, []byte("rollback fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Snapshot(src, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := domain.PlannedAction{Path: src, Action: domain.OperationQuarantine, File: domain.FileInstance{Path: src, Size: snap.Size, ContentSHA256: snap.Hash}}
+	p, task := seedPlanWithTask(t, st, "rollback-write-fault", []domain.PlannedAction{a})
+	if err := st.BeginJournal(ctx, task, p.ID, p.Actions); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(src, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkJournalDone(ctx, p.ID, 0, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdatePlanState(ctx, p.ID, domain.PlanExecuting); err != nil {
+		t.Fatal(err)
+	}
+	fault, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fault.Close()
+	if _, err := fault.Exec(`CREATE TRIGGER reject_rollback BEFORE UPDATE OF rollback_status ON execution_journal BEGIN SELECT RAISE(FAIL,'PRIVATE_RECOVERY_CANARY'); END`); err != nil {
+		t.Fatal(err)
+	}
+	r := NewForRecovery().Recover(ctx, st)
+	if len(r) != 1 || r[0].Action != RecoverySkipped || len(r[0].Errors) == 0 || strings.Contains(fmt.Sprint(r), "PRIVATE_RECOVERY_CANARY") {
+		t.Fatalf("unconfirmed rollback released lock or leaked: %+v", r)
+	}
+	actual, err := st.GetPlan(ctx, p.ID)
+	if err != nil || actual.State != domain.PlanExecuting {
+		t.Fatal("unconfirmed rollback terminalized")
+	}
+	got, err := os.ReadFile(src)
+	if err != nil || string(got) != "rollback fixture" {
+		t.Fatal("rollback lost content")
+	}
+	r = NewForRecovery().Recover(ctx, st)
+	if len(r) != 1 || r[0].Action != RecoverySkipped {
+		t.Fatalf("unconfirmed rollback replayed: %+v", r)
 	}
 }

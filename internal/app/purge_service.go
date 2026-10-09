@@ -100,6 +100,17 @@ func (s *PurgeService) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (
 	if in.PlanID == "" || in.Digest == "" || in.QuarantineRoot == "" {
 		return nil, fmt.Errorf("app: ExecutePurge: plan-id, digest, and quarantine are required")
 	}
+	if !in.DryRun {
+		unlock, err := s.store.AcquireExecutionLock()
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+		if err := requireNoRecovery(ctx, s.store); err != nil {
+			return nil, err
+		}
+	}
+
 	plan, err := s.store.GetPurgePlan(ctx, in.PlanID)
 	if err != nil {
 		return nil, fmt.Errorf("app: get purge plan: %w", err)
@@ -147,6 +158,12 @@ func (s *PurgeService) RecoverPurges(ctx context.Context, quarantineRoot string)
 	if quarantineRoot == "" {
 		return nil, fmt.Errorf("app: RecoverPurges: quarantine is required")
 	}
+	unlock, lockErr := s.store.AcquireExecutionLock()
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
+
 	exec, err := executor.NewPurgeExecutor(quarantineRoot, s.store)
 	if err != nil {
 		return nil, fmt.Errorf("app: create purge executor: %w", err)

@@ -203,7 +203,7 @@ func TestDrill_A_CrashRecovery(t *testing.T) {
 		t.Fatalf("expected ROLLED_BACK, got %s", got.State)
 	}
 
-	// 子场景 A2：无 done 条目，应重置为 APPROVED。
+	// 子场景 A2：pending 不能证明没有写入，必须保留恢复锁。
 	// 用独立的 task，避免 SavePlans 删除 A1 的 plan（journal FK 引用）。
 	taskID2 := "task-drill-a2"
 	if err := st.CreateTask(ctx, domain.OperationTask{
@@ -231,16 +231,16 @@ func TestDrill_A_CrashRecovery(t *testing.T) {
 	results2 := exec.Recover(ctx, st)
 	var resetFound bool
 	for _, r := range results2 {
-		if r.PlanID == plan2.ID && r.Action == executor.RecoveryResetToApproved {
+		if r.PlanID == plan2.ID && r.Action == executor.RecoverySkipped && len(r.Errors) > 0 {
 			resetFound = true
 		}
 	}
 	if !resetFound {
-		t.Fatalf("expected reset_to_approved for %s, got %+v", plan2.ID, results2)
+		t.Fatalf("expected blocked pending outcome for %s, got %+v", plan2.ID, results2)
 	}
 	got2, _ := st.GetPlan(ctx, plan2.ID)
-	if got2.State != domain.PlanApproved {
-		t.Fatalf("expected APPROVED after reset, got %s", got2.State)
+	if got2.State != domain.PlanExecuting {
+		t.Fatalf("expected EXECUTING recovery lock, got %s", got2.State)
 	}
 
 	// 更新报告证据。
@@ -250,7 +250,7 @@ func TestDrill_A_CrashRecovery(t *testing.T) {
 			r := &reportBuf.scenarios[i]
 			r.Pass = !t.Failed()
 			r.Duration = time.Since(start)
-			r.Detail = "A1 有 done 条目→回滚隔离文件+置 ROLLED_BACK；A2 无 done 条目→重置为 APPROVED"
+			r.Detail = "A1 有 done 条目→回滚隔离文件+置 ROLLED_BACK；A2 pending 结果未知→保留恢复锁"
 			r.Evidence = []string{
 				fmt.Sprintf("A1 recovered=%s rolledBack=%d", results[0].Action, results[0].RolledBack),
 				fmt.Sprintf("A2 reset found=%v final state=%s", resetFound, got2.State),
@@ -497,9 +497,9 @@ func TestDrill_C_StaleDetection(t *testing.T) {
 
 	result := exec.Execute(ctx, &plan)
 
-	// stale 检测不应导致 result.Err；而是把 state 退回 DRAFT。
-	if result.Err != nil {
-		t.Fatalf("unexpected error: %v", result.Err)
+	// stale 是明确拒绝，审批失效回 DRAFT。
+	if result.Err == nil || result.ErrorType != "stale_detected" {
+		t.Fatalf("expected explicit stale refusal: %+v", result)
 	}
 	if plan.State != domain.PlanDraft {
 		t.Fatalf("expected DRAFT (stale re-review), got %s", plan.State)

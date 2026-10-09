@@ -36,6 +36,19 @@ func (s *SQLiteStore) RegisterQuarantinesFromJournal(
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	registered, err := registerQuarantinesTx(ctx, tx, plan, entries, quarantinedAt, retainUntil)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: commit quarantine registration: %w", err)
+	}
+	return registered, nil
+}
+
+func registerQuarantinesTx(ctx context.Context, tx *sql.Tx, plan domain.OperationPlan, entries []JournalEntry, quarantinedAt, retainUntil time.Time) ([]domain.QuarantineItem, error) {
+	planID := plan.ID
 	registered := make([]domain.QuarantineItem, 0)
 	for _, entry := range entries {
 		actionType := domain.OperationType(entry.ActionType)
@@ -76,9 +89,6 @@ func (s *SQLiteStore) RegisterQuarantinesFromJournal(
 		if n, _ := result.RowsAffected(); n > 0 {
 			registered = append(registered, item)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: commit quarantine registration: %w", err)
 	}
 	return registered, nil
 }

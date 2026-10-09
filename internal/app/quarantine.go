@@ -100,6 +100,17 @@ func (s *QuarantineService) ExecuteRestore(ctx context.Context, in RestoreExecut
 	if in.PlanID == "" || in.Digest == "" || in.QuarantineRoot == "" || len(in.SourceRoots) == 0 {
 		return nil, fmt.Errorf("app: ExecuteRestore: plan-id, digest, quarantine, and source-root are required")
 	}
+	if !in.DryRun {
+		unlock, err := s.store.AcquireExecutionLock()
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+		if err := requireNoRecovery(ctx, s.store); err != nil {
+			return nil, err
+		}
+	}
+
 	plan, err := s.store.GetRestorePlan(ctx, in.PlanID)
 	if err != nil {
 		return nil, fmt.Errorf("app: get restore plan: %w", err)
@@ -140,6 +151,12 @@ func (s *QuarantineService) RecoverRestores(ctx context.Context, in RecoverResto
 	if in.QuarantineRoot == "" || len(in.SourceRoots) == 0 {
 		return nil, fmt.Errorf("app: RecoverRestores: quarantine and source-root are required")
 	}
+	unlock, lockErr := s.store.AcquireExecutionLock()
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
+
 	exec, err := executor.NewRestoreExecutor(in.QuarantineRoot, in.SourceRoots, s.store)
 	if err != nil {
 		return nil, fmt.Errorf("app: create restore executor: %w", err)

@@ -7,7 +7,7 @@ import (
 )
 
 // RecoveryStore is the store subset needed for crash recovery. It matches
-// executor.RecoveryStore (Journal + GetPlan + UpdatePlanState).
+// executor.RecoveryStore.
 // store.SQLiteStore satisfies this interface structurally.
 type RecoveryStore interface {
 	executor.RecoveryStore
@@ -28,7 +28,7 @@ func NewRecoveryService(st RecoveryStore) *RecoveryService {
 // Recover scans for plans in EXECUTING state and brings them to a safe,
 // deterministic state:
 //   - If any filesystem action was done → undo all in reverse, mark ROLLED_BACK.
-//   - If no action was done → reset to APPROVED for re-execution.
+//   - If no action was done → return to DRAFT for fresh review; unknown journal outcomes remain locked.
 //
 // Returns one RecoveryResult per inspected plan.
 func (s *RecoveryService) Recover(ctx context.Context) ([]executor.RecoveryResult, error) {

@@ -145,8 +145,8 @@ func TestExecuteStaleCheckSendsBackToDraft(t *testing.T) {
 	exec, _ := New(QuarantineConfig{Root: qDir, Structure: QuarantineFlat, SourceRoots: []string{filepath.Dir(src)}})
 	result := exec.Execute(context.Background(), plan)
 
-	if result.Err != nil {
-		t.Fatalf("unexpected error: %v", result.Err)
+	if result.Err != errStaleDetected || result.ErrorType != "stale_detected" {
+		t.Fatalf("expected explicit stale failure: %+v", result)
 	}
 	if plan.State != domain.PlanDraft {
 		t.Fatalf("expected DRAFT (stale re-review), got %s", plan.State)

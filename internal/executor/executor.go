@@ -72,9 +72,10 @@ type Result struct {
 // Executor runs approved plans through the safe-operation pipeline.
 // It is the only component that writes to the user's file system.
 type Executor struct {
-	quarantine QuarantineConfig
-	now        func() time.Time
-	journal    Journal
+	quarantine  QuarantineConfig
+	now         func() time.Time
+	journal     Journal
+	stateWriter StateWriter
 }
 
 // New creates an executor with the given quarantine config. `now` defaults
@@ -189,11 +190,16 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 	if staleCount > 0 {
 		// Some files changed since the plan was generated: send the plan
 		// back to DRAFT for human re-review. No filesystem writes happen.
-		_ = Transition(plan, domain.PlanDraft)
+		result.Err = errStaleDetected
+		result.ErrorType = "stale_detected"
+		if err := e.transition(ctx, plan, domain.PlanDraft); err != nil {
+			result.Err = err
+			result.ErrorType = "state_persist_failed"
+		}
 		result.FinalState = plan.State
 		return result
 	}
-	if err := Transition(plan, domain.PlanStaleChecked); err != nil {
+	if err := e.transition(ctx, plan, domain.PlanStaleChecked); err != nil {
 		result.Err = err
 		result.ErrorType = "state_transition_failed"
 		return result
@@ -210,22 +216,30 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 			})
 			result.Err = fmt.Errorf("executor: journal begin failed")
 			result.ErrorType = "journal_begin_failed"
-			_ = Transition(plan, domain.PlanApproved)
+			if err := e.transition(ctx, plan, domain.PlanApproved); err != nil {
+				result.ErrorType = "state_persist_failed"
+			}
 			result.FinalState = plan.State
 			return result
 		}
 	}
 
 	// Step 3: execute actions in order.
-	_ = Transition(plan, domain.PlanExecuting)
+	if err := e.transition(ctx, plan, domain.PlanExecuting); err != nil {
+		result.Err = err
+		result.ErrorType = "state_persist_failed"
+		result.FinalState = plan.State
+		return result
+	}
 	result.FinalState = plan.State
 	var rollbacks []rollbackEntry
 	for i, action := range plan.Actions {
 		if err := ctx.Err(); err != nil {
 			result.Err = err
 			result.ErrorType = "cancelled"
-			e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
-			_ = Transition(plan, domain.PlanRolledBack)
+			if e.rollbackAll(ctx, &result, plan.ID, &rollbacks) {
+				_ = Transition(plan, domain.PlanRolledBack)
+			}
 			result.FinalState = plan.State
 			return result
 		}
@@ -244,8 +258,9 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 			}
 			result.Err = errActionFailed
 			result.ErrorType = "action_failed"
-			e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
-			_ = Transition(plan, domain.PlanRolledBack)
+			if e.rollbackAll(ctx, &result, plan.ID, &rollbacks) {
+				_ = Transition(plan, domain.PlanRolledBack)
+			}
 			result.FinalState = plan.State
 			return result
 		}
@@ -260,8 +275,9 @@ func (e *Executor) Execute(ctx context.Context, plan *domain.OperationPlan) Resu
 				})
 				result.Err = fmt.Errorf("executor: journal completion failed")
 				result.ErrorType = "journal_done_failed"
-				e.rollbackAll(ctx, &result, plan.ID, &rollbacks)
-				_ = Transition(plan, domain.PlanRolledBack)
+				if e.rollbackAll(ctx, &result, plan.ID, &rollbacks) {
+					_ = Transition(plan, domain.PlanRolledBack)
+				}
 				result.FinalState = plan.State
 				return result
 			}
@@ -549,14 +565,19 @@ func (e *Executor) maybeCleanupEmptyDir(dir string) {
 // rollbackAll runs rollback functions in reverse order, appending one
 // audit step per rollback attempt. When a journal is configured, each
 // rollback is marked in the journal so Recover() can see the final state.
-func (e *Executor) rollbackAll(ctx context.Context, result *Result, planID string, rollbacks *[]rollbackEntry) {
+func (e *Executor) rollbackAll(ctx context.Context, result *Result, planID string, rollbacks *[]rollbackEntry) bool {
+	confirmed := true
 	for i := len(*rollbacks) - 1; i >= 0; i-- {
 		entry := (*rollbacks)[i]
 		err := entry.fn()
 		if e.journal != nil {
-			_ = e.journal.MarkJournalRolledBack(ctx, planID, entry.actionIndex, err)
+			if persistErr := e.journal.MarkJournalRolledBack(ctx, planID, entry.actionIndex, err); persistErr != nil {
+				confirmed = false
+				result.Steps = append(result.Steps, AuditStep{Name: "rollback_journal", Status: StepFailed, Detail: map[string]any{"error_type": "rollback_persist_failed", "index": entry.actionIndex}})
+			}
 		}
 		if err != nil {
+			confirmed = false
 			result.Steps = append(result.Steps, AuditStep{
 				Name: "rollback", Status: StepFailed,
 				Detail: map[string]any{"error_type": "rollback_failed", "index": i},
@@ -569,6 +590,7 @@ func (e *Executor) rollbackAll(ctx context.Context, result *Result, planID strin
 		})
 	}
 	*rollbacks = nil
+	return confirmed
 }
 
 // touchesFilesystem reports whether an action type writes to the user's

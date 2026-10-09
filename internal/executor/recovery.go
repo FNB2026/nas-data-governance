@@ -15,7 +15,9 @@ import (
 type RecoveryStore interface {
 	Journal
 	GetPlan(ctx context.Context, planID string) (domain.OperationPlan, error)
-	UpdatePlanState(ctx context.Context, planID string, state domain.PlanState) error
+	CompareAndSwapPlanState(ctx context.Context, planID string, from, to domain.PlanState) error
+	ListJournalAll(ctx context.Context, planID string) ([]store.JournalEntry, error)
+	AcquireExecutionLock() (func(), error)
 }
 
 // RecoveryAction describes what Recover() did with a crashed plan.
@@ -23,7 +25,8 @@ type RecoveryAction string
 
 const (
 	RecoveryRolledBack      RecoveryAction = "rolled_back"       // done actions were undone
-	RecoveryResetToApproved RecoveryAction = "reset_to_approved" // nothing was done, safe to re-run
+	RecoveryResetToDraft    RecoveryAction = "reset_to_draft"    // no journal, requires fresh review
+	RecoveryResetToApproved RecoveryAction = "reset_to_approved" // legacy API value; never emitted
 	RecoverySkipped         RecoveryAction = "skipped"           // not in EXECUTING state
 )
 
@@ -35,78 +38,74 @@ type RecoveryResult struct {
 	Errors     []string       `json:"errors,omitempty"`
 }
 
-// Recover scans for plans left in EXECUTING state (typically after a
-// crash or power loss) and brings them to a safe, deterministic state.
-//
-// Policy (crash-conservative):
-//
-//   - If ANY filesystem action was marked done in the journal → undo all
-//     done actions in reverse order, then transition the plan to
-//     ROLLED_BACK. Auto-continuing partial execution is too risky
-//     because the executor cannot know which action was about to run.
-//
-//   - If NO action was done (all pending or no journal entries) → reset
-//     the plan to APPROVED so it can be re-executed from scratch. The
-//     stale check will catch any files that disappeared.
-//
-// This method is safe to call repeatedly: it only touches plans in
-// EXECUTING state, and journal updates are idempotent.
+// Recover excludes live execution and keeps uncertain journal outcomes locked.
+// Only a reservation with no journal can return to DRAFT; pending entries
+// are not proof that no filesystem write occurred.
 func (e *Executor) Recover(ctx context.Context, rs RecoveryStore) []RecoveryResult {
-	planIDs, err := rs.ListExecutingPlans(ctx)
+	unlock, err := rs.AcquireExecutionLock()
 	if err != nil {
-		return []RecoveryResult{{
-			PlanID: "",
-			Action: RecoverySkipped,
-			Errors: []string{fmt.Sprintf("list executing plans: %v", err)},
-		}}
+		return []RecoveryResult{{Action: RecoverySkipped, Errors: []string{"recovery: execution owner active or unavailable"}}}
 	}
-
-	results := make([]RecoveryResult, 0, len(planIDs))
-	for _, planID := range planIDs {
-		results = append(results, e.recoverPlan(ctx, rs, planID))
+	defer unlock()
+	ids, err := rs.ListExecutingPlans(ctx)
+	if err != nil {
+		return []RecoveryResult{{Action: RecoverySkipped, Errors: []string{"recovery: cannot read reserved plans"}}}
+	}
+	results := make([]RecoveryResult, 0, len(ids))
+	for _, id := range ids {
+		results = append(results, e.recoverPlan(ctx, rs, id))
 	}
 	return results
 }
 
-func (e *Executor) recoverPlan(ctx context.Context, rs RecoveryStore, planID string) RecoveryResult {
-	result := RecoveryResult{PlanID: planID}
-
-	doneEntries, err := rs.ListJournalDone(ctx, planID)
+func (e *Executor) recoverPlan(ctx context.Context, rs RecoveryStore, id string) RecoveryResult {
+	r := RecoveryResult{PlanID: id, Action: RecoverySkipped}
+	fail := func(message string) RecoveryResult { r.Errors = append(r.Errors, message); return r }
+	p, err := rs.GetPlan(ctx, id)
 	if err != nil {
-		// Cannot read journal — cannot safely recover. Mark as
-		// ROLLED_BACK so the plan is not silently re-executed.
-		result.Action = RecoveryRolledBack
-		result.Errors = []string{fmt.Sprintf("list journal done: %v", err)}
-		_ = rs.UpdatePlanState(ctx, planID, domain.PlanRolledBack)
-		return result
+		return fail("recovery: cannot read plan")
 	}
-
-	if len(doneEntries) == 0 {
-		// No filesystem writes were confirmed done before the crash.
-		// Safe to reset to APPROVED for re-execution.
-		result.Action = RecoveryResetToApproved
-		_ = rs.UpdatePlanState(ctx, planID, domain.PlanApproved)
-		return result
+	// Legacy APPROVED plus journal has ambiguous lifecycle registration.
+	// Keep it blocked for explicit reconciliation instead of undoing a success.
+	if p.State != domain.PlanExecuting && p.State != domain.PlanStaleChecked {
+		return fail("recovery: legacy journal requires reconciliation")
 	}
-
-	// Some actions completed — undo them in reverse order.
-	result.Action = RecoveryRolledBack
-	for i := len(doneEntries) - 1; i >= 0; i-- {
-		entry := doneEntries[i]
-		rerr := rollbackJournalEntry(entry)
-		// Mark the journal regardless of rollback success, so the
-		// final state is visible to operators.
-		_ = rs.MarkJournalRolledBack(ctx, planID, entry.ActionIndex, rerr)
-		if rerr != nil {
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("action %d (%s): %v", entry.ActionIndex, entry.ActionType, rerr))
+	entries, err := rs.ListJournalAll(ctx, id)
+	if err != nil {
+		return fail("recovery: cannot read journal")
+	}
+	if len(entries) == 0 {
+		if err := rs.CompareAndSwapPlanState(ctx, id, p.State, domain.PlanDraft); err != nil {
+			return fail("recovery: cannot persist review state")
+		}
+		r.Action = RecoveryResetToDraft
+		return r
+	}
+	for _, entry := range entries {
+		if entry.RollbackStatus == "done" {
 			continue
 		}
-		result.RolledBack++
+		if entry.Status != "done" || entry.RollbackStatus != "" {
+			return fail("recovery: uncertain action outcome; manual reconciliation required")
+		}
 	}
-
-	_ = rs.UpdatePlanState(ctx, planID, domain.PlanRolledBack)
-	return result
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry.RollbackStatus == "done" {
+			continue
+		}
+		rollbackErr := rollbackJournalEntry(entry)
+		persistErr := rs.MarkJournalRolledBack(ctx, id, entry.ActionIndex, rollbackErr)
+		if rollbackErr != nil || persistErr != nil {
+			return fail("recovery: rollback not durably confirmed")
+		}
+		r.RolledBack++
+	}
+	if err := rs.CompareAndSwapPlanState(ctx, id, p.State, domain.PlanRolledBack); err != nil {
+		return fail("recovery: cannot persist rollback state")
+	}
+	r.Action = RecoveryRolledBack
+	return r
 }
 
 // rollbackJournalEntry undoes one completed action using the journal's
@@ -132,9 +131,12 @@ func rollbackJournalEntry(entry store.JournalEntry) error {
 		if entry.TargetPath == "" {
 			return fmt.Errorf("recovery: done copy entry has empty target_path (action %d)", entry.ActionIndex)
 		}
+		snapshot, err := Snapshot(entry.TargetPath, true)
+		if err != nil || snapshot.Hash != entry.ContentSHA256 || snapshot.Size != entry.FileSize {
+			return fmt.Errorf("recovery: copy target changed; manual reconciliation required")
+		}
 		return SafeRemove(entry.TargetPath)
 	default:
-		// Unknown action type — nothing to undo.
-		return nil
+		return fmt.Errorf("recovery: unsupported journal action")
 	}
 }
