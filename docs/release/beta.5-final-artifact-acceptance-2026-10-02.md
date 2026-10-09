@@ -44,8 +44,9 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 | 正式 App：真实 NAS 项目、索引、重复结果、目录语境与路径脱敏 | PASS | 2026-10-09 Computer Use：正式安装 App 只读打开已有 NAS 验证项目；Finder 重挂载原共享后，注册根目录可读且位于 SMB。52,319 组可读取；抽样两副本组显示 backup / 受保护 / 必须人工复核，业务锚点已隐藏，物理身份不可靠并保守估算。 | 本行只覆盖已有项目读取与 UI 抽样；不是正式 beta.5 新扫描、网络 Resume 或完整写操作闭环。截图在本轮对话可见，未另存图片。 |
 | 正式 App：GUI 操作期间新增事件隐私 | PASS | 2026-10-09 正式 App GUI 创建独立本机合成项目并扫描 3 文件：COMPLETED，discovered=processed=3，failed=0，checkpoint completed / 3；新增 11 条事件的测试锚点命中 0，job:created 仅含 {"job_type":"scan"}。 | 仅覆盖本轮成功扫描新增事件；失败摘要、网络异常等未在此场景触发。历史数据库不清洗、不回填。 |
 | 正式 App：GUI 操作窗口 stdout / stderr 与统一日志隐私 | PASS | 2026-10-09 捕获 252 秒真实 GUI 创建项目、扫描、重复结果、审计与错误保护路径；stdout=stderr=0 bytes；log show exit=0，2,872 条统一日志，测试路径 / 文件名等锚点命中 0。 | 有界操作窗口，不宣称全日志零泄漏或长时压力验收通过；详细范围见下节。 |
-| 正式 App：长时 / 网络异常 stdout / stderr 与统一日志隐私 | NOT RUN | 尚未覆盖长时扫描及 SMB 中断操作期间的日志。 | 本轮 252 秒 GUI 窗口与既有 8 秒启动窗口均不能代替本行。 |
-| 小范围 SMB 中断 → PAUSED_NETWORK → remount → Resume → COMPLETED | NOT RUN | 本阶段未卸载共享卷或发起扫描。 | 需安全小范围与明确中断时点；不得开展百万级扫描或把未见文件误判 missing。 |
+| 正式 App：小范围网络异常事件 / stdout / stderr / 统一日志隐私 | PASS | 2026-10-09 独立 SMB 全流程约 765 秒：95 条事件载荷、stdout/stderr=0 bytes、3,951 条统一日志，测试路径 / 文件名等锚点 0 命中；GUI 暂停摘要只含计数。见 [专题记录](beta.5-smb-network-resume-acceptance-2026-10-09.md)。 | 有界故障窗口；夹具无非空业务锚点，不代替长时扫描或全部异常类型。 |
+| 正式 App：长时运行日志隐私 | NOT RUN | 尚未覆盖长时压力扫描日志。 | 765 秒 SMB 故障窗口和此前 252 秒 GUI 窗口均不能代替长时场景。 |
+| 小范围 SMB 中断 → PAUSED_NETWORK → remount → Resume 与结果完整性 | FAIL | 正式 App、独立只读 SMB / 项目：6/6/0 基线，完整哈希阶段真实中断后 paused_network / 6；重挂载 Resume 自然 COMPLETED、checkpoint completed / 6、入口消失，active=6、missing=unavailable=0。 | 未完成完整哈希未恢复：SHA-256 仅 2/6，预期 3 组实际 GUI 1 组。状态链与前缀安全通过，不足以判整体 PASS。见 [失败证据](beta.5-smb-network-resume-acceptance-2026-10-09.md)。 |
 | Disposable Dry Run → Quarantine → 校验 → Restore | NOT RUN | 本阶段未执行写操作。 | 只可使用明确可丢弃夹具，不能使用真实唯一资料。 |
 | Disposable Crash Recovery / Recovery Lock | NOT RUN | 本阶段未执行恢复夹具。 | 历史 K6 不能替代正式 beta.5 发行物验证。 |
 
@@ -70,9 +71,9 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 
 ## 发布结论与下一动作
 
-**Public Beta：BLOCKED。** 静态资产、安装身份、Clean Install、全新环境离线首启、已有 NAS 索引只读 UI 与本轮新增扫描事件隐私已通过；长时 / 网络异常日志、小范围 SMB Resume、disposable Quarantine / Restore 与 Crash Recovery 仍未验收。不解除整体发布门槛。
+**Public Beta：BLOCKED。** 静态资产、安装身份、Clean Install、全新环境离线首启、已有 NAS 索引只读 UI、成功扫描与本次 SMB 异常窗口隐私通过。小范围 SMB 场景已执行并 FAIL：Resume 完成但遗漏 4 个未完成完整哈希候选，预期 3 个重复组只剩 1 个。长时日志、disposable Quarantine / Restore 与 Crash Recovery 仍未验收。
 
-下一唯一动作：准备安全小范围 SMB 中断 / Resume 验收，同时采集全程运行日志；必须先确认中断不会影响其他任务或用户共享会话，不重新扫描百万级源。
+下一唯一动作：独立审查本次前缀完整哈希恢复遗漏，确定后续候选修复与复验路径；保持 beta.5 Tag / 资产和 Draft 不变。失败现场保留，不进入 Disposable Quarantine / Restore。
 
 
 ## 2026-10-09 人工反馈与身份闭环
@@ -110,4 +111,4 @@ About 原始截图按字节一致复制保存，图片只含产品身份，没�
 
 **范围限制：** 本轮新增事件只有成功扫描；没有触发 hash failure 摘要或 SMB 中断。252 秒是有界 GUI 操作窗口，不等于长时扫描 / 异常压力测试，也不能证明未列入锚点的所有数据绝无泄漏。NAS 只读视图与合成扫描分别取证；不把本机合成扫描当作真实 SMB 扫描闭环。操作结束后，App 已恢复到已有 NAS 项目的只读模式。
 
-下一唯一动作：安全小范围 SMB 中断 / Resume 及对应运行日志验收；随后 disposable Quarantine / Restore 与 Crash Recovery。Draft 保持未发布，产品 / VERSION / Tag / 正式资产均不改动。
+以上为此前成功扫描窗口的证据。后续小范围 SMB 故障验收已完成取证并发现阻断项，现行结论见 [2026-10-09 SMB 专题记录](beta.5-smb-network-resume-acceptance-2026-10-09.md)：网络状态链 / 源安全 / 本次异常隐私 PASS，完整哈希待办恢复 FAIL。Draft 保持未发布，产品 / VERSION / Tag / 正式资产均不改动。
