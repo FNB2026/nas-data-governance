@@ -2,6 +2,19 @@
 
 本项目的显著变更按里程碑组织。每个里程碑对应 [开发路线](knowledge/maps/roadmap.md) 中的章节。
 
+## 0.5.0-beta.7 — 执行状态一致性发行候选
+
+- **执行终态可靠持久化**：成功隔离仅在 VERIFIED、隔离登记与审计事务提交后报告成功，重启与重复执行不复用旧执行资格（#64 / #62）。
+- **stale 审批失效**：文件变化明确计为拒绝失败，durable DRAFT 与审批失效审计同步提交，要求人工复审；不再把 stale 拒绝计为 executed。
+- **执行与恢复保护**：条件状态更新、权威计划重读、共享执行 owner 和完整恢复锁；未知 Journal、回滚/持久化失败保留锁，并停止批次后续写入。COPY 恢复保护变化目标。
+
+### 候选状态与必需复验
+
+- 新的不可变 **Draft 发行候选**；beta.6 Tag、DMG 和正式 Quarantine / Restore **FAIL** 保留。源码修复与自动化通过不代表旧发行物通过。
+- 正式 App 必须复验隔离/恢复文件闭环、durable VERIFIED、stale executed=0/failed=1/DRAFT、审批失效、重复执行安全、GUI/数据库/Journal 一致性与限定窗口隐私。
+- 使用全新人工 disposable 文件与独立项目数据库，不修改真实 NAS、原失败数据库或日志。不进入 Purge，不主动触发正式 Crash Recovery。
+- Public Beta 仍 **BLOCKED**；正式候选与必要门禁通过之前不得发布 Release。Crash Recovery / Recovery Lock、全新 Mac 离线首装、长时隐私和剩余安全项继续单独留证。
+
 ## 0.5.0-beta.6 — 完整哈希断点恢复发行候选
 
 - **完整哈希待办恢复**：修复 FULL_HASHING 网络中断后 Resume 遗漏持久化遍历前缀中尚未完成的重复候选（#57）；恢复同组已完成成员的分组语境，覆盖无新增遍历文件与跨 checkpoint 的情况。保留分层哈希，普通单例不强制完整 SHA-256。
