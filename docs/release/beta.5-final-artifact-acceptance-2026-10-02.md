@@ -1,4 +1,4 @@
-# beta.5 最终发行物验收记录（2026-10-02）
+# beta.5 最终发行物验收记录（初始 2026-10-02；更新 2026-10-09）
 
 本记录保存正式发行物证据；实时进度与发布决策仍由 [唯一执行手册](NDG-v0.5-Beta-RC-Release-Execution-Manual.md) 管理。未执行场景不默认通过，开发 App / CI / 静态资产检查不能替代真机与 NAS 场景。
 
@@ -38,8 +38,8 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 | 正式 App 的 Finder 安装与启动 | PASS | 安装目标原先不存在；通过 Finder 复制包内 App 到 Applications 后，用安装路径启动，GUI 正常出现。安装后二进制 SHA-256 与正式包内二进制相等。 | 本机已有 NDG 使用历史；实际安装为 Finder 复制，不能声称拖动操作成功或干净环境首次启动通过。 |
 | 安装后 App codesign / Gatekeeper | PASS | codesign deep / strict exit=0；spctl execute exit=0，accepted、source=Notarized Developer ID。 | 当前在线且已经评估过该资产。 |
 | 安装后 GUI About 身份 | PASS | 真机 About：Version=0.5.0-beta.5；Commit=`8473dd630c4165389b32ffc85ae062145546a766`；Build time=2026-10-02T12:13:59Z；Channel=beta。正式二进制中完整 RC SHA 恰出现一次。 | 初始窗口 About Commit=`bcab0413ac49`，不匹配 RC，已排除该窗口并关闭空闲旧构建；未把其结果算作正式发行物证据。 |
-| QA-1：浏览器下载后 Clean Install / 首次 Gatekeeper GUI 路径 | BLOCKED | 已完成安装与 About 子检查；本轮 `gh` 下载及安装的 App 未携带 com.apple.quarantine 标记。 | 没有清除 quarantine，但 CLI 下载未走浏览器下载标记路径；本机也非全新环境，不能把正常启动记为完整 Clean Install PASS。需浏览器下载且不绕过保护的独立场景。 |
-| 全新环境断网首次启动 | BLOCKED | 已向用户提供独立 Mac / VM 验收步骤。 | 尚无未运行过 beta.5、未在线评估过该资产的环境证据；未断开当前 NAS / 网络，也未模拟干净环境。 |
+| QA-1：Clean Install / 首次 Gatekeeper GUI 路径 | PASS | 2026-10-09 用户人工验收：未运行过 beta.5 的 Mac，下载后未在线启动，断网首次安装并打开正常，未使用“仍要打开”或清除隔离属性；[About 截图](evidence/beta5-offline-first-launch-about-20261009.png) 身份严格匹配正式 RC。 | 用户实际操作反馈与截图，非代理现场操作；未在该 Mac 单独读取 quarantine 属性或复算下载文件 checksum。2026-10-02 CLI 下载与已使用环境的启动证据不用于替代本场景。 |
+| 全新环境断网首次启动 | PASS | 2026-10-09 用户确认全新 beta.5 环境、下载后无在线启动、断网首次安装 / 打开、无 Gatekeeper 绕过；About 版本=0.5.0-beta.5，Commit=`8473dd630c4165389b32ffc85ae062145546a766`，构建时间=2026-10-02T12:13:59Z，通道=beta。 | 用户人工验收与身份截图共同支持本场景；不替代 NAS、事件 / 运行日志隐私、Resume 或恢复场景。 |
 | Release notes / SBOM 资产读取 | PASS | GitHub Release body 去首尾空白后与 CHANGELOG beta.5 段正文逐字相等；未使用占位回退。CycloneDX JSON 可读取，59 components；SPDX-2.3 JSON 可读取，55 packages。 | JSON 读取不代表穷尽 SBOM 完整性审计。 |
 | 正式 App：真实 NAS 项目、索引、重复结果、目录语境与路径脱敏 | NOT RUN | 本阶段未在正式 App 打开真实项目或重新扫描 NAS。 | 开发版与历史 beta.4 证据不能替代此行。 |
 | 正式 App：GUI 操作期间新增事件隐私 | NOT RUN | 尚未执行安全小范围扫描并检查新增持久化事件。 | 旧 creation event / 历史数据库原样保留；不推断新增事件合规。 |
@@ -52,7 +52,7 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 
 治理说明：**PASS WITH DOCUMENTATION CORRECTION**；这是已接受的要求修正，不是独立验收场景状态，也不代表 QA-4 所有子场景或 Public Beta 已通过。
 
-当前流水线只公证并 staple DMG，包内 App `stapler validate` exit=65（无独立 stapled ticket）。记录这一实现事实，不单独判定 beta.5 FAIL，不由此推断离线首次启动的结果。正式 DMG staple、安装后 codesign 与 spctl 仍必须通过；全新环境断网首次启动另行实际验收。
+当前流水线只公证并 staple DMG，包内 App `stapler validate` exit=65（无独立 stapled ticket）。记录这一实现事实，不单独判定 beta.5 FAIL，不由此推断离线首次启动的结果。正式 DMG staple、安装后 codesign 与 spctl 仍必须通过；全新环境断网首次启动已于 2026-10-09 由用户人工验收与 About 截图取证为 PASS，详情见本记录。
 
 不更改产品、版本、流水线、Tag 或正式资产，也不发布 Draft。
 
@@ -69,6 +69,20 @@ e6d5ad3ad2ae87eeff9d558d646a3dd67a3a56c9d48f12f28ce77afae37881e5
 
 ## 发布结论与下一动作
 
-**Public Beta：BLOCKED。** 静态资产与安装身份检查已通过；完整 Clean Install、独立环境离线首启和其余真机 / NAS / 隐私 / 恢复场景仍缺证据。没有新增产品或资产回归判定，也没有解除最终发布门槛。
+**Public Beta：BLOCKED。** 静态资产、安装身份、Clean Install 与全新环境离线首启已通过；真实 NAS、GUI 事件 / 长时运行日志隐私、小范围 SMB Resume、disposable Quarantine / Restore 与 Crash Recovery 仍未验收。本次解除安装 / 离线首启两项阻断，不解除整体发布门槛。
 
-下一唯一动作：用户准备未运行过 beta.5 的 Mac / VM，通过浏览器从正式 Draft 下载 DMG，核对上述 SHA-256 后先不要启动；断网、挂载、Finder 安装并首次双击，记录 Gatekeeper 与 About。禁止 `xattr -cr` 或“仍要打开”绕过。若无该环境，保持 BLOCKED，由用户明确后再推进下一阶段。
+下一唯一动作：在正式 beta.5 App 中以“只读打开”进入已有真实 NAS 项目，开启路径脱敏，查看重复结果中的一组目录语境和文件证据；不重新启动大目录扫描，不执行隔离、删除或恢复。
+
+
+## 2026-10-09 人工反馈与身份闭环
+
+| 场景 | 结果 | 证据 | 问题 / 限制 |
+|---|---|---|---|
+| 严格的全新环境断网首次启动 | PASS | 用户确认在未运行过 beta.5 的 Mac 上，下载后未在线启动 App，断网后首次安装并打开，未使用“仍要打开”或清除隔离属性；About 截图显示完整 RC SHA 与构建身份。 | 用户人工验收 + GUI 截图，不是代理现场网络状态测量；只关闭本场景。 |
+| Mac 根目录范围包含当前项目数据库时的扫描启动拒绝 | PASS | 同轮用户报错截图与 About 身份闭环；报错精确对应 RC 源码 `internal/project/service.go` 的项目数据库 / WAL / SHM 包含检查及已有拒绝测试。 | PASS 仅表示预期保护拒绝得到证据，不表示合法子目录扫描已完成；报错截图见本轮对话，其原始图片文件现不可读取，未归档图片副本。 |
+
+About 原始截图按字节一致复制保存，图片只含产品身份，没有本机路径、文件名、NAS 地址或凭据；报告不记录用户机器与源目录的实际路径。
+
+2026-10-02 的 BLOCKED 来自 CLI 下载及已使用环境；2026-10-09 的人工反馈和身份截图补齐全新环境证据，现按场景关闭。Tag / RC / 发行资产不变，Draft 不发布。
+
+下一唯一动作：正式 beta.5 App 只读打开已有 NAS 项目，检查一组重复结果 / 目录语境 / 文件证据，并以路径脱敏状态提供截图。
