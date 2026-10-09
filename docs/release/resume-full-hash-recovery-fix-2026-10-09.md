@@ -57,6 +57,12 @@ macOS/Linux 的 production recovered quick/full reads 使用 root-anchored `open
 
 CLI 生产默认也使用受保护的 `NewScanService`；测试在 `_test.go` 中显式替换 factory，避免正式构造因历史测试注入而绕开保护。CI、独立审查、Desktop Build 与合并后 Gate 以最终 SHA 的 PR 记录为准。自动化测试通过不替代正式签名 App 的 SMB 验收。
 
+## CI 发现的工具链安全门禁
+
+初始修复 HEAD `4a56e66` 的 Govulncheck [实际失败](https://github.com/FNB2026/nas-data-governance/actions/runs/37907743641)：当前 Go 1.26.6 的标准库报告五项可达漏洞 `GO-2026-6617 / 6613 / 6612 / 6611 / 6603`，全部要求 Go 1.26.9。这里的可达报告不等于已证实产品可被利用，但不能绕过强制安全门禁。
+
+用单独提交将 `go.mod` 的 Go 补丁版本升到 1.26.9；产品版本与依赖库版本保持不变。[官方漏洞报告](https://pkg.go.dev/vuln/GO-2026-6611)列出相应修复边界。最终 HEAD 需重新完成 CI、构建与独立审查，初始失败记录保留。
+
 ## 新发行候选与正式复验建议（尚未执行）
 
 1. 独立修复 PR 经最终 HEAD CI 和独立 Codex 复审通过后合 main，再跑合并后 Gate。
