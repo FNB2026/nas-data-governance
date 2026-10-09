@@ -50,6 +50,11 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("store: inspect database: %w", err)
 	}
+	canonicalDir, err := filepath.EvalSymlinks(dbDir)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve database directory")
+	}
+	absPath = filepath.Join(canonicalDir, filepath.Base(absPath))
 	// _txlock=immediate makes write transactions acquire the write lock up
 	// front, avoiding "database is locked" mid-transaction. foreign_keys &
 	// busy_timeout make the behavior safer under concurrent readers.
@@ -644,6 +649,13 @@ func (s *SQLiteStore) SavePlans(ctx context.Context, taskID string, plans []doma
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	var frozen int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operation_plans WHERE task_id=? AND (state <> 'DRAFT' OR EXISTS (SELECT 1 FROM execution_journal WHERE plan_id=operation_plans.id) OR EXISTS (SELECT 1 FROM operation_logs WHERE plan_id=operation_plans.id))`, taskID).Scan(&frozen); err != nil {
+		return err
+	}
+	if frozen > 0 {
+		return ErrPlanStateConflict
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM operation_plans WHERE task_id = ?`, taskID); err != nil {
 		return fmt.Errorf("store: clear plans: %w", err)
 	}
@@ -750,10 +762,17 @@ func (s *SQLiteStore) GetPlan(ctx context.Context, planID string) (domain.Operat
 // UpdatePlanState persists a plan's state transition. Used by crash
 // recovery to mark a plan as ROLLED_BACK or reset to APPROVED.
 func (s *SQLiteStore) UpdatePlanState(ctx context.Context, planID string, state domain.PlanState) error {
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE operation_plans SET state = ? WHERE id = ?`, string(state), planID)
 	if err != nil {
 		return fmt.Errorf("store: update plan state: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -852,12 +871,17 @@ func journalTouchesFilesystem(action domain.OperationType) bool {
 // BeginJournal 为 plan 的所有 filesystem action 写入 pending 记录。
 // 已存在的记录不重复写入（INSERT OR IGNORE），保证幂等。
 func (s *SQLiteStore) BeginJournal(ctx context.Context, taskID, planID string, actions []domain.PlannedAction) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for i, action := range actions {
 		if !journalTouchesFilesystem(action.Action) {
 			continue
 		}
-		_, err := s.db.ExecContext(ctx,
+		_, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO execution_journal
 			  (plan_id, task_id, action_index, action_type, source_path, target_path, content_sha256, file_size, status, started_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
@@ -868,29 +892,43 @@ func (s *SQLiteStore) BeginJournal(ctx context.Context, taskID, planID string, a
 			return fmt.Errorf("store: begin journal: %w", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // MarkJournalDone 标记 action 执行完成，并记录实际目标路径。
 // actualTargetPath 对 MOVE/COPY/RENAME 等于 plan 中的 TargetPath；对
 // QUARANTINE/DELETE 是运行时解析出的隔离路径，回滚时需要此路径。
 func (s *SQLiteStore) MarkJournalDone(ctx context.Context, planID string, actionIndex int, actualTargetPath string) error {
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE execution_journal SET status = 'done', target_path = ?, completed_at = ? WHERE plan_id = ? AND action_index = ?`,
 		nullIfEmpty(actualTargetPath), time.Now().UTC().Format(time.RFC3339Nano), planID, actionIndex)
 	if err != nil {
 		return fmt.Errorf("store: mark journal done: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
 	}
 	return nil
 }
 
 // MarkJournalFailed 标记 action 执行失败。
 func (s *SQLiteStore) MarkJournalFailed(ctx context.Context, planID string, actionIndex int) error {
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE execution_journal SET status = 'failed', completed_at = ? WHERE plan_id = ? AND action_index = ?`,
 		time.Now().UTC().Format(time.RFC3339Nano), planID, actionIndex)
 	if err != nil {
 		return fmt.Errorf("store: mark journal failed: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -901,11 +939,18 @@ func (s *SQLiteStore) MarkJournalRolledBack(ctx context.Context, planID string, 
 	if rollbackErr != nil {
 		status = "failed"
 	}
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE execution_journal SET rollback_status = ? WHERE plan_id = ? AND action_index = ?`,
 		status, planID, actionIndex)
 	if err != nil {
 		return fmt.Errorf("store: mark journal rolled back: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -972,7 +1017,7 @@ func scanJournalEntries(rows *sql.Rows) ([]JournalEntry, error) {
 // ListExecutingPlans 列出 state=EXECUTING 的 plan_id。
 func (s *SQLiteStore) ListExecutingPlans(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id FROM operation_plans WHERE state = 'EXECUTING'`)
+		`SELECT id FROM operation_plans WHERE state IN ('STALE_CHECKED', 'EXECUTING') OR (state='APPROVED' AND EXISTS (SELECT 1 FROM execution_journal WHERE plan_id=operation_plans.id))`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list executing plans: %w", err)
 	}

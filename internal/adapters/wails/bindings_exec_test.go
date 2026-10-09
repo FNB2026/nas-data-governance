@@ -388,3 +388,26 @@ func TestSmokeGovernanceExecutionLifecycle(t *testing.T) {
 		t.Fatalf("expected audit and journal records, logs=%d journal=%d", len(logs), len(journal))
 	}
 }
+
+func TestCapabilitiesFailClosedWhenRecoveryEvidenceUnavailable(t *testing.T) {
+	api := NewAPI()
+	db := filepath.Join(t.TempDir(), "capabilities.db")
+	if _, err := api.OpenProjectReadWrite(db); err != nil {
+		t.Fatal(err)
+	}
+	defer api.CloseProject()
+	// Closed handle simulates loss of recovery evidence, not a production edit.
+	if err := api.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	caps, err := api.GetAppCapabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !caps.RecoveryLockActive || caps.CanScan || caps.CanApprovePlans || caps.CanExecuteQuarantine || caps.CanExecutePurge {
+		t.Fatalf("missing evidence granted capabilities: %+v", caps)
+	}
+	if _, err := api.ApprovePlans(ApprovePlansRequest{PlanIDs: []string{"fixture"}}); err == nil {
+		t.Fatal("approval accepted without recovery evidence")
+	}
+}

@@ -51,7 +51,7 @@ func seedQuarantineItem(
 		},
 	}
 	plan := domain.OperationPlan{
-		ID: planID, TaskID: taskID, State: domain.PlanApproved,
+		ID: planID, TaskID: taskID, State: domain.PlanExecuting,
 		Actions: []domain.PlannedAction{action},
 	}
 	if err := st.SavePlans(ctx, taskID, []domain.OperationPlan{plan}); err != nil {
@@ -63,7 +63,17 @@ func seedQuarantineItem(
 	if err := st.MarkJournalDone(ctx, planID, 0, qPath); err != nil {
 		t.Fatal(err)
 	}
-	items, err := st.RegisterQuarantinesFromJournal(ctx, planID, quarantinedAt, retainUntil)
+	// Seed a fully finalized lifecycle, not the old APPROVED+journal defect.
+	if err := st.CompletePlanExecution(ctx, plan, domain.PlanVerified, nil, quarantinedAt, retainUntil); err != nil {
+		t.Fatal(err)
+	}
+	allItems, err := st.ListQuarantineItems(ctx, "")
+	var items []domain.QuarantineItem
+	for _, item := range allItems {
+		if item.PlanID == planID {
+			items = append(items, item)
+		}
+	}
 	if err != nil || len(items) != 1 {
 		t.Fatalf("register item: len=%d err=%v", len(items), err)
 	}

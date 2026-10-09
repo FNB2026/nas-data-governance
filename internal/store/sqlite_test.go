@@ -363,16 +363,20 @@ func TestSaveAndReplacePlans(t *testing.T) {
 		t.Fatalf("ListAllPlans did not expose authoritative state: %#v, %v", all, err)
 	}
 
-	// Replace with a smaller plan set; the old plan must disappear.
-	replacement := []domain.OperationPlan{
-		{ID: "dup-bbbbbbbbbbbb", State: domain.PlanDraft, Risk: domain.RiskHigh, Actions: []domain.PlannedAction{{Path: "/x", Action: domain.OperationReview}}, Evidence: []string{"new"}},
+	// Approved actions and invalidation audit must never be deleted by regeneration.
+	replacement := []domain.OperationPlan{{ID: "replacement", State: domain.PlanDraft, Risk: domain.RiskLow}}
+	if err := s.SavePlans(ctx, taskID, replacement); err != ErrPlanStateConflict {
+		t.Fatalf("approved replacement accepted: %v", err)
 	}
-	if err := s.SavePlans(ctx, taskID, replacement); err != nil {
-		t.Fatalf("save replacement: %v", err)
+	if err := s.CompareAndSwapPlanState(ctx, plans[0].ID, domain.PlanApproved, domain.PlanDraft); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SavePlans(ctx, taskID, replacement); err != ErrPlanStateConflict {
+		t.Fatalf("audit history replacement accepted: %v", err)
 	}
 	got, _ = s.ListPlans(ctx, taskID)
-	if len(got) != 1 || got[0].ID != "dup-bbbbbbbbbbbb" {
-		t.Fatalf("expected replacement only, got %#v", got)
+	if len(got) != 1 || got[0].ID != plans[0].ID || got[0].State != domain.PlanDraft {
+		t.Fatalf("original invalidated plan lost: %#v", got)
 	}
 }
 
@@ -705,5 +709,57 @@ CREATE TABLE IF NOT EXISTS file_instances (
 			}
 			break
 		}
+	}
+}
+
+func TestConditionalPlanStateDoesNotOverwriteApprovalOrTerminal(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.CreateTask(ctx, domain.OperationTask{ID: "conditional-task", RootPath: "/fixture", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	p := domain.OperationPlan{ID: "conditional-plan", TaskID: "conditional-task", State: domain.PlanDraft}
+	if err := s.SavePlans(ctx, p.TaskID, []domain.OperationPlan{p}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompareAndSwapPlanState(ctx, p.ID, domain.PlanDraft, domain.PlanApproved); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompareAndSwapPlanState(ctx, p.ID, domain.PlanDraft, domain.PlanApproved); err != ErrPlanStateConflict {
+		t.Fatalf("outdated approval succeeded: %v", err)
+	}
+	if err := s.CompareAndSwapPlanState(ctx, "missing", domain.PlanDraft, domain.PlanApproved); err != ErrPlanStateConflict {
+		t.Fatalf("missing CAS succeeded: %v", err)
+	}
+	if err := s.UpdatePlanState(ctx, "missing", domain.PlanApproved); err != ErrNotFound {
+		t.Fatalf("missing unconditional update succeeded: %v", err)
+	}
+	if err := s.CompareAndSwapPlanState(ctx, p.ID, domain.PlanApproved, domain.PlanStaleChecked); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompareAndSwapPlanState(ctx, p.ID, domain.PlanDraft, domain.PlanApproved); err != ErrPlanStateConflict {
+		t.Fatalf("approval replaced reservation: %v", err)
+	}
+}
+
+func TestBeginJournalAtomicOnSecondInsertFailure(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.CreateTask(ctx, domain.OperationTask{ID: "atomic-task", RootPath: "/fixture", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	p := domain.OperationPlan{ID: "atomic-plan", TaskID: "atomic-task", State: domain.PlanApproved, Actions: []domain.PlannedAction{{Action: domain.OperationCopy, Path: "/fixture/a"}, {Action: domain.OperationCopy, Path: "/fixture/b"}}}
+	if err := s.SavePlans(ctx, p.TaskID, []domain.OperationPlan{p}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER second_insert_failure BEFORE INSERT ON execution_journal WHEN NEW.action_index=1 BEGIN SELECT RAISE(FAIL,'fixture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BeginJournal(ctx, p.TaskID, p.ID, p.Actions); err == nil {
+		t.Fatal("expected journal failure")
+	}
+	entries, err := s.ListJournalAll(ctx, p.ID)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("partial pending journal: %+v %v", entries, err)
 	}
 }

@@ -482,6 +482,10 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		}
 		return StartScanResponse{}, ErrNoProjectOpen
 	}
+	lockStatus, lockErr := checkRecoveryLock(context.Background(), a.store)
+	if lockErr != nil || lockStatus.LockActive {
+		return StartScanResponse{}, errors.New("wails: recovery lock active or unavailable")
+	}
 	if strings.TrimSpace(req.Root) == "" {
 		return StartScanResponse{}, errors.New("wails: root is required")
 	}
@@ -956,8 +960,8 @@ func (a *API) ListGroupDecisions(decisionType string) ([]GroupDecisionDTO, error
 // Critical-risk plans cannot be approved here; they require an independent
 // hold-release workflow. Non-DRAFT plans are rejected.
 func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.store == nil {
 		return ApprovePlansResponse{}, ErrNoProjectOpen
@@ -967,6 +971,12 @@ func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error
 	}
 	if len(req.PlanIDs) == 0 {
 		return ApprovePlansResponse{}, errors.New("wails: at least one plan_id is required")
+	}
+
+	// A failed recovery query must not permit approval.
+	lockStatus, lockErr := checkRecoveryLock(context.Background(), a.store)
+	if lockErr != nil || lockStatus.LockActive {
+		return ApprovePlansResponse{}, errors.New("wails: recovery lock active or unavailable")
 	}
 
 	// Load all plans so PlanService can validate transitions.
@@ -985,7 +995,7 @@ func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error
 
 	// Persist each state transition.
 	for _, p := range result.Approved {
-		if err := a.store.UpdatePlanState(context.Background(), p.ID, p.State); err != nil {
+		if err := a.store.CompareAndSwapPlanState(context.Background(), p.ID, domain.PlanDraft, p.State); err != nil {
 			return ApprovePlansResponse{}, fmt.Errorf("wails: persist approval for plan %s: %w", p.ID, err)
 		}
 	}
@@ -1087,8 +1097,8 @@ func (a *API) ApproveRestorePlan(planID, digest string) error {
 // ExecuteRestore executes an approved restore plan. When dry_run is true,
 // only validation is performed. Requires read-write mode.
 func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.quarantineSvc == nil {
 		return ExecuteRestoreResponse{}, ErrNoProjectOpen
@@ -1194,8 +1204,8 @@ func (a *API) ApprovePurgePlan(planID, digest string) error {
 // ExecutePurge executes an approved purge plan. When dry_run is true, only
 // validation is performed. Requires read-write mode.
 func (a *API) ExecutePurge(req ExecutePurgeRequest) (ExecutePurgeResponse, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.purgeSvc == nil {
 		return ExecutePurgeResponse{}, ErrNoProjectOpen
@@ -1275,11 +1285,11 @@ func checkRecoveryLock(ctx context.Context, st recoveryLockStore) (RecoveryStatu
 }
 
 // RecoverSourcePlans scans for plans stuck in EXECUTING state and brings
-// them to a safe terminal state (rolled back or reset to APPROVED).
+// them to a safe state (rolled back, fresh DRAFT, or explicitly blocked).
 // Requires read-write mode.
 func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.recoverySvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1306,8 +1316,8 @@ func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
 // RecoverRestores coordinates crash recovery for non-terminal restore
 // operations. Requires read-write mode.
 func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResultDTO, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.quarantineSvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1341,8 +1351,8 @@ func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResu
 // RecoverPurges coordinates crash recovery for non-terminal purge
 // operations. Requires read-write mode.
 func (a *API) RecoverPurges(quarantineRoot string) ([]PurgeRecoveryResultDTO, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.purgeSvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1489,8 +1499,8 @@ func (a *API) SaveDraftPlans(storageID string) ([]PlanDTO, error) {
 // re-loads plans from the database by plan_ids — it does not trust
 // frontend-supplied plan data.
 func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.store == nil {
 		return ExecutePlansResponse{}, ErrNoProjectOpen
@@ -1603,7 +1613,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	isRW := a.scanRunner != nil
 
 	// Check recovery lock from real backend state.
-	recoveryLock := false
+	recoveryLock := true
 	lockStatus, err := checkRecoveryLock(context.Background(), a.store)
 	if err == nil {
 		recoveryLock = lockStatus.LockActive
@@ -1713,7 +1723,7 @@ func (a *API) GetProjectReadiness() (ProjectReadinessDTO, error) {
 	})
 
 	// 4. Recovery lock inactive
-	recoveryLock := false
+	recoveryLock := true
 	lockStatus, lockErr := checkRecoveryLock(ctx, a.store)
 	if lockErr == nil {
 		recoveryLock = lockStatus.LockActive

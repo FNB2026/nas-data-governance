@@ -92,13 +92,28 @@ func (s *ExecutionService) Execute(ctx context.Context, in ExecutionInput) (*Exe
 	var exec *executor.Executor
 	var err error
 	if !in.DryRun {
-		exec, err = executor.NewWithJournal(qCfg, s.store)
+		exec, err = executor.NewWithJournalAndState(qCfg, s.store, func(ctx context.Context, id string, from, to domain.PlanState) error {
+			return s.store.CompareAndSwapPlanState(ctx, id, from, to)
+		})
 	} else {
 		exec, err = executor.New(qCfg)
 	}
 	if err != nil {
 		return nil, err
 	}
+
+	if !in.DryRun {
+		unlock, err := s.store.AcquireExecutionLock()
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+		if err := requireNoRecovery(ctx, s.store); err != nil {
+			return nil, fmt.Errorf("app: recovery lock active or unavailable")
+		}
+	}
+	// Never mutate the caller's shared request slice.
+	in.Plans = append([]domain.OperationPlan(nil), in.Plans...)
 
 	// For real execution, persist only plans that do not already exist.
 	// Desktop governance plans are saved and approved before this method is
@@ -135,7 +150,21 @@ func (s *ExecutionService) Execute(ctx context.Context, in ExecutionInput) (*Exe
 
 	summary := &ExecutionSummary{Results: make([]ExecutionResult, 0, len(in.Plans))}
 	for i := range in.Plans {
+		if summary.LifecycleErr != nil {
+			summary.Skipped++
+			summary.Results = append(summary.Results, ExecutionResult{PlanID: in.Plans[i].ID, FinalState: in.Plans[i].State, ErrorType: "recovery_required", Err: fmt.Errorf("app: batch stopped; recovery required")})
+			continue
+		}
 		p := &in.Plans[i]
+		if s.store != nil {
+			durable, err := s.store.GetPlan(ctx, p.ID)
+			if err != nil && !(in.DryRun && err == store.ErrNotFound) {
+				return summary, fmt.Errorf("app: cannot load authoritative plan")
+			}
+			if err == nil {
+				*p = durable
+			}
+		}
 		if p.State != domain.PlanApproved {
 			summary.Skipped++
 			summary.Results = append(summary.Results, ExecutionResult{
@@ -160,24 +189,51 @@ func (s *ExecutionService) Execute(ctx context.Context, in ExecutionInput) (*Exe
 			continue
 		}
 		result := exec.Execute(ctx, p)
-		summary.Results = append(summary.Results, toAppResult(result))
-		if result.Err != nil {
-			summary.Failed++
+		if result.Err == nil && result.FinalState == domain.PlanVerified {
+			at := time.Now().UTC()
+			err := s.store.CompletePlanExecution(ctx, *p, domain.PlanVerified, auditLogs(result), at, at.Add(in.Retention))
+			if err != nil {
+				result.Err = fmt.Errorf("app: execution finalization failed; recovery required")
+				result.ErrorType = "state_persist_failed"
+				summary.LifecycleErr = result.Err
+			} else {
+				summary.Executed++
+			}
 		} else {
-			summary.Executed++
-			quarantinedAt := time.Now().UTC()
-			if _, err := s.store.RegisterQuarantinesFromJournal(
-				ctx, p.ID, quarantinedAt, quarantinedAt.Add(in.Retention),
-			); err != nil {
-				summary.Executed--
-				summary.Failed++
-				summary.LifecycleErr = fmt.Errorf("managed quarantine registration failed")
+			if result.Err == nil {
+				result.Err = fmt.Errorf("app: execution not verified")
+				result.ErrorType = "incomplete_execution"
+			}
+			if result.FinalState == domain.PlanRolledBack {
+				at := time.Now().UTC()
+				if err := s.store.CompletePlanExecution(ctx, *p, domain.PlanRolledBack, auditLogs(result), at, at.Add(in.Retention)); err != nil {
+					result.Err = fmt.Errorf("app: rollback finalization failed; recovery required")
+					result.ErrorType = "state_persist_failed"
+					summary.LifecycleErr = result.Err
+				}
+			} else {
+				persistAudit(ctx, s.store, result)
 			}
 		}
-		// Persist audit steps to SQLite.
-		if s.store != nil {
-			persistAudit(ctx, s.store, result)
+		if result.Err != nil {
+			summary.Failed++
+			if result.FinalState == domain.PlanExecuting || result.FinalState == domain.PlanStaleChecked {
+				summary.LifecycleErr = fmt.Errorf("app: execution state uncertain; recovery required")
+			}
+			if durable, err := s.store.GetPlan(ctx, p.ID); err == nil {
+				result.FinalState = durable.State
+				if durable.State == domain.PlanExecuting || durable.State == domain.PlanStaleChecked {
+					summary.LifecycleErr = fmt.Errorf("app: execution state uncertain; recovery required")
+				}
+			} else {
+				summary.LifecycleErr = fmt.Errorf("app: final state unavailable; recovery required")
+			}
+			if result.ErrorType == "state_persist_failed" {
+				summary.LifecycleErr = fmt.Errorf("app: execution state uncertain; recovery required")
+			}
 		}
+		summary.Results = append(summary.Results, toAppResult(result))
+
 	}
 	return summary, summary.LifecycleErr
 }
@@ -217,4 +273,21 @@ func persistAudit(ctx context.Context, st ExecutionStore, result executor.Result
 		}
 		_ = st.AppendLog(ctx, result.PlanID, step.Name, detail)
 	}
+}
+
+func auditLogs(result executor.Result) []domain.OperationLog {
+	logs := make([]domain.OperationLog, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		detail := make(map[string]any, len(step.Detail)+3)
+		for k, v := range step.Detail {
+			detail[k] = v
+		}
+		detail["status"] = string(step.Status)
+		detail["final_state"] = string(result.FinalState)
+		if result.Err != nil {
+			detail["error_type"] = result.ErrorType
+		}
+		logs = append(logs, domain.OperationLog{PlanID: result.PlanID, EventType: step.Name, Detail: detail})
+	}
+	return logs
 }
