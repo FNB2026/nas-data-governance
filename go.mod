@@ -1,6 +1,6 @@
 module github.com/FNB2026/nas-data-governance
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/dslipak/pdf v0.0.2

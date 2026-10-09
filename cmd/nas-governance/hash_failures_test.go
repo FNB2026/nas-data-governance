@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	idx "github.com/FNB2026/nas-data-governance/internal/index"
 )
@@ -41,6 +42,7 @@ func TestScanRetainsUnfingerprintedRecordAndWritesPrivateManifest(t *testing.T) 
 	original := quickHash
 	quickHash = func(string, int64) (string, error) { return "", errors.New("unavailable") }
 	defer func() { quickHash = original }()
+	useInjectedScanService(t)
 
 	if err := runScan([]string{
 		"--root", root, "--out", indexPath, "--storage", "test",
@@ -222,6 +224,7 @@ func TestIncrementalScanRetriesCachedRecordWithoutQuickHash(t *testing.T) {
 		return original(path, size)
 	}
 	defer func() { quickHash = original }()
+	useInjectedScanService(t)
 	if err := runScan([]string{
 		"--root", root, "--out", filepath.Join(tmp, "rescanned.jsonl"),
 		"--storage", "test", "--db", dbPath, "--hash-retry-delay", "0",
@@ -284,4 +287,14 @@ func TestRetryHashesRequiresSeparateOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected source overwrite rejection")
 	}
+}
+
+// Injection is test-only; the production CLI uses NewScanService by default.
+func useInjectedScanService(t *testing.T) {
+	t.Helper()
+	original := scanServiceFactory
+	scanServiceFactory = func(st app.ScanStore) *app.ScanService {
+		return app.NewScanServiceWithHashFunc(st, app.HashFunc(quickHash), app.HashFunc(fullHash))
+	}
+	t.Cleanup(func() { scanServiceFactory = original })
 }

@@ -15,6 +15,10 @@ func Full(path string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
+	return fullReader(f)
+}
+
+func fullReader(f io.Reader) (string, error) {
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -28,6 +32,10 @@ func Quick(path string, size int64) (string, error) {
 		return "", err
 	}
 	defer f.Close()
+	return quickReader(f, size)
+}
+
+func quickReader(f io.ReadSeeker, size int64) (string, error) {
 	h := sha256.New()
 	if size <= sampleSize*2 {
 		if _, err := io.Copy(h, f); err != nil {

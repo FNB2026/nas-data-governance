@@ -89,6 +89,8 @@ func main() {
 	}
 }
 
+var scanServiceFactory = app.NewScanService
+
 func runScan(args []string) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	root := fs.String("root", "", "root directory to scan")
@@ -131,13 +133,13 @@ func runScan(args []string) error {
 	// hash reuse, two-stage progressive fingerprinting, and DB persistence.
 	// When --db is omitted, pass a nil interface (not a nil *SQLiteStore)
 	// so the service correctly detects JSONL-only mode.
-	// We inject the global quickHash/fullHash variables so tests can
-	// override them without reaching into the service internals.
+	// Production uses the default service, including protected recovered reads.
+	// Tests may replace the service factory to inject content-read failures.
 	var scanStore app.ScanStore
 	if st != nil {
 		scanStore = st
 	}
-	svc := app.NewScanServiceWithHashFunc(scanStore, app.HashFunc(quickHash), app.HashFunc(fullHash))
+	svc := scanServiceFactory(scanStore)
 
 	// Start progress reporter that polls the service's Progress() method.
 	reporter, err := startProgressReporter(*progressOut, *progressInterval, func() progressSnapshot {

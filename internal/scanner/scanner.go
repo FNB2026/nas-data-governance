@@ -33,6 +33,10 @@ type Options struct {
 	// resume never misses a file. Scan enforces this ordering via a
 	// deterministic pre-order DFS (see dirSortKey).
 	ResumePath string
+	// SelectedPaths restricts traversal to these exact file paths and their
+	// ancestors. Used to revalidate checkpointed hash candidates without
+	// enumerating unrelated subtrees. Nil retains ordinary scan behavior.
+	SelectedPaths map[string]bool
 	// NetworkSource enables conservative classification of filesystem errors
 	// that indicate a temporarily disconnected remote source.
 	NetworkSource bool
@@ -119,6 +123,19 @@ func scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	}
 	rootDev, _ := deviceAndInode(rootInfo)
 	identityReliable := physicalIdentityReliable(root)
+	selectedAncestors := map[string]bool{}
+	for path, selected := range opts.SelectedPaths {
+		if !selected {
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return Stats{}, errors.New("selected scan path outside root; path omitted")
+		}
+		for parent := filepath.Dir(path); parent != root; parent = filepath.Dir(parent) {
+			selectedAncestors[parent] = true
+		}
+	}
 
 	stats := Stats{}
 	// seen guards (storage_id, path) idempotency across the whole scan.
@@ -168,6 +185,9 @@ func scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 
 			// Exclusion check (root itself is never excluded).
 			if path != root && opts.ExcludedNames[entry.Name()] {
+				continue
+			}
+			if opts.SelectedPaths != nil && !opts.SelectedPaths[path] && !selectedAncestors[path] {
 				continue
 			}
 
