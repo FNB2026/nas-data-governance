@@ -80,7 +80,7 @@ GUI 计划、文件证据、Journal 显示遮罩路径；执行中心可编辑 S
 ## 限制与后续门禁
 
 - 未修改数据库来模拟审批 digest 失效；GUI 未提供时间型过期审批操作，本次该子场景 **NOT RUN**。源变化导致的批准失效要求已实际暴露 FAIL。
-- 未直接构造 managed HOLD item，因此 managed HOLD 的恢复拒绝 **NOT RUN**；受保护计划 Gate 与它分开记录。
+- 未直接构造 managed HOLD item，其恢复流程 **NOT RUN**；后端允许 HOLD 项恢复，HOLD 限制永久清理。当前 GUI 仅对 QUARANTINED 项显示创建恢复草案；受保护计划 Gate 与它分开记录，不将允许的 HOLD 恢复误判为应拒绝操作。
 - 恢复拒绝没有开始文件动作，因此无 Restore Journal；未声称 GUI 审计列出不存在的恢复失败 Journal。实际拒绝以私有 GUI 文本/截图、前后文件哈希和 DB 验证。
 - 本轮结论限于本机可丢弃 APFS 工作流；正式 SMB Resume 的此前 PASS 另见[独立记录](beta.6-formal-artifact-smb-acceptance-2026-10-09.md)，不能混作 SMB 隔离/恢复证据。
 - Crash Recovery / Recovery Lock **NOT RUN，前置验收 FAIL 阻断**；Purge **NOT RUN**。下一步仅推进 Issue #62 的独立修复，不提前崩溃测试或清理。
