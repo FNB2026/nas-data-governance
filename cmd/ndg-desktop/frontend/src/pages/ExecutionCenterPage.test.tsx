@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { apiMock, contextMock, pushToastMock } = vi.hoisted(() => ({
   pushToastMock: vi.fn(),
@@ -68,6 +68,11 @@ const successfulResult = {
 beforeEach(() => {
   Object.defineProperty(window, "go", { value: {}, configurable: true });
   Object.defineProperty(window, "runtime", { value: {}, configurable: true });
+  contextMock.dataRevision = 0;
+  contextMock.isReadWrite = true;
+  apiMock.execution.createRestorePlan.mockReset();
+  apiMock.execution.approveRestore.mockReset().mockResolvedValue(undefined);
+  apiMock.execution.executeRestore.mockReset().mockResolvedValue({ status: "ok", final_state: "APPROVED" });
   contextMock.capabilities.can_execute_quarantine = true;
   contextMock.capabilities.can_execute_purge = true;
   contextMock.capabilities.recovery_lock_active = false;
@@ -207,5 +212,188 @@ describe("ExecutionCenter recovery request and lock uncertainty", () => {
     expect(contextMock.refreshRecoveryLock).toHaveBeenCalledTimes(1);
     expect(pushToastMock.mock.calls.some(([tone]) => tone === "success")).toBe(mode === "confirmed");
     expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
+  });
+});
+
+
+describe("Restore after verified rollback", () => {
+  it("offers a new draft rather than reusing a rolled-back approval", async () => {
+    apiMock.execution.listQuarantine.mockResolvedValue([{
+      id: "item-disposable", status: "QUARANTINED", file_size: 1024,
+      content_sha256: "abcdef0123456789", quarantined_at: "2026-01-01T00:00:00Z", retain_until: "2026-02-01T00:00:00Z",
+    }]);
+    apiMock.execution.listRestores.mockResolvedValue([{
+      id: "restore-old", item_id: "item-disposable", state: "ROLLED_BACK", approval_digest: "",
+    }]);
+    apiMock.execution.createRestorePlan.mockImplementation(async () => {
+      const plan = { id: "restore-new", item_id: "item-disposable", state: "DRAFT", approval_digest: "new-digest" };
+      apiMock.execution.listRestores.mockResolvedValue([plan]);
+      return plan;
+    });
+    apiMock.execution.approveRestore.mockResolvedValue(undefined);
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+    expect(await screen.findByText("item-disposable")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "创建恢复草案" }));
+    fireEvent.click(await screen.findByRole("button", { name: "批准" }));
+    await waitFor(() => expect(apiMock.execution.approveRestore).toHaveBeenCalledWith("restore-new", "new-digest"));
+  });
+});
+
+
+const restoreItem = { id: "item-safe", status: "QUARANTINED", file_size: 1024, content_sha256: "abcdef", quarantined_at: "2026-01-01T00:00:00Z", retain_until: "2026-02-01T00:00:00Z" };
+const rolledRestore = { id: "old-restore", item_id: restoreItem.id, state: "ROLLED_BACK", approval_digest: "" };
+const activeRestore = { id: "fresh-restore", item_id: restoreItem.id, state: "DRAFT", approval_digest: "fresh-digest" };
+async function renderRestores(plans: object[], status = "QUARANTINED") {
+  apiMock.execution.listQuarantine.mockResolvedValue([{ ...restoreItem, status }]);
+  apiMock.execution.listRestores.mockResolvedValue(plans);
+  const view = render(<ExecutionCenterPage />);
+  fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+  expect(await screen.findByText(restoreItem.id)).toBeVisible();
+  return view;
+}
+
+describe("Restore plan selection safety", () => {
+  it.each([false, true])("approves only the new draft regardless of list order (%s)", async (reverse) => {
+    await renderRestores(reverse ? [activeRestore, rolledRestore] : [rolledRestore, activeRestore]);
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
+    await waitFor(() => expect(apiMock.execution.approveRestore).toHaveBeenCalledWith("fresh-restore", "fresh-digest"));
+  });
+
+  it.each([false, true])("uses the fresh approval across dry run and reload (%s)", async (reverse) => {
+    const approved = { ...activeRestore, state: "APPROVED" };
+    await renderRestores(reverse ? [approved, rolledRestore] : [rolledRestore, approved]);
+    fireEvent.change(screen.getByPlaceholderText("隔离根目录"), { target: { value: "/quarantine" } });
+    fireEvent.change(screen.getByPlaceholderText("源根目录（逗号分隔）"), { target: { value: "/source" } });
+    fireEvent.click(screen.getByRole("button", { name: "试运行" }));
+    await waitFor(() => expect(apiMock.execution.executeRestore).toHaveBeenCalledWith(expect.objectContaining({ plan_id: "fresh-restore", digest: "fresh-digest", dry_run: true })));
+    await waitFor(() => expect(screen.getByRole("button", { name: "执行" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "执行" }));
+    await waitFor(() => expect(apiMock.execution.executeRestore).toHaveBeenLastCalledWith(expect.objectContaining({ plan_id: "fresh-restore", digest: "fresh-digest", dry_run: false })));
+  });
+
+  it.each([
+    { name: "conflicting active plans", plans: [activeRestore, { ...activeRestore, id: "other-active", state: "APPROVED" }] },
+    { name: "unknown unresolved state", plans: [rolledRestore, { ...activeRestore, state: "UNKNOWN" }] },
+  ])("blocks $name", async ({ plans }) => {
+    await renderRestores(plans);
+    for (const name of ["创建恢复草案", "批准", "试运行", "执行"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  });
+
+  it.each(["HOLD", "RESTORED", "PURGED"])("does not create a new plan for %s", async (status) => {
+    await renderRestores([rolledRestore], status);
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+  });
+
+  it("keeps creation disabled under a recovery lock", async () => {
+    contextMock.capabilities.can_execute_quarantine = false;
+    contextMock.capabilities.recovery_lock_active = true;
+    apiMock.recovery.checkLock.mockResolvedValue({ lock_active: true, executing_count: 1 });
+    await renderRestores([rolledRestore]);
+    expect(screen.getByRole("button", { name: "创建恢复草案" })).toBeDisabled();
+  });
+
+  it("does not expose a write action in read-only mode", async () => {
+    contextMock.isReadWrite = false;
+    await renderRestores([rolledRestore]);
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+  });
+
+  it("disables repeated creation while a new draft is pending", async () => {
+    apiMock.execution.createRestorePlan.mockReturnValue(new Promise(() => {}));
+    await renderRestores([rolledRestore]);
+    const create = screen.getByRole("button", { name: "创建恢复草案" });
+    fireEvent.click(create);
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+    expect(apiMock.execution.createRestorePlan).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("Restore list trust", () => {
+  it("does not treat a pending read as an empty plan list", async () => {
+    apiMock.execution.listRestores.mockReturnValue(new Promise(() => {}));
+    apiMock.execution.listQuarantine.mockResolvedValue([restoreItem]);
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+    expect(await screen.findByText(restoreItem.id)).toBeVisible();
+    const create = screen.queryByRole("button", { name: "创建恢复草案" });
+    if (create) expect(create).toBeDisabled();
+    expect(apiMock.execution.createRestorePlan).not.toHaveBeenCalled();
+  });
+
+  it("blocks writes after failed refresh instead of trusting a rolled-back cache", async () => {
+    await renderRestores([rolledRestore]);
+    expect(screen.getByRole("button", { name: "创建恢复草案" })).toBeEnabled();
+    apiMock.execution.listRestores.mockRejectedValue(new Error("private-test-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => {
+      expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2);
+      const create = screen.queryByRole("button", { name: "创建恢复草案" });
+      if (create) expect(create).toBeDisabled();
+    });
+    expect(screen.queryByText("private-test-anchor")).not.toBeInTheDocument();
+    expect(apiMock.execution.createRestorePlan).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Restore refresh races", () => {
+  it("does not let an older successful read reopen writes after the newest read fails", async () => {
+    let resolveOld!: (plans: object[]) => void;
+    apiMock.execution.listRestores.mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }));
+    apiMock.execution.listQuarantine.mockResolvedValue([restoreItem]);
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+    expect(await screen.findByText(restoreItem.id)).toBeVisible();
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("private-read-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    await act(async () => resolveOld([rolledRestore]));
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+    expect(screen.getByText("恢复状态尚未确认，请刷新后人工核对")).toBeVisible();
+    expect(screen.queryByText("private-read-anchor")).not.toBeInTheDocument();
+  });
+
+  it("keeps an existing approval disabled when its state read fails", async () => {
+    await renderRestores([{ ...activeRestore, state: "APPROVED" }]);
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("private-read-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "执行" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "试运行" })).toBeDisabled();
+    expect(apiMock.execution.executeRestore).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Restore read and mutation interleaving", () => {
+  it("invalidates a read that straddles draft creation and reloads canonical plans", async () => {
+    let finishCreate!: (plan: object) => void;
+    let finishOldPurges!: (plans: object[]) => void;
+    apiMock.execution.createRestorePlan.mockImplementation(() => new Promise((resolve) => { finishCreate = resolve; }));
+    const view = await renderRestores([rolledRestore]);
+    fireEvent.click(screen.getByRole("button", { name: "创建恢复草案" }));
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    apiMock.execution.listPurges.mockReturnValueOnce(new Promise((resolve) => { finishOldPurges = resolve; }));
+    contextMock.dataRevision++;
+    view.rerender(<ExecutionCenterPage />);
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    apiMock.execution.listRestores.mockResolvedValue([rolledRestore, activeRestore]);
+    await act(async () => finishCreate(activeRestore));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(3));
+    await act(async () => finishOldPurges([]));
+    expect(await screen.findByRole("button", { name: "批准" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+  });
+
+  it("never displays raw lifecycle read errors on the purge tab", async () => {
+    await renderRestores([rolledRestore]);
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("PRIVATE_READ_LEAK_MARKER"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: /清理 \(0\)/ }));
+    expect(await screen.findByText("恢复与清理计划读取失败，请刷新后人工核对")).toBeVisible();
+    expect(screen.queryByText("PRIVATE_READ_LEAK_MARKER")).not.toBeInTheDocument();
   });
 });
