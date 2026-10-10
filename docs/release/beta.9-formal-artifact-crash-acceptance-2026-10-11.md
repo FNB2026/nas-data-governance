@@ -47,7 +47,7 @@
 
 人工保留与产品 Recover 分开执行：先在全新独立保留目录内原样保存部分目标（同文件 inode、大小与 SHA-256），确认完整隔离副本和批准目标缺失；没有直接修改数据库或 Journal，也没有删除部分输出。随后正式 GUI Recover 报告“确认回滚 1、未完成 0、恢复锁已解除”。只读数据库证实 Restore Plan ROLLED_BACK、Journal rolled_back、approval_digest 空、approved_at NULL、pending=0；隔离项 QUARANTINED、隔离副本完整、保留部分目标不变。
 
-### 新 GUI 阻断
+### 新 GUI 阻断（[Issue #75](https://github.com/FNB2026/nas-data-governance/issues/75)）
 
 在正式 App 的“隔离与恢复”页面，唯一隔离项状态为“已隔离”，但操作列仅显示“已回滚”，没有“创建恢复草案”、审批或执行入口。没有通过 API 注入、修改数据库或旧审批复用来绕过。
 
