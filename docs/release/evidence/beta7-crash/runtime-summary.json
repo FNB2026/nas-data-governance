@@ -1,0 +1,70 @@
+{
+  "rc": "b09166f4ef5f7a4c9fa899a3c1370163fa373e62",
+  "window_start": "2026-10-10T07:51:17.376220+00:00",
+  "window_end": "2026-10-10T07:59:46.245957+00:00",
+  "intentional_stop": true,
+  "log_exit": 0,
+  "health_samples": 1010,
+  "log_dead_samples": 0,
+  "max_health_gap_seconds": 0.51171,
+  "app_segments": [
+    {
+      "pid": 15984,
+      "start": "2026-10-10T07:51:17.380203+00:00",
+      "index": 0
+    },
+    {
+      "pid": 23110,
+      "start": "2026-10-10T07:56:24.186928+00:00",
+      "index": 1
+    }
+  ],
+  "unified_records": 32204,
+  "non_json_lines": 2,
+  "marker_variants": 28,
+  "ordinary_log_marker_hits": {
+    "unified.ndjson": 0,
+    "log-stderr.log": 0,
+    "app-1-stderr.log": 0,
+    "app-0-stdout.log": 0,
+    "app-1-stdout.log": 0,
+    "app-0-stderr.log": 0
+  },
+  "log_sha256": {
+    "unified.ndjson": "3087b378aa4a88d65d05385c3ba02d34260c3100325791fa85d499b6e2f33fbb",
+    "log-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app-1-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app-0-stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app-1-stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app-0-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "file_status_counts": {
+    "active": 4
+  },
+  "source_original": 4,
+  "source_total": 4,
+  "outside_unchanged": true,
+  "partial_output_size": 8421376,
+  "recovery_bytes_unchanged": true,
+  "operation_logs": 0,
+  "quarantine_items": 0,
+  "plans": [
+    "EXECUTING"
+  ],
+  "journal": [
+    "pending"
+  ],
+  "private_evidence_sha256": {
+    "reopened-locked.snapshot.db": "2e791cbf5452c3404fd27924b844e6e343e3011df7c2add0e124b049b2a77067",
+    "after-crash.snapshot.db": "2e791cbf5452c3404fd27924b844e6e343e3011df7c2add0e124b049b2a77067",
+    "after-recovery-attempt.snapshot.db": "2e791cbf5452c3404fd27924b844e6e343e3011df7c2add0e124b049b2a77067",
+    "interrupted.snapshot.db": "2e791cbf5452c3404fd27924b844e6e343e3011df7c2add0e124b049b2a77067",
+    "after-recovery-attempt.private.json": "7508e56ca318bda6bac34efdcac88d58769fc207fd969604ef6b254c19c1b249",
+    "temporary-scan-baseline.snapshot.db": "72b69e692425ce0b5bd5ef8bf86b30c790b027785bd68c25fb386275b3f3ea57",
+    "interrupt.private.json": "cc564956396b3cefdf0565a476885fdbb694537202c8c4f4a100addf26a362f4",
+    "approved-dry-run.snapshot.db": "1d9d69acaa21fa1e9d126df4d19f86c9423a4cb104e5a7f3100b2458d609d75c",
+    "gui.private.ndjson": "b3c7ade05a2084d539bd480a43f0118ff6525919230131e4493775984daf0d92"
+  },
+  "gui_records": 25,
+  "gui_skipped_and_success_toast_observed": true
+}
