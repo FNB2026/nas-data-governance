@@ -1,0 +1,190 @@
+// Evidence-only tests: copied into an export of the frozen RC, never into the signed App.
+package app
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/executor"
+	"github.com/FNB2026/nas-data-governance/internal/store"
+)
+
+func TestBeta7EvidenceRestoreClassification(t *testing.T) {
+	for _, layer := range []string{"executor", "service"} {
+		for _, mutation := range []string{"size_changed", "same_size_content_changed", "unchanged_control"} {
+			t.Run(layer+"/"+mutation, func(t *testing.T) {
+				ctx := context.Background()
+				tmp := t.TempDir()
+				source, quarantine := filepath.Join(tmp, "source"), filepath.Join(tmp, "quarantine")
+				for _, p := range []string{source, quarantine} {
+					if err := os.Mkdir(p, 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				dbPath := filepath.Join(tmp, "project.db")
+				st, err := store.Open(ctx, dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer st.Close()
+				now := time.Now().UTC()
+				item := seedQuarantineItem(t, st, source, quarantine, "candidate.dat", now, now.Add(24*time.Hour))
+				svc := NewQuarantineService(st)
+				plan, err := svc.CreateRestorePlan(ctx, item.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := svc.ApproveRestorePlan(ctx, plan.ID, plan.ApprovalDigest); err != nil {
+					t.Fatal(err)
+				}
+				approved, err := st.GetRestorePlan(ctx, plan.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				original, err := os.ReadFile(item.QuarantinePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				changed := append([]byte(nil), original...)
+				switch mutation {
+				case "size_changed":
+					changed = append(changed, byte('!'))
+				case "same_size_content_changed":
+					changed[0] ^= 0x01
+				}
+				if err := os.WriteFile(item.QuarantinePath, changed, 0600); err != nil {
+					t.Fatal(err)
+				}
+				nonTarget := filepath.Join(source, "control.dat")
+				outside := filepath.Join(tmp, "outside.dat")
+				for _, p := range []string{nonTarget, outside} {
+					if err := os.WriteFile(p, []byte("control"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ro, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer ro.Close()
+				count := func(table string) int {
+					t.Helper()
+					var n int
+					if err := ro.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+						t.Fatal(err)
+					}
+					return n
+				}
+				tables := []string{"restore_journal", "execution_journal", "quarantine_items", "operation_logs"}
+				before := make(map[string]int)
+				for _, table := range tables {
+					before[table] = count(table)
+				}
+				if before["restore_journal"] != 0 {
+					t.Fatal("unexpected initial restore journal")
+				}
+				exec, err := executor.NewRestoreExecutor(quarantine, []string{source}, st)
+				if err != nil {
+					t.Fatal(err)
+				}
+				attempts := 2
+				if mutation == "unchanged_control" {
+					attempts = 1
+				}
+				for attempt := 0; attempt < attempts; attempt++ {
+					var result executor.RestoreResult
+					if layer == "executor" {
+						result = exec.ExecuteRestore(ctx, &approved, &item)
+					} else {
+						response, callErr := svc.ExecuteRestore(ctx, RestoreExecuteInput{PlanID: plan.ID, Digest: plan.ApprovalDigest, QuarantineRoot: quarantine, SourceRoots: []string{source}, DryRun: false})
+						if response == nil {
+							t.Fatal("missing retained result")
+						}
+						result = response.Result
+						if mutation != "unchanged_control" && (callErr == nil || callErr.Error() != "restore failed: stale_detected") {
+							t.Fatalf("service error classification: %v", callErr)
+						}
+						if mutation == "unchanged_control" && callErr != nil {
+							t.Fatal(callErr)
+						}
+					}
+					if mutation == "unchanged_control" {
+						if result.Err != nil || result.ErrorType != "" || result.Status != executor.StepOK || result.FinalState != domain.RestoreCompleted {
+							t.Fatalf("valid control rejected: %#v", result)
+						}
+						restored, err := os.ReadFile(item.SourcePath)
+						if err != nil || !bytes.Equal(restored, original) {
+							t.Fatal("control restore bytes mismatch")
+						}
+						if _, err := os.Lstat(item.QuarantinePath); !errors.Is(err, os.ErrNotExist) {
+							t.Fatal("control quarantine remains")
+						}
+						if count("restore_journal") != 1 {
+							t.Fatal("control must create exactly one restore journal")
+						}
+						saved, err := st.GetRestorePlan(ctx, plan.ID)
+						if err != nil || saved.State != domain.RestoreCompleted {
+							t.Fatal("control completion not durable")
+						}
+						savedItem, err := st.GetQuarantineItem(ctx, item.ID)
+						if err != nil || savedItem.Status != domain.QuarantineRestored {
+							t.Fatal("control item not RESTORED")
+						}
+						var journalPlan, journalItem, journalStatus string
+						if err := ro.QueryRow("SELECT plan_id,item_id,status FROM restore_journal").Scan(&journalPlan, &journalItem, &journalStatus); err != nil || journalPlan != plan.ID || journalItem != item.ID || journalStatus != "done" {
+							t.Fatal("control journal identity/terminal mismatch")
+						}
+						continue
+					}
+					if result.Err == nil || result.ErrorType != "stale_detected" || result.Status != executor.StepFailed || result.FinalState != domain.RestoreApproved {
+						t.Fatalf("unexpected refusal: %#v", result)
+					}
+					if _, err := os.Lstat(item.SourcePath); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("refusal created destination")
+					}
+					got, err := os.ReadFile(item.QuarantinePath)
+					if err != nil || !bytes.Equal(got, changed) {
+						t.Fatal("refusal changed quarantine bytes")
+					}
+					saved, err := st.GetRestorePlan(ctx, plan.ID)
+					if err != nil || !reflect.DeepEqual(saved, approved) {
+						t.Fatal("refusal changed approved restore plan")
+					}
+					savedItem, err := st.GetQuarantineItem(ctx, item.ID)
+					if err != nil || !reflect.DeepEqual(savedItem, item) {
+						t.Fatal("refusal changed quarantine item")
+					}
+					sourcePlan, err := st.GetPlan(ctx, item.PlanID)
+					if err != nil || sourcePlan.State != domain.PlanVerified {
+						t.Fatal("source plan lost VERIFIED")
+					}
+					for _, table := range tables {
+						if count(table) != before[table] {
+							t.Fatalf("refusal changed %s count", table)
+						}
+					}
+					for _, p := range []string{nonTarget, outside} {
+						got, err := os.ReadFile(p)
+						if err != nil || string(got) != "control" {
+							t.Fatal("refusal changed non-target bytes")
+						}
+					}
+				}
+				for _, p := range []string{nonTarget, outside} {
+					got, err := os.ReadFile(p)
+					if err != nil || string(got) != "control" {
+						t.Fatal("non-target bytes changed")
+					}
+				}
+			})
+		}
+	}
+}

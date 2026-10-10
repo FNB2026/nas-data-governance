@@ -1,5 +1,7 @@
 # beta.7 正式发行物与 Disposable Quarantine / Restore 验收
 
+最新结论（2026-10-10 方案 A 采用及独立补证后）：**限定 Disposable Quarantine / Restore Gate PASS**，详见末节。此前 INCONCLUSIVE、原始字段未直接捕获及日志历史缺口保留为阶段事实；Public Beta BLOCKED，Release Draft，Crash Recovery NOT RUN。
+
 ## 冻结身份与边界
 
 - 修复 PR #64 合并 `ed691a15a4d3c2aa951d6df875c9134bd05dfded`，版本 PR #65 合并后最终 RC `b09166f4ef5f7a4c9fa899a3c1370163fa373e62`。
@@ -103,3 +105,17 @@
 - 67测试标记、201编码变体对 stdout/stderr、统一日志及采集 stderr均零命中。原始日志、进程清单、AX转录、数据库与 SHA 证据仅存本机私有归档。该窗口关闭原先需要重新建立连续采集的缺口；不消除历史缺口，不声称全系统或长时隐私 PASS，1秒存活采样也不是底层日志绝无丢失的证明。
 
 下一步仅补原始错误分类的可观测证据并独立复核；在原始分类未直接捕获前，正式 Quarantine / Restore Gate 仍 INCONCLUSIVE。Release Draft / Public Beta BLOCKED，Crash Recovery 不启动。
+
+## 方案 A 采用与限定 Gate 结案
+
+上述最后一段是直接原始字段取证方法下的历史判定，未追溯删除。2026-10-10 用户明确批准“认可方案 A，继续补独立分类测试”，采用[多层证据契约](beta.7-restore-error-evidence-contract-proposal-2026-10-10.md)：正式 GUI 拒绝、字节/状态保护 + 冻结源码独立分类回归 + 错误传输链审查。采用范围仅为 Restore 分类证据方法，不是发布许可。
+
+- 正式运行证据仍依据第六组：实际点击、即时 AX/截图的 stale 类中文通知、隔离变更字节保护、源目标未创建、非目标与根外未变、恢复 Journal0、状态未错误完成，重复拒绝无新增项。没有把源码测试替代这些正式 App 操作。
+- 独立测试载体导出冻结 RC `b09166f4ef5f7a4c9fa899a3c1370163fa373e62`，仅增加证据测试；369 个原文件哈希不变，关闭 workspace/GOFLAGS 覆盖，显式 Go1.26.9。每层 executor/service 各测试大小变化、同大小内容变化、未变正控制；负例实际执行两次，服务层 DryRun=false。
+- 根运行 UTC `06:15:06.552103–06:15:11.365111`，独立复核运行 `06:15:21.358206–06:15:26.262426`：均6/6 PASS、race exit0。负例明确返回 stale_detected/StepFailed，service 保留分类及错误；只读 SQLite 无新增 Restore Journal/源 Journal/隔离项/审计，计划与隔离项未误完成，字节保护。正控制真实恢复，RESTORED plan/item、唯一身份匹配 done Journal，排除“总是拒绝”的假阳性。
+- [测试与运行载体](evidence/beta7-restore-classification/restore_contract_test.go.txt)、[根结果](evidence/beta7-restore-classification/result.json)、[独立结果](evidence/beta7-restore-classification/independent-result.json)保留完整 SHA、工具链、命令和时间；原始日志仅私有归档。一次系统 local Go1.26.2 在测试前因低于要求失败，已留存；显式1.26.9最终执行通过。
+- 独立只读复核 APPROVE 测试充分性，并确认采用方案 A 后上述多层证据可关闭限定分类门禁。接口链证据仍是源码审查；正式签名 App 原始 error_type/status **NOT_CAPTURED**，不宣称直接取证。
+
+结合此前正常闭环、计划终态/重开、源 stale 审批失效、恢复冲突、保护及源根 Dry Run 的实际证据，按已批准契约裁定 **Disposable Quarantine / Restore PASS（本报告限定范围）**。受保护项证明的是正式 GUI HOLD/审批阻断，源根证明的是不匹配根 Dry Run 拒绝；不扩大成后端不可见接口或真实越界写入验收。隐私 PASS 仅指203秒实际连续采集窗口及所取得内容，历史缺口、更广进程和长时限制继续保留。
+
+本次未修改产品源码、beta.7 Tag/DMG/版本/资产、正式 App、历史失败数据库或真实 NAS；没有 Purge 或故意崩溃。Crash Recovery / Recovery Lock **NOT RUN**，可以作为下一独立验收阶段准备；全新 Mac 离线首装、长时隐私及依赖安全项仍未关闭，Public Beta **BLOCKED**，Release **Draft**。
