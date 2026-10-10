@@ -64,5 +64,7 @@
 - durable 状态 DRAFT；审计包含 `approval_invalidated` 与 `stale_check`，无 Journal、无隔离项。改变的目标保持改变后的 SHA，另3个源文件与根外对照均未变。
 - 全新 destination 项目批准后，输入与登记源不匹配的允许根，Dry Run 返回 `scope_validation_failed`、executed=0/failed=1，实际隔离按钮禁用；源4/4、隔离区空、Journal/隔离项0。随后输入正确源根，重新 Dry Run 后隔离成功：VERIFIED / 唯一 done Journal / QUARANTINED。
 - 独立创建并批准恢复计划后，仅在原恢复目标位置创建人工冲突文件。恢复 Dry Run 返回 `destination_exists`；原隔离内容与冲突文件保持，restore plan APPROVED、restore Journal0。真实执行拒绝尚待观察，不据 Dry Run 判完整冲突验收通过。
+- 独立只读复核确认 happy 重开六张状态/Journal/审计表与恢复快照逐行一致，stale 的 DRAFT/审批失效/字节保护以及 destination 现场一致。GUI 汇总数字依据本任务实际 AX 观察，另存脱敏转录；转录并非原始截图或 GUI 事件导出，不能由 Journal0反推执行数字。
+- 最新限定窗口采样：56标记、164编码变体，三组项目的33条 job_events、8条 operation_logs、两段 stdout/stderr、约373.4MB初始统一日志、约55.3MB新进程日志及约2.0MB补取日志均零命中。新进程日志尚未封存，另两组尚无运行证据，采集缺口与进程覆盖限制仍保留；不判最终隐私 PASS。
 
 剩余隔离内容变化、受保护目录、真实恢复冲突执行及最终隐私证据未完成；整体仍 INCONCLUSIVE，Public Beta BLOCKED，Release Draft。
