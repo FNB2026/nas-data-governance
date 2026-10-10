@@ -31,15 +31,15 @@
 | 门禁 | 当前状态 |
 | --- | --- |
 | 正式下载 SHA / 签名 / 公证 / Gatekeeper / About | PASS（本机在线基础检查；离线首装未验收） |
-| GUI 扫描、目录语境、计划复核审批与 Dry Run | happy / source-stale / destination 已执行 |
+| GUI 扫描、目录语境、计划复核审批与 Dry Run | 五组已执行；protected 在 HOLD 门禁止步 |
 | 真实 Quarantine / 原路径 Restore | happy 闭环 PASS（恢复执行由用户点击正式 GUI） |
 | durable VERIFIED、重开及重复执行安全 | 正常重启后状态一致、执行入口消失 PASS；未绕过 GUI 发起后端重复执行 |
 | stale executed=0 / failed=1 / DRAFT / 旧审批失效 | PASS |
 | 恢复目标冲突 | PASS：用户点击正式 GUI 执行，destination_exists，未覆盖 |
-| 隔离变化 | Dry Run 拒绝已观察，真实执行拒绝待验 |
-| 受保护目录 | NOT RUN |
+| 隔离变化 | 字节保护 PASS；用户确认执行失败，实际执行错误码证据缺失 |
+| 受保护目录 | GUI HOLD / 审批入口阻断 / 源字节保护 PASS |
 | 源根边界 | 不匹配源根的 Dry Run 拒绝 PASS；不冒称真实越界写入尝试 |
-| 限定运行窗口事件 / stdout / stderr / 统一日志隐私 | NOT RUN |
+| 限定运行窗口事件 / stdout / stderr / 统一日志隐私 | 已采集内容零标记命中；连续完整覆盖 INCONCLUSIVE |
 | Crash Recovery / Recovery Lock 正式故障测试 | NOT RUN |
 
 独立准备复核指出：`operation_plans.state` 为判定依据，`evidence_json` 内状态是旧快照；恢复完成后源计划仍 VERIFIED，隔离项及恢复计划才为 RESTORED；HOLD 限制 Purge，不能虚构后端 Restore 拒绝测试。
@@ -64,7 +64,7 @@
 - 仅改变该计划的人工可丢弃 QUARANTINE 目标，备份保持原始内容。正式 GUI 点击执行后显示 executed=0/skipped=0/failed=1、`stale_detected`，可执行列表归零。
 - durable 状态 DRAFT；审计包含 `approval_invalidated` 与 `stale_check`，无 Journal、无隔离项。改变的目标保持改变后的 SHA，另3个源文件与根外对照均未变。
 - 全新 destination 项目批准后，输入与登记源不匹配的允许根，Dry Run 返回 `scope_validation_failed`、executed=0/failed=1，实际隔离按钮禁用；源4/4、隔离区空、Journal/隔离项0。随后输入正确源根，重新 Dry Run 后隔离成功：VERIFIED / 唯一 done Journal / QUARANTINED。
-- 独立创建并批准恢复计划后，仅在原恢复目标位置创建人工冲突文件。恢复 Dry Run 返回 `destination_exists`；原隔离内容与冲突文件保持，restore plan APPROVED、restore Journal0。真实执行拒绝尚待观察，不据 Dry Run 判完整冲突验收通过。
+- 独立创建并批准恢复计划后，仅在原恢复目标位置创建人工冲突文件。恢复 Dry Run 返回 `destination_exists`；原隔离内容与冲突文件保持，restore plan APPROVED、restore Journal0。当时真实执行拒绝尚待观察，随后实际执行证据见下一节。
 - 独立只读复核确认 happy 重开六张状态/Journal/审计表与恢复快照逐行一致，stale 的 DRAFT/审批失效/字节保护以及 destination 现场一致。GUI 汇总数字依据本任务实际 AX 观察，另存脱敏转录；转录并非原始截图或 GUI 事件导出，不能由 Journal0反推执行数字。
 - 最新限定窗口采样：56标记、164编码变体，三组项目的33条 job_events、8条 operation_logs、两段 stdout/stderr、约373.4MB初始统一日志、约55.3MB新进程日志及约2.0MB补取日志均零命中。新进程日志尚未封存，另两组尚无运行证据，采集缺口与进程覆盖限制仍保留；不判最终隐私 PASS。
 
@@ -72,6 +72,16 @@
 
 - 用户确认点击 destination 测试项的正式 GUI「执行」，页面新增 `destination_exists` 错误。随后的只读快照证明冲突文件 SHA 未变、原隔离文件 SHA/大小未变，restore Journal0、隔离项仍 QUARANTINED，源计划 VERIFIED；没有覆盖或新写入。这是预期安全拒绝，不是正常恢复闭环失败。
 - 新 quarantine-stale 独立项目扫描及分阶段审批/Dry Run后正常隔离：VERIFIED、唯一 done Journal、QUARANTINED，另3个源文件与根外对照不变。
-- 独立创建/批准恢复计划后，仅改变可丢弃隔离内容，原始备份未变。正式 GUI Dry Run 提示「计划已过期（文件自审批后发生了变化）。请重新生成计划并审批。」；真实执行拒绝尚待用户点击 GUI 后观察，不能据 Dry Run 判 PASS。
+- 独立创建/批准恢复计划后，仅改变可丢弃隔离内容，原始备份未变。正式 GUI Dry Run 提示「计划已过期（文件自审批后发生了变化）。请重新生成计划并审批。」。随后用户确认点击蓝色执行并显示「执行恢复失败」；复查时 toast 已过期，不能直接确认实际执行的具体错误码。执行后只读快照确认变更隔离 SHA/大小不变、源目标仍缺失、其余3个源文件及根外不变、restore Journal0、隔离项 QUARANTINED、恢复计划 APPROVED。字节保护通过；精确错误码证据不足，不冒称完整错误分类验收 PASS。
 
-剩余隔离内容变化实际执行、受保护目录及最终隐私证据未完成；整体仍 INCONCLUSIVE，Public Beta BLOCKED，Release Draft。
+## 受保护目录与收尾
+
+- 第五个全新项目正常扫描4/4，受保护重复组为 critical，两项均 REVIEW/raw_source；GUI 明确显示严重风险 HOLD 需独立释放。
+- 保存「起草动作」用户决定后仍无批准入口，执行中心可执行数0。只读数据库仍 critical/DRAFT，无 Journal/隔离项，源4/4原始 SHA/大小及根外不变。这里只证明正式 GUI 保护门禁，不声称调用过不可见的后端批准/执行接口，也没有测试隔离项 HOLD 的 Purge 行为。
+- 五组原始备份、历史证据及现场均保留。异常用例保留人工冲突/变更内容作为证据；未清理、未 Purge、未主动触发 Crash Recovery。
+- 当前正常闭环、状态持久化、stale 失效、恢复冲突、保护和源根 Dry Run 边界均有实际证据。隔离变化真实失败的精确错误码、连续日志采集缺口及更广进程覆盖仍限制最终结论。
+- 最终封存日志采样：58标记、172编码变体；五组共55条 job_events、11条 operation_logs、两段 stdout/stderr、373,425,308字节与94,548,459字节实时统一日志及2,014,319字节 retained补取日志均零命中。两段实时日志不是可直接解析的完整 JSON 文档，按原始文本检查；补取 JSON 可解析为1754项。零命中只覆盖实际采集内容，不能证明缺口或全部相关进程无泄漏。
+- 最后核对五组独立备份均4/4原始 SHA匹配、根外对照均未变。各组最后一致性快照 file_status 均 active4、missing/unavailable0、Purge Journal0。尝试统一重新打开旧项目 live DB 的只读查询遇到 `unable to open database file`，未改权限或数据库，改用此前各阶段保存的一致性快照；不把这些快照宣称为当前全部 live DB 的同时采样。
+- 独立只读复审批准上述限定功能与文档结论；不是 Public Beta 发布批准。正式 App 保持打开，已停止诊断日志采集，没有取消或改变产品任务。
+
+整体仍 INCONCLUSIVE（证据限制），Public Beta BLOCKED，Release Draft；不进入 Crash Recovery / Recovery Lock 正式故障验收。
