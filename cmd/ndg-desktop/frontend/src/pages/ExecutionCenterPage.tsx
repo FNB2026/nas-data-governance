@@ -267,7 +267,7 @@ export default function ExecutionCenterPage() {
     try {
       const plan = await api.execution.createRestorePlan(itemId);
       setRestorePlans((prev) => {
-        const next = prev.filter((p) => p.item_id !== itemId);
+        const next = prev.filter((p) => p.id !== plan.id);
         return [...next, plan];
       });
       pushToast("success", "恢复草案已创建", `计划 ${plan.id}`);
@@ -690,7 +690,15 @@ export default function ExecutionCenterPage() {
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => {
-                    const restorePlan = restorePlans.find((p) => p.item_id === item.id);
+                    const itemRestores = restorePlans.filter((p) => p.item_id === item.id);
+                    // A verified rollback invalidates approval but leaves the item available
+                    // for a new plan. Never select a historical approval by list order.
+                    const unresolvedRestores = itemRestores.filter((p) => p.state !== "ROLLED_BACK");
+                    const restorePlan = unresolvedRestores.length === 1
+                      ? unresolvedRestores[0]
+                      : unresolvedRestores.length === 0 ? itemRestores[0] : undefined;
+                    const canCreateRestore = item.status === "QUARANTINED" && unresolvedRestores.length === 0;
+                    const restoreWriteDisabled = restoring || execWriteDisabled || item.status !== "QUARANTINED";
                     return (
                       <tr key={item.id}>
                         <td className="mono">
@@ -711,7 +719,7 @@ export default function ExecutionCenterPage() {
                         <td>{formatDateTime(item.retain_until)}</td>
                         {isReadWrite && (
                           <td>
-                            {item.status === "QUARANTINED" && !restorePlan && (
+                            {canCreateRestore && (
                               <button
                                 className="btn-sm"
                                 onClick={() => void handleCreateRestorePlan(item.id)}
@@ -719,6 +727,9 @@ export default function ExecutionCenterPage() {
                               >
                                 创建恢复草案
                               </button>
+                            )}
+                            {unresolvedRestores.length > 1 && (
+                              <span>恢复状态存在冲突，请人工核对</span>
                             )}
                             {restorePlan && (
                               <div className="exec-plan-actions">
@@ -729,7 +740,7 @@ export default function ExecutionCenterPage() {
                                   <button
                                     className="btn-sm"
                                     onClick={() => void handleApproveRestore(restorePlan.id, restorePlan.approval_digest)}
-                                    disabled={execWriteDisabled}
+                                    disabled={restoreWriteDisabled}
                                   >
                                     批准
                                   </button>
@@ -739,14 +750,14 @@ export default function ExecutionCenterPage() {
                                     <button
                                       className="btn-sm secondary"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, true)}
-                                      disabled={restoring || execWriteDisabled}
+                                      disabled={restoreWriteDisabled}
                                     >
                                       试运行
                                     </button>
                                     <button
                                       className="btn-sm"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, false)}
-                                      disabled={restoring || execWriteDisabled}
+                                      disabled={restoreWriteDisabled}
                                     >
                                       执行
                                     </button>
