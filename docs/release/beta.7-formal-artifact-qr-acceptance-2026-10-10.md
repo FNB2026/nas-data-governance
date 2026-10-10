@@ -36,10 +36,10 @@
 | durable VERIFIED、重开及重复执行安全 | 正常重启后状态一致、执行入口消失 PASS；未绕过 GUI 发起后端重复执行 |
 | stale executed=0 / failed=1 / DRAFT / 旧审批失效 | PASS |
 | 恢复目标冲突 | PASS：用户点击正式 GUI 执行，destination_exists，未覆盖 |
-| 隔离变化 | 字节保护 PASS；用户确认执行失败，实际执行错误码证据缺失 |
+| 隔离变化 | 字节保护、实际 stale 中文通知已观察；原始 error_type/status 仍缺证据 |
 | 受保护目录 | GUI HOLD / 审批入口阻断 / 源字节保护 PASS |
 | 源根边界 | 不匹配源根的 Dry Run 拒绝 PASS；不冒称真实越界写入尝试 |
-| 限定运行窗口事件 / stdout / stderr / 统一日志隐私 | 已采集内容零标记命中；连续完整覆盖 INCONCLUSIVE |
+| 限定运行窗口事件 / stdout / stderr / 统一日志隐私 | 新补证窗口连续采集、零命中；旧缺口不追溯消除，全进程/长时不作 PASS |
 | Crash Recovery / Recovery Lock 正式故障测试 | NOT RUN |
 
 独立准备复核指出：`operation_plans.state` 为判定依据，`evidence_json` 内状态是旧快照；恢复完成后源计划仍 VERIFIED，隔离项及恢复计划才为 RESTORED；HOLD 限制 Purge，不能虚构后端 Restore 拒绝测试。
@@ -85,3 +85,21 @@
 - 独立只读复审批准上述限定功能与文档结论；不是 Public Beta 发布批准。正式 App 保持打开，已停止诊断日志采集，没有取消或改变产品任务。
 
 整体仍 INCONCLUSIVE（证据限制），Public Beta BLOCKED，Release Draft；不进入 Crash Recovery / Recovery Lock 正式故障验收。
+
+## 第六组补证：连续窗口与实际执行通知
+
+本节为后续补证，不改写五组历史结果或旧日志缺口；这仍是证据完整性阻断，未据此确认新的产品功能缺陷。正式 beta.7 与完整 RC、About 构建时间及通道再次核对一致，没有重建、修改版本、Tag、DMG 或发行资产。
+
+- 创建第六组全新 disposable 文件与独立数据库，保留原始 SHA/大小及独立备份。正常扫描4/4，独立决定、批准、Dry Run 后实际隔离成功：durable VERIFIED、唯一 done Journal、QUARANTINED。
+- 独立恢复草案及批准后，只改变该组人工隔离文件。CUA 此次坐标点击真正蓝色「执行」成功；再次相同安全拒绝的点击开始 `2026-10-10T03:07:41.225Z`，返回时间 `03:07:41.359Z`，同一工具调用即时取得完整 AX 和截图：`执行恢复失败 计划已过期（文件自审批后发生了变化）。请重新生成计划并审批。`。不再依赖用户通用失败报告或已经消失的 toast。
+- 执行后隔离内容保持人为变更后的 SHA/大小，原目标缺失，另外3源文件与根外对照未变；恢复 Journal0，隔离项 QUARANTINED，恢复计划 APPROVED，源计划 VERIFIED。实际重复拒绝没有增加 Journal/隔离项。
+- 这不是原始错误分类的直接证据：客户端会把含 `stale` 的错误翻译为上述通知；源码预期返回 `stale_detected` 且 StepFailed，但运行 stdout/stderr 和统一日志均未出现原始 `stale_detected` 或原始 status。中文通知与源码映射支持 stale 类拒绝的推论，不能宣称捕获了 `error_type=stale_detected / status=failed`。该严格证据项仍 INCONCLUSIVE。
+
+### 新连续日志窗口
+
+- 开始 `2026-10-10T03:05:01.090199Z`，结束 `03:08:23.922801Z`，203秒；先启动统一日志，再开启 stdout/stderr 重定向并启动正式 App。新 App PID84740，log PID84728；窗口内 App 未重启。
+- predicate 包含 NDG 及 WebKit process/subsystem；每秒记录采集进程/App 存活、字节数、NDG 与 WebKit PID/PPID。193次采样全部存活，最大采样间隔1.139秒；实际恢复点击与只读结果核验均位于窗口内。结束为明确 STOP 后 SIGINT，log exit0，stderr空，未使用事后 `log show` 填补本窗口。
+- NDJSON 为27,745,939字节，完整解析27,864条事件，结束记录 `count=27864 / finished=1`，另两行为过滤器头和空行。事件中 NDG26,928、WebKit GPU636、Networking300；WebContent 在 predicate 和进程存活清单中，但本窗口未取得它的独立日志事件，不能把零事件扩大为 WebContent 所有行为已通过隐私验收。
+- 67测试标记、201编码变体对 stdout/stderr、统一日志及采集 stderr均零命中。原始日志、进程清单、AX转录、数据库与 SHA 证据仅存本机私有归档。该窗口关闭原先需要重新建立连续采集的缺口；不消除历史缺口，不声称全系统或长时隐私 PASS，1秒存活采样也不是底层日志绝无丢失的证明。
+
+下一步仅补原始错误分类的可观测证据并独立复核；在原始分类未直接捕获前，正式 Quarantine / Restore Gate 仍 INCONCLUSIVE。Release Draft / Public Beta BLOCKED，Crash Recovery 不启动。
