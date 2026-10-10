@@ -1,3 +1,4 @@
+import { isRecoveryLockClear } from "../lib/recoveryFeedback";
 // Global project context: holds cross-page state extracted from App.tsx.
 // Scan polling lives here so it survives page navigation.
 // Page-local state (scan form, group filters, selected items) stays in pages.
@@ -456,9 +457,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!hasWailsRuntime()) return null;
     try {
       const status = await api.recovery.checkLock();
-      setRecoveryLockActive(status.lock_active);
+      setRecoveryLockActive(!isRecoveryLockClear(status));
       return status;
     } catch {
+      // Recovery cannot authorize new writes without a fresh lock result.
+      setRecoveryLockActive(true);
       return null;
     }
   }, []);

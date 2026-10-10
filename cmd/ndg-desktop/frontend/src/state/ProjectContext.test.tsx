@@ -57,6 +57,7 @@ function ContextHarness() {
       />
       <button onClick={() => void ctx.openProject(true)}>open rw</button>
       <button onClick={() => void ctx.closeProject()}>close</button>
+      <button onClick={() => void ctx.refreshRecoveryLock()}>refresh recovery</button>
       <button onClick={() => void ctx.startScan({
         root: "  /source/root  ",
         fullScan: true,
@@ -145,6 +146,24 @@ describe("ProjectContext safety and scan wiring", () => {
 
     await waitFor(() => expect(screen.getByTestId("can-execute")).toHaveTextContent("false"));
     expect(screen.getByTestId("toasts")).toHaveTextContent("恢复锁激活");
+  });
+
+  it("blocks writes for inconsistent post-recovery lock counts", async () => {
+    renderContext();
+    await openReadWriteProject();
+    apiMock.recovery.checkLock.mockResolvedValue({ lock_active: false, executing_count: 0, restore_pending_count: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "refresh recovery" }));
+    await waitFor(() => expect(screen.getByTestId("can-execute")).toHaveTextContent("false"));
+  });
+
+  it("blocks new writes when the post-recovery lock refresh fails", async () => {
+    renderContext();
+    await openReadWriteProject();
+    expect(screen.getByTestId("can-execute")).toHaveTextContent("true");
+    apiMock.recovery.checkLock.mockRejectedValue(new Error("PRIVATE_CANARY /private/path"));
+    fireEvent.click(screen.getByRole("button", { name: "refresh recovery" }));
+    await waitFor(() => expect(screen.getByTestId("can-execute")).toHaveTextContent("false"));
+    expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
   });
 
   it("discards a storage response that resolves after the project closes", async () => {

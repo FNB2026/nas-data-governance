@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { maskPath } from "../state/settings";
 
 const { apiMock, contextMock, projectState } = vi.hoisted(() => ({
@@ -16,7 +16,7 @@ const { apiMock, contextMock, projectState } = vi.hoisted(() => ({
   },
   apiMock: {
     audit: { listLogs: vi.fn(), listJournal: vi.fn() },
-    recovery: { checkLock: vi.fn() },
+    recovery: { checkLock: vi.fn(), recoverSource: vi.fn(), recoverRestores: vi.fn(), recoverPurges: vi.fn() },
   },
 }));
 
@@ -33,6 +33,11 @@ beforeEach(() => {
   Object.defineProperty(window, "go", { value: {}, configurable: true });
   Object.defineProperty(window, "runtime", { value: {}, configurable: true });
   projectState.pathPrivacyMode = false;
+  contextMock.pushToast.mockReset();
+  apiMock.recovery.recoverSource.mockReset().mockResolvedValue([]);
+  apiMock.recovery.recoverRestores.mockReset().mockResolvedValue([]);
+  apiMock.recovery.recoverPurges.mockReset().mockResolvedValue([]);
+  contextMock.refreshRecoveryLock.mockReset().mockResolvedValue({ lock_active: false, executing_count: 0 });
   apiMock.audit.listLogs.mockReset().mockResolvedValue([]);
   apiMock.audit.listJournal.mockReset().mockResolvedValue([]);
   apiMock.recovery.checkLock.mockReset().mockResolvedValue({ lock_active: false, executing_count: 0 });
@@ -291,5 +296,63 @@ describe("AuditRecoveryPage summary & guidance", () => {
 
     expect(await screen.findByLabelText("审计与恢复概览")).toBeInTheDocument();
     expect(screen.queryByLabelText("恢复指引")).not.toBeInTheDocument();
+  });
+});
+
+describe("recovery result feedback regression", () => {
+  it.each([
+    ["recoverSource", "恢复普通执行", [{ action: "skipped", errors: ["PRIVATE_CANARY /private/data/name"] }]],
+    ["recoverRestores", "恢复隔离还原", [{ status: "failed", error: "PRIVATE_CANARY /private/data/name" }]],
+    ["recoverPurges", "恢复永久清理", [{ status: "failed", error_type: "PRIVATE_CANARY" }]],
+  ] as const)("does not report success for %s rejection", async (method, label, results) => {
+    const lock = { lock_active: true, executing_count: 1, source_executing_count: 1, restore_pending_count: 1, purge_recoverable_count: 1 };
+    apiMock.recovery.checkLock.mockResolvedValue(lock);
+    contextMock.refreshRecoveryLock.mockResolvedValue(lock);
+    apiMock.recovery[method].mockResolvedValue(results);
+    render(<AuditRecoveryPage />);
+    const button = await screen.findByRole("button", { name: label });
+    fireEvent.change(screen.getByPlaceholderText("隔离根目录"), { target: { value: "/q" } });
+    fireEvent.change(screen.getByPlaceholderText("源根目录（每行一个）"), { target: { value: "/s" } });
+    fireEvent.click(button);
+    await waitFor(() => expect(contextMock.pushToast).toHaveBeenCalled());
+    expect(contextMock.pushToast.mock.calls.some(([tone]) => tone === "success")).toBe(false);
+    expect(JSON.stringify(contextMock.pushToast.mock.calls)).toContain("人工核对");
+    expect(JSON.stringify(contextMock.pushToast.mock.calls)).not.toContain("PRIVATE_CANARY");
+    expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
+  });
+});
+
+
+describe("source recovery confirmed versus unconfirmed outcomes", () => {
+  it.each([
+    [[{ action: "rolled_back" }], { lock_active: false, executing_count: 0 }, "success", "确认回滚 1 条"],
+    [[{ action: "reset_to_draft" }], { lock_active: false, executing_count: 0 }, "warning", "旧审批不可复用"],
+    [[], { lock_active: false, executing_count: 0 }, "info", "无需恢复"],
+    [[{ action: "rolled_back" }], null, "warning", "无法确认恢复锁"],
+    [[{ action: "rolled_back" }, { action: "skipped" }], { lock_active: true, executing_count: 1 }, "warning", "未完成 1 条"],
+  ] as const)("retains feedback after lock refresh", async (results, lock, tone, message) => {
+    apiMock.recovery.checkLock.mockResolvedValue({ lock_active: true, source_executing_count: 1, executing_count: 1 });
+    apiMock.recovery.recoverSource.mockResolvedValue(results);
+    contextMock.refreshRecoveryLock.mockResolvedValue(lock);
+    render(<AuditRecoveryPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "恢复普通执行" }));
+    await waitFor(() => expect(contextMock.pushToast).toHaveBeenCalledWith(tone, expect.any(String), expect.stringContaining(message)));
+    expect(apiMock.recovery.recoverSource).toHaveBeenCalledTimes(1);
+    expect(contextMock.refreshRecoveryLock).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("恢复结果")).toHaveTextContent(message);
+  });
+  it.each(["request", "lock"])("does not expose a %s exception or retry the mutation", async (failure) => {
+    apiMock.recovery.checkLock.mockResolvedValue({ lock_active: true, source_executing_count: 1, executing_count: 1 });
+    apiMock.recovery.recoverSource.mockReset().mockResolvedValue([{ action: "rolled_back" }]);
+    const error = new Error("rollback failed PRIVATE_CANARY /private/secret");
+    if (failure === "request") apiMock.recovery.recoverSource.mockRejectedValue(error);
+    else contextMock.refreshRecoveryLock.mockRejectedValue(error);
+    render(<AuditRecoveryPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "恢复普通执行" }));
+    await waitFor(() => expect(contextMock.pushToast).toHaveBeenCalledWith("error", expect.any(String), expect.stringContaining("人工核对")));
+    expect(apiMock.recovery.recoverSource).toHaveBeenCalledTimes(1);
+    expect(contextMock.refreshRecoveryLock).toHaveBeenCalled();
+    expect(JSON.stringify(contextMock.pushToast.mock.calls)).not.toContain("PRIVATE_CANARY");
+    expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
   });
 });

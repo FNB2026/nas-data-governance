@@ -11,6 +11,7 @@ import {
   friendlyError,
   stateBadgeClass,
 } from "../lib/utils";
+import { recoveryFeedback, RECOVERY_REQUEST_FAILED } from "../lib/recoveryFeedback";
 import CopyButton from "../components/CopyButton";
 import ErrorState from "../components/ErrorState";
 import LoadingState from "../components/LoadingState";
@@ -304,56 +305,30 @@ export default function AuditRecoveryPage() {
     await Promise.all([loadLogs(), loadJournal(), loadRecoveryStatus()]);
   }, [loadLogs, loadJournal, loadRecoveryStatus]);
 
-  const finishRecovery = useCallback(async (summary: string) => {
-    setRecoveryResult(summary);
+  const finishRecovery = useCallback(async (kind: "source" | "restore" | "purge", results: Parameters<typeof recoveryFeedback>[1]) => {
     const status = await refreshRecoveryLock();
     setRecoveryStatus(status);
+    const feedback = recoveryFeedback(kind, results, status);
+    setRecoveryResult(feedback.summary);
+    pushToast(feedback.tone, feedback.title, feedback.summary);
     await Promise.all([loadLogs(), loadJournal()]);
-  }, [loadJournal, loadLogs, refreshRecoveryLock]);
+  }, [loadJournal, loadLogs, refreshRecoveryLock, pushToast]);
 
-  const recoverSourcePlans = async () => {
+  const recover = async (kind: "source" | "restore" | "purge") => {
     setRecoveryLoading(true);
     try {
-      const results = await api.recovery.recoverSource();
-      await finishRecovery(results.length === 0
-        ? "普通执行：无需恢复"
-        : results.map((r) => `${r.plan_id}: ${r.action}`).join("\n"));
-      pushToast("success", "普通执行恢复完成", `处理 ${results.length} 个计划`);
-    } catch (e: unknown) {
-      pushToast("error", "普通执行恢复失败", (e as Error).message);
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
-
-  const recoverRestores = async () => {
-    setRecoveryLoading(true);
-    try {
-      const results = await api.recovery.recoverRestores({
-        quarantine_root: quarantineRoot.trim(),
-        source_roots: sourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
-      } as wails.RecoverRestoresRequest);
-      await finishRecovery(results.length === 0
-        ? "隔离还原：无需恢复"
-        : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
-      pushToast("success", "隔离还原恢复完成", `处理 ${results.length} 条记录`);
-    } catch (e: unknown) {
-      pushToast("error", "隔离还原恢复失败", (e as Error).message);
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
-
-  const recoverPurges = async () => {
-    setRecoveryLoading(true);
-    try {
-      const results = await api.recovery.recoverPurges(quarantineRoot.trim());
-      await finishRecovery(results.length === 0
-        ? "永久清理：无需恢复"
-        : results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
-      pushToast("success", "永久清理恢复完成", `处理 ${results.length} 条记录`);
-    } catch (e: unknown) {
-      pushToast("error", "永久清理恢复失败", (e as Error).message);
+      const results = kind === "source" ? await api.recovery.recoverSource()
+        : kind === "restore" ? await api.recovery.recoverRestores({
+          quarantine_root: quarantineRoot.trim(),
+          source_roots: sourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
+        } as wails.RecoverRestoresRequest)
+        : await api.recovery.recoverPurges(quarantineRoot.trim());
+      await finishRecovery(kind, results);
+    } catch {
+      const status = await refreshRecoveryLock().catch(() => null);
+      setRecoveryStatus(status);
+      setRecoveryResult(RECOVERY_REQUEST_FAILED);
+      pushToast("error", "恢复未获确认", RECOVERY_REQUEST_FAILED);
     } finally {
       setRecoveryLoading(false);
     }
@@ -471,11 +446,10 @@ export default function AuditRecoveryPage() {
                 />
               </div>
               <div className="exec-recovery-buttons">
-                <button className="btn-sm" onClick={() => void recoverSourcePlans()} disabled={recoveryLoading || recoveryStatus.source_executing_count === 0}>恢复普通执行</button>
-                <button className="btn-sm" onClick={() => void recoverRestores()} disabled={recoveryLoading || recoveryStatus.restore_pending_count === 0 || !quarantineRoot.trim() || !sourceRoots.trim()}>恢复隔离还原</button>
-                <button className="btn-sm" onClick={() => void recoverPurges()} disabled={recoveryLoading || recoveryStatus.purge_recoverable_count === 0 || !quarantineRoot.trim()}>恢复永久清理</button>
+                <button className="btn-sm" onClick={() => void recover("source")} disabled={recoveryLoading || recoveryStatus.source_executing_count === 0}>恢复普通执行</button>
+                <button className="btn-sm" onClick={() => void recover("restore")} disabled={recoveryLoading || recoveryStatus.restore_pending_count === 0 || !quarantineRoot.trim() || !sourceRoots.trim()}>恢复隔离还原</button>
+                <button className="btn-sm" onClick={() => void recover("purge")} disabled={recoveryLoading || recoveryStatus.purge_recoverable_count === 0 || !quarantineRoot.trim()}>恢复永久清理</button>
               </div>
-              {recoveryResult && <pre className="exec-recovery-log">{recoveryResult}</pre>}
             </>
           ) : (
             <DisabledNotice
@@ -485,6 +459,8 @@ export default function AuditRecoveryPage() {
           )}
         </section>
       )}
+
+      {recoveryResult && <pre className="exec-recovery-log" aria-label="恢复结果">{recoveryResult}</pre>}
 
       {/* Filter toolbar */}
       <div className="audit-toolbar">
