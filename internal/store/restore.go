@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -98,15 +100,22 @@ func (s *SQLiteStore) BeginRestore(ctx context.Context, plan domain.RestorePlan,
 		return fmt.Errorf("store: begin restore journal: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	var planState, itemStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT state FROM restore_plans WHERE id = ?`, plan.ID).Scan(&planState); err != nil {
+	var identity int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM restore_plans p JOIN quarantine_items q ON q.id=p.item_id
+	 WHERE p.id=? AND p.state='APPROVED' AND p.item_id=? AND p.quarantine_path=? AND p.restore_path=? AND p.expected_sha256=? AND p.expected_size=? AND p.approval_digest=?
+	 AND q.quarantine_path=p.quarantine_path AND q.source_path=p.restore_path AND q.content_sha256=p.expected_sha256 AND q.file_size=p.expected_size
+	 AND q.status IN ('QUARANTINED','HOLD','PURGE_ELIGIBLE')`, plan.ID, item.ID, item.QuarantinePath, item.SourcePath, item.ContentSHA256, item.FileSize, plan.ApprovalDigest).Scan(&identity); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM quarantine_items WHERE id = ?`, item.ID).Scan(&itemStatus); err != nil {
+	if identity != 1 || plan.State != domain.RestoreApproved || plan.ItemID != item.ID || plan.QuarantinePath != item.QuarantinePath || plan.RestorePath != item.SourcePath || plan.ExpectedSHA256 != item.ContentSHA256 || plan.ExpectedSize != item.FileSize {
+		return errRestoreStateConflict
+	}
+	var pending int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM restore_journal WHERE item_id=? AND status='pending'`, item.ID).Scan(&pending); err != nil {
 		return err
 	}
-	if planState != string(domain.RestoreApproved) || !restorableStatus(domain.QuarantineStatus(itemStatus)) {
-		return fmt.Errorf("store: restore state changed before execution")
+	if pending != 0 {
+		return errRestoreStateConflict
 	}
 	var approvedPurges int
 	if err := tx.QueryRowContext(ctx, `
@@ -130,13 +139,47 @@ func (s *SQLiteStore) BeginRestore(ctx context.Context, plan domain.RestorePlan,
 	return tx.Commit()
 }
 
-func restorableStatus(status domain.QuarantineStatus) bool {
-	switch status {
-	case domain.QuarantineActive, domain.QuarantineHold, domain.QuarantinePurgeEligible:
-		return true
-	default:
-		return false
+var errRestoreStateConflict = errors.New("store: restore state or identity conflict")
+
+// A terminal restore consumes exactly one matching pending reservation.
+// Journal, plan, lifecycle and sanitized audit commit together or not at all.
+func restoreReservation(ctx context.Context, tx *sql.Tx, planID string) (itemID, parentPlanID string, err error) {
+	err = tx.QueryRowContext(ctx, `SELECT j.item_id,q.plan_id FROM restore_journal j
+ JOIN restore_plans p ON p.id=j.plan_id JOIN quarantine_items q ON q.id=j.item_id
+ WHERE j.plan_id=? AND j.status='pending' AND p.state='APPROVED'
+ AND p.item_id=j.item_id AND p.quarantine_path=j.quarantine_path AND p.restore_path=j.restore_path
+ AND p.expected_sha256=j.content_sha256 AND p.expected_size=j.file_size
+ AND q.quarantine_path=j.quarantine_path AND q.source_path=j.restore_path
+ AND q.content_sha256=j.content_sha256 AND q.file_size=j.file_size
+ AND q.status IN ('QUARANTINED','HOLD','PURGE_ELIGIBLE')`, planID).Scan(&itemID, &parentPlanID)
+	if err == sql.ErrNoRows {
+		err = errRestoreStateConflict
 	}
+	return
+}
+
+func restoreUpdateOne(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
+	r, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errRestoreStateConflict
+	}
+	return nil
+}
+
+func restoreAudit(ctx context.Context, tx *sql.Tx, parent, event, status, state, kind string, at time.Time) error {
+	detail, err := json.Marshal(map[string]string{"status": status, "final_state": state, "error_type": kind})
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO operation_logs(plan_id,event_type,detail_json,created_at) VALUES(?,?,?,?)`, parent, event, string(detail), formatTime(at))
+	return err
 }
 
 func (s *SQLiteStore) MarkRestoreCompleted(ctx context.Context, planID, itemID string, at time.Time) error {
@@ -145,25 +188,26 @@ func (s *SQLiteStore) MarkRestoreCompleted(ctx context.Context, planID, itemID s
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE restore_journal SET status = 'done', completed_at = ? WHERE plan_id = ?`,
-		formatTime(at), planID); err != nil {
+	canonical, parent, err := restoreReservation(ctx, tx, planID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE restore_plans SET state = ?, restored_at = ? WHERE id = ?`,
-		string(domain.RestoreCompleted), formatTime(at), planID); err != nil {
+	if canonical != itemID {
+		return errRestoreStateConflict
+	}
+	if err = restoreUpdateOne(ctx, tx, `UPDATE restore_journal SET status='done',completed_at=? WHERE plan_id=? AND status='pending'`, formatTime(at), planID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE quarantine_items SET status = ?, restored_at = ? WHERE id = ?`,
-		string(domain.QuarantineRestored), formatTime(at), itemID); err != nil {
+	if err = restoreUpdateOne(ctx, tx, `UPDATE restore_plans SET state='RESTORED',restored_at=? WHERE id=? AND state='APPROVED'`, formatTime(at), planID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE purge_plans SET state = ?
-		 WHERE item_id = ? AND state = ?`,
-		string(domain.PurgeRolledBack), itemID, string(domain.PurgeDraft)); err != nil {
+	if err = restoreUpdateOne(ctx, tx, `UPDATE quarantine_items SET status='RESTORED',restored_at=? WHERE id=? AND status IN ('QUARANTINED','HOLD','PURGE_ELIGIBLE')`, formatTime(at), itemID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE purge_plans SET state=? WHERE item_id=? AND state=?`, string(domain.PurgeRolledBack), itemID, string(domain.PurgeDraft)); err != nil {
+		return err
+	}
+	if err = restoreAudit(ctx, tx, parent, "restore_execution", "ok", string(domain.RestoreCompleted), "", at); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -175,14 +219,40 @@ func (s *SQLiteStore) MarkRestoreRolledBack(ctx context.Context, planID string, 
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE restore_journal SET status = 'rolled_back', completed_at = ? WHERE plan_id = ?`,
-		formatTime(at), planID); err != nil {
+	_, parent, err := restoreReservation(ctx, tx, planID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE restore_plans SET state = ? WHERE id = ?`,
-		string(domain.RestoreRolledBack), planID); err != nil {
+	if err = restoreUpdateOne(ctx, tx, `UPDATE restore_journal SET status='rolled_back',completed_at=? WHERE plan_id=? AND status='pending'`, formatTime(at), planID); err != nil {
+		return err
+	}
+	if err = restoreUpdateOne(ctx, tx, `UPDATE restore_plans SET state='ROLLED_BACK',approval_digest='',approved_at=NULL WHERE id=? AND state='APPROVED'`, planID); err != nil {
+		return err
+	}
+	if err = restoreAudit(ctx, tx, parent, "restore_recovery", "ok", string(domain.RestoreRolledBack), "recovery_rolled_back", at); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RecordRestoreBlocked records static error classes without file paths. It does
+// not terminalize the reservation; an audit failure leaves pending unchanged.
+func (s *SQLiteStore) RecordRestoreBlocked(ctx context.Context, planID, kind string, at time.Time) error {
+	switch kind {
+	case "cancelled", "scope_validation_failed", "recovery_evidence_unavailable", "manual_reconciliation_required", "journal_rollback_failed", "journal_complete_failed":
+	default:
+		return errRestoreStateConflict
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	_, parent, err := restoreReservation(ctx, tx, planID)
+	if err != nil {
+		return err
+	}
+	if err = restoreAudit(ctx, tx, parent, "restore_recovery", "failed", string(domain.RestoreApproved), kind, at); err != nil {
 		return err
 	}
 	return tx.Commit()
