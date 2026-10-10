@@ -31,11 +31,13 @@
 | 门禁 | 当前状态 |
 | --- | --- |
 | 正式下载 SHA / 签名 / 公证 / Gatekeeper / About | PASS（本机在线基础检查；离线首装未验收） |
-| GUI 扫描、目录语境、计划复核审批与 Dry Run | happy PASS，其余案例未执行 |
-| 真实 Quarantine / 原路径 Restore | Quarantine PASS，Restore 执行工具阻断 |
-| durable VERIFIED、重开及重复执行安全 | VERIFIED PASS，重开与重复操作待验 |
-| stale executed=0 / failed=1 / DRAFT / 旧审批失效 | NOT RUN |
-| 恢复冲突、隔离变化、保护及源根边界 | NOT RUN |
+| GUI 扫描、目录语境、计划复核审批与 Dry Run | happy / source-stale / destination 已执行 |
+| 真实 Quarantine / 原路径 Restore | happy 闭环 PASS（恢复执行由用户点击正式 GUI） |
+| durable VERIFIED、重开及重复执行安全 | 正常重启后状态一致、执行入口消失 PASS；未绕过 GUI 发起后端重复执行 |
+| stale executed=0 / failed=1 / DRAFT / 旧审批失效 | PASS |
+| 恢复目标冲突 | Dry Run 拒绝已观察，真实执行拒绝待验 |
+| 隔离变化 / 受保护目录 | NOT RUN |
+| 源根边界 | 不匹配源根的 Dry Run 拒绝 PASS；不冒称真实越界写入尝试 |
 | 限定运行窗口事件 / stdout / stderr / 统一日志隐私 | NOT RUN |
 | Crash Recovery / Recovery Lock 正式故障测试 | NOT RUN |
 
@@ -51,4 +53,16 @@
 - 恢复草案、审批、Dry Run 分开完成。恢复校验通过，restore plan APPROVED、restore Journal0，文件仍保持隔离后状态。
 - Computer Use 坐标输入连续返回 `windowNotFoundAtPosition` / `noWindowsAvailable`；AX 将恢复试运行和执行合并为单元格，只能触发试运行。刷新绑定、Raise 和原生窗口菜单未解除定位问题；已请求用户点击当前唯一测试项的恢复执行按钮。工具阻断不能解释为产品 Restore FAIL 或 PASS。
 - 当前采样：54标记/156编码变体；stdout/stderr、约366.8MB统一日志、11条 job_events、3条 operation_logs 均零命中。采集仍进行，未覆盖其余案例和重开后的新进程，不能作为最终隐私PASS。
-- 恢复闭环、重开项目、stale、冲突、保护和最终隐私核验未完成，整体 INCONCLUSIVE。
+- 上述工具阻断后，用户确认已点击唯一测试项的正式 GUI 恢复执行按钮。只读快照及实际页面确认源4/4的 SHA-256/大小均与初始清单一致，隔离区空，根外不变；源计划 VERIFIED，隔离项与恢复计划 RESTORED，恢复 Journal done。
+- 正常退出并重新启动正式 App 后，重新打开 happy 项目，状态保持一致、执行可选数0、无恢复锁、无新增隔离项或 Journal。没有主动崩溃，也没有绕过 GUI 调用重复执行 API。
+- 初始统一日志实时采集停止后存在恢复点击窗口的采集缺口，已通过系统 retained `log show` 补取该窗口；补取不能证明连续实时覆盖。stdout/stderr 保持捕获，新进程另开统一日志段；最终隐私判定须保留此限制。
+
+## source-stale 与源根边界实际证据
+
+- 全新 source-stale 项目正常扫描、独立复核、批准及 Dry Run；源4/4、隔离区空、Journal/隔离项0。
+- 仅改变该计划的人工可丢弃 QUARANTINE 目标，备份保持原始内容。正式 GUI 点击执行后显示 executed=0/skipped=0/failed=1、`stale_detected`，可执行列表归零。
+- durable 状态 DRAFT；审计包含 `approval_invalidated` 与 `stale_check`，无 Journal、无隔离项。改变的目标保持改变后的 SHA，另3个源文件与根外对照均未变。
+- 全新 destination 项目批准后，输入与登记源不匹配的允许根，Dry Run 返回 `scope_validation_failed`、executed=0/failed=1，实际隔离按钮禁用；源4/4、隔离区空、Journal/隔离项0。随后输入正确源根，重新 Dry Run 后隔离成功：VERIFIED / 唯一 done Journal / QUARANTINED。
+- 独立创建并批准恢复计划后，仅在原恢复目标位置创建人工冲突文件。恢复 Dry Run 返回 `destination_exists`；原隔离内容与冲突文件保持，restore plan APPROVED、restore Journal0。真实执行拒绝尚待观察，不据 Dry Run 判完整冲突验收通过。
+
+剩余隔离内容变化、受保护目录、真实恢复冲突执行及最终隐私证据未完成；整体仍 INCONCLUSIVE，Public Beta BLOCKED，Release Draft。
