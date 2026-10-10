@@ -23,7 +23,8 @@ beta.9 RC `af4c5902eb431833e72d9024ccdee6e6ea678f97` 的真实 D 场景已证明
 - 页面专项 23/23 PASS（新增 13 项）：新草案新审批、两种历史排序、Dry Run 后重新加载、新批准 ID/digest、冲突/未知状态、非 QUARANTINED、恢复锁、只读、busy。
 - 全前端 28 文件、252 测试 PASS；TypeScript / Vite build PASS。
 - 专项日志 SHA-256 `6f2f4b84d00780df447979c70937f15a2b99a50d8f7c57bb7cbf25b8b604e7ed`；全前端 `e469bf44320b95539975f5722c8fc074660dc1f9bc68808018506a117e1c80ff`；build `6d389e44051d677b7a0835cc72069b34b3b717db442181f7d69407fb14a09c27`。
-- 相关 Go race、CI/Security、独立 exact-HEAD review：尚待完成，以后续实际结果为准。
+- 相关 Go race（app / executor / Wails / store）PASS，日志 SHA-256 `c8f3c0887b8f25db81fa8d98bf603b64a333d5843937163c5a667418c8f71d1a`。
+- CI/Security、独立 exact-HEAD review：尚待完成，以后续实际结果为准。
 
 ## 正式层仍待验证
 
