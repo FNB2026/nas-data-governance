@@ -204,7 +204,7 @@ func (*restoreCompleteFailStore) ListPendingRestores(context.Context) ([]domain.
 	return nil, nil
 }
 
-func TestRestoreCompletionFailureRollsBackToQuarantine(t *testing.T) {
+func TestRestoreCompletionFailureRetainsUnconfirmedDestination(t *testing.T) {
 	tmp := t.TempDir()
 	sourceRoot := filepath.Join(tmp, "source")
 	quarantineRoot := filepath.Join(tmp, "quarantine")
@@ -236,15 +236,17 @@ func TestRestoreCompletionFailureRollsBackToQuarantine(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := exec.ExecuteRestore(context.Background(), &plan, &item)
-	if result.ErrorType != "journal_complete_failed" || !fake.began || !fake.rolledBack {
+	if result.ErrorType != "journal_complete_failed" || !fake.began || fake.rolledBack || result.FinalState == domain.RestoreRolledBack {
 		t.Fatalf("unexpected restore result: %#v fake=%#v", result, fake)
 	}
-	if _, err := os.Stat(qPath); err != nil {
-		t.Fatalf("quarantine item was not restored after failure: %v", err)
+	if _, err := os.Stat(qPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("unexpected quarantine overwrite")
 	}
-	if _, err := os.Stat(sourcePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("restore destination survived rollback: %v", err)
+	got, err := Snapshot(sourcePath, true)
+	if err != nil || got.Hash != item.ContentSHA256 || got.Size != item.FileSize {
+		t.Fatal("unconfirmed full destination lost")
 	}
+
 }
 
 func TestRecoverPurgeRollsStagedItemBack(t *testing.T) {
