@@ -160,7 +160,7 @@ export default function ExecutionCenterPage() {
       setRestorePlansReady(true);
     } catch (e: unknown) {
       if (request !== lifecycleRequest.current) return;
-      setPurgeError((e as Error).message);
+      setPurgeError("恢复与清理计划读取失败，请刷新后人工核对");
     }
   }, []);
 
@@ -276,6 +276,8 @@ export default function ExecutionCenterPage() {
       pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
       return;
     }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     setRestoring(true);
     try {
       const plan = await api.execution.createRestorePlan(itemId);
@@ -287,6 +289,7 @@ export default function ExecutionCenterPage() {
     } catch (e: unknown) {
       pushToast("error", "创建恢复计划失败", (e as Error).message);
     } finally {
+      await loadLifecyclePlans();
       setRestoring(false);
     }
   };
@@ -296,6 +299,9 @@ export default function ExecutionCenterPage() {
       pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
       return;
     }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
+    setRestoring(true);
     try {
       await api.execution.approveRestore(planId, digest);
       setRestorePlans((prev) =>
@@ -304,6 +310,9 @@ export default function ExecutionCenterPage() {
       pushToast("success", "恢复计划已批准", planId);
     } catch (e: unknown) {
       pushToast("error", "批准失败", (e as Error).message);
+    } finally {
+      await loadLifecyclePlans();
+      setRestoring(false);
     }
   };
 
@@ -312,6 +321,8 @@ export default function ExecutionCenterPage() {
       pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
       return;
     }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     setRestoring(true);
     try {
       const result = await api.execution.executeRestore({
@@ -326,10 +337,11 @@ export default function ExecutionCenterPage() {
       } else {
         pushToast("error", dryRun ? "校验失败" : "恢复执行失败", result.error || result.error_type || planId);
       }
-      await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
+      await loadQuarantine();
     } catch (e: unknown) {
       pushToast("error", "执行恢复失败", (e as Error).message);
     } finally {
+      await loadLifecyclePlans();
       setRestoring(false);
     }
   };
@@ -659,7 +671,7 @@ export default function ExecutionCenterPage() {
                 <option key={s} value={s}>{label}</option>
               ))}
             </select>
-            <button className="btn-sm secondary" onClick={() => void Promise.all([loadQuarantine(), loadLifecyclePlans()])} disabled={quarantineLoading}>
+            <button className="btn-sm secondary" onClick={() => void Promise.all([loadQuarantine(), loadLifecyclePlans()])} disabled={quarantineLoading || restoring}>
               {quarantineLoading ? "加载中…" : "刷新"}
             </button>
             {isReadWrite && (

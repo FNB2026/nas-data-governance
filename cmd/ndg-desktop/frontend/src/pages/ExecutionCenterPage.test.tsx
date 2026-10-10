@@ -68,6 +68,7 @@ const successfulResult = {
 beforeEach(() => {
   Object.defineProperty(window, "go", { value: {}, configurable: true });
   Object.defineProperty(window, "runtime", { value: {}, configurable: true });
+  contextMock.dataRevision = 0;
   contextMock.isReadWrite = true;
   apiMock.execution.createRestorePlan.mockReset();
   apiMock.execution.approveRestore.mockReset().mockResolvedValue(undefined);
@@ -224,8 +225,10 @@ describe("Restore after verified rollback", () => {
     apiMock.execution.listRestores.mockResolvedValue([{
       id: "restore-old", item_id: "item-disposable", state: "ROLLED_BACK", approval_digest: "",
     }]);
-    apiMock.execution.createRestorePlan.mockResolvedValue({
-      id: "restore-new", item_id: "item-disposable", state: "DRAFT", approval_digest: "new-digest",
+    apiMock.execution.createRestorePlan.mockImplementation(async () => {
+      const plan = { id: "restore-new", item_id: "item-disposable", state: "DRAFT", approval_digest: "new-digest" };
+      apiMock.execution.listRestores.mockResolvedValue([plan]);
+      return plan;
     });
     apiMock.execution.approveRestore.mockResolvedValue(undefined);
     render(<ExecutionCenterPage />);
@@ -244,9 +247,10 @@ const activeRestore = { id: "fresh-restore", item_id: restoreItem.id, state: "DR
 async function renderRestores(plans: object[], status = "QUARANTINED") {
   apiMock.execution.listQuarantine.mockResolvedValue([{ ...restoreItem, status }]);
   apiMock.execution.listRestores.mockResolvedValue(plans);
-  render(<ExecutionCenterPage />);
+  const view = render(<ExecutionCenterPage />);
   fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
   expect(await screen.findByText(restoreItem.id)).toBeVisible();
+  return view;
 }
 
 describe("Restore plan selection safety", () => {
@@ -301,7 +305,7 @@ describe("Restore plan selection safety", () => {
     await renderRestores([rolledRestore]);
     const create = screen.getByRole("button", { name: "创建恢复草案" });
     fireEvent.click(create);
-    expect(create).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
     expect(apiMock.execution.createRestorePlan).toHaveBeenCalledOnce();
   });
 });
@@ -359,5 +363,37 @@ describe("Restore refresh races", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "执行" })).toBeDisabled());
     expect(screen.getByRole("button", { name: "试运行" })).toBeDisabled();
     expect(apiMock.execution.executeRestore).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Restore read and mutation interleaving", () => {
+  it("invalidates a read that straddles draft creation and reloads canonical plans", async () => {
+    let finishCreate!: (plan: object) => void;
+    let finishOldPurges!: (plans: object[]) => void;
+    apiMock.execution.createRestorePlan.mockImplementation(() => new Promise((resolve) => { finishCreate = resolve; }));
+    const view = await renderRestores([rolledRestore]);
+    fireEvent.click(screen.getByRole("button", { name: "创建恢复草案" }));
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    apiMock.execution.listPurges.mockReturnValueOnce(new Promise((resolve) => { finishOldPurges = resolve; }));
+    contextMock.dataRevision++;
+    view.rerender(<ExecutionCenterPage />);
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    apiMock.execution.listRestores.mockResolvedValue([rolledRestore, activeRestore]);
+    await act(async () => finishCreate(activeRestore));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(3));
+    await act(async () => finishOldPurges([]));
+    expect(await screen.findByRole("button", { name: "批准" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+  });
+
+  it("never displays raw lifecycle read errors on the purge tab", async () => {
+    await renderRestores([rolledRestore]);
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("PRIVATE_READ_LEAK_MARKER"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: /清理 \(0\)/ }));
+    expect(await screen.findByText("恢复与清理计划读取失败，请刷新后人工核对")).toBeVisible();
+    expect(screen.queryByText("PRIVATE_READ_LEAK_MARKER")).not.toBeInTheDocument();
   });
 });
