@@ -1,7 +1,7 @@
 // Execution center page: quarantine lifecycle, purge management, and crash recovery.
 // V7 wiring — connects QuarantineService, PurgeService, and RecoveryService.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import { recoveryFeedback, RECOVERY_REQUEST_FAILED } from "../lib/recoveryFeedback";
@@ -97,6 +97,9 @@ export default function ExecutionCenterPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
 
   // Restore workflow
+  const [restorePlansReady, setRestorePlansReady] = useState(false);
+  const lifecycleRequest = useRef(0);
+  const lifecycleReadyRequest = useRef(0);
   const [restorePlans, setRestorePlans] = useState<wails.RestorePlanDTO[]>([]);
   const [restoreRoot, setRestoreRoot] = useState("");
   const [restoreSourceRoots, setRestoreSourceRoots] = useState("");
@@ -146,11 +149,17 @@ export default function ExecutionCenterPage() {
 
   const loadLifecyclePlans = useCallback(async () => {
     if (!hasWailsRuntime()) return;
+    const request = ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     try {
       const [restores, purges] = await Promise.all([api.execution.listRestores(), api.execution.listPurges()]);
+      if (request !== lifecycleRequest.current) return;
       setRestorePlans(restores || []);
       setPurgePlans(purges || []);
+      lifecycleReadyRequest.current = request;
+      setRestorePlansReady(true);
     } catch (e: unknown) {
+      if (request !== lifecycleRequest.current) return;
       setPurgeError((e as Error).message);
     }
   }, []);
@@ -263,6 +272,10 @@ export default function ExecutionCenterPage() {
   // ---- Quarantine actions ----
 
   const handleCreateRestorePlan = async (itemId: string) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
     setRestoring(true);
     try {
       const plan = await api.execution.createRestorePlan(itemId);
@@ -279,6 +292,10 @@ export default function ExecutionCenterPage() {
   };
 
   const handleApproveRestore = async (planId: string, digest: string) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
     try {
       await api.execution.approveRestore(planId, digest);
       setRestorePlans((prev) =>
@@ -291,6 +308,10 @@ export default function ExecutionCenterPage() {
   };
 
   const handleExecuteRestore = async (planId: string, digest: string, dryRun: boolean) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
     setRestoring(true);
     try {
       const result = await api.execution.executeRestore({
@@ -638,7 +659,7 @@ export default function ExecutionCenterPage() {
                 <option key={s} value={s}>{label}</option>
               ))}
             </select>
-            <button className="btn-sm secondary" onClick={() => void loadQuarantine()} disabled={quarantineLoading}>
+            <button className="btn-sm secondary" onClick={() => void Promise.all([loadQuarantine(), loadLifecyclePlans()])} disabled={quarantineLoading}>
               {quarantineLoading ? "加载中…" : "刷新"}
             </button>
             {isReadWrite && (
@@ -697,8 +718,8 @@ export default function ExecutionCenterPage() {
                     const restorePlan = unresolvedRestores.length === 1
                       ? unresolvedRestores[0]
                       : unresolvedRestores.length === 0 ? itemRestores[0] : undefined;
-                    const canCreateRestore = item.status === "QUARANTINED" && unresolvedRestores.length === 0;
-                    const restoreWriteDisabled = restoring || execWriteDisabled || item.status !== "QUARANTINED";
+                    const canCreateRestore = restorePlansReady && item.status === "QUARANTINED" && unresolvedRestores.length === 0;
+                    const restoreWriteDisabled = !restorePlansReady || restoring || execWriteDisabled || item.status !== "QUARANTINED";
                     return (
                       <tr key={item.id}>
                         <td className="mono">
@@ -728,6 +749,7 @@ export default function ExecutionCenterPage() {
                                 创建恢复草案
                               </button>
                             )}
+                            {!restorePlansReady && <span>恢复状态尚未确认，请刷新后人工核对</span>}
                             {unresolvedRestores.length > 1 && (
                               <span>恢复状态存在冲突，请人工核对</span>
                             )}

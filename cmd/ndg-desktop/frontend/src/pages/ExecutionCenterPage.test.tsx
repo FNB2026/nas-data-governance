@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { apiMock, contextMock, pushToastMock } = vi.hoisted(() => ({
   pushToastMock: vi.fn(),
@@ -303,5 +303,61 @@ describe("Restore plan selection safety", () => {
     fireEvent.click(create);
     expect(create).toBeDisabled();
     expect(apiMock.execution.createRestorePlan).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("Restore list trust", () => {
+  it("does not treat a pending read as an empty plan list", async () => {
+    apiMock.execution.listRestores.mockReturnValue(new Promise(() => {}));
+    apiMock.execution.listQuarantine.mockResolvedValue([restoreItem]);
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+    expect(await screen.findByText(restoreItem.id)).toBeVisible();
+    const create = screen.queryByRole("button", { name: "创建恢复草案" });
+    if (create) expect(create).toBeDisabled();
+    expect(apiMock.execution.createRestorePlan).not.toHaveBeenCalled();
+  });
+
+  it("blocks writes after failed refresh instead of trusting a rolled-back cache", async () => {
+    await renderRestores([rolledRestore]);
+    expect(screen.getByRole("button", { name: "创建恢复草案" })).toBeEnabled();
+    apiMock.execution.listRestores.mockRejectedValue(new Error("private-test-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => {
+      expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2);
+      const create = screen.queryByRole("button", { name: "创建恢复草案" });
+      if (create) expect(create).toBeDisabled();
+    });
+    expect(screen.queryByText("private-test-anchor")).not.toBeInTheDocument();
+    expect(apiMock.execution.createRestorePlan).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Restore refresh races", () => {
+  it("does not let an older successful read reopen writes after the newest read fails", async () => {
+    let resolveOld!: (plans: object[]) => void;
+    apiMock.execution.listRestores.mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }));
+    apiMock.execution.listQuarantine.mockResolvedValue([restoreItem]);
+    render(<ExecutionCenterPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /隔离与恢复/ }));
+    expect(await screen.findByText(restoreItem.id)).toBeVisible();
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("private-read-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(apiMock.execution.listRestores).toHaveBeenCalledTimes(2));
+    await act(async () => resolveOld([rolledRestore]));
+    expect(screen.queryByRole("button", { name: "创建恢复草案" })).not.toBeInTheDocument();
+    expect(screen.getByText("恢复状态尚未确认，请刷新后人工核对")).toBeVisible();
+    expect(screen.queryByText("private-read-anchor")).not.toBeInTheDocument();
+  });
+
+  it("keeps an existing approval disabled when its state read fails", async () => {
+    await renderRestores([{ ...activeRestore, state: "APPROVED" }]);
+    apiMock.execution.listRestores.mockRejectedValueOnce(new Error("private-read-anchor"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "执行" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "试运行" })).toBeDisabled();
+    expect(apiMock.execution.executeRestore).not.toHaveBeenCalled();
   });
 });
