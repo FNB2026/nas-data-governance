@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
+import { recoveryFeedback, RECOVERY_REQUEST_FAILED } from "../lib/recoveryFeedback";
 import CopyButton from "../components/CopyButton";
 import ErrorState from "../components/ErrorState";
 import LoadingState from "../components/LoadingState";
@@ -63,7 +64,7 @@ function planStateBadgeClass(state: string, prefix: string): string {
 // ---- Component ----
 
 export default function ExecutionCenterPage() {
-  const { capabilities, isReadWrite, dataRevision, pushToast } = useProject();
+  const { capabilities, isReadWrite, dataRevision, pushToast, refreshRecoveryLock } = useProject();
 
   const [activeTab, setActiveTab] = useState<ExecTab>("plans");
 
@@ -366,59 +367,26 @@ export default function ExecutionCenterPage() {
 
   // ---- Recovery actions ----
 
-  const handleRecoverSource = async () => {
+  const handleRecover = async (kind: "source" | "restore" | "purge") => {
     setRecoveryLoading(true);
     try {
-      const results = await api.recovery.recoverSource();
-      if (results.length === 0) {
-        pushToast("success", "无需恢复", "没有检测到卡住的执行计划");
-        setRecoveryResults("无需恢复 — 没有卡住的执行计划");
-      } else {
-        const summary = results.map((r) => `${r.plan_id}: ${r.action} (回滚 ${r.rolled_back} 步)`).join("\n");
-        setRecoveryResults(summary);
-        pushToast("success", "恢复完成", `处理了 ${results.length} 个计划`);
-      }
-      void loadRecoveryStatus();
-      void loadQuarantine();
-    } catch (e: unknown) {
-      pushToast("error", "恢复失败", (e as Error).message);
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
-
-  const handleRecoverRestores = async () => {
-    setRecoveryLoading(true);
-    try {
-      const results = await api.recovery.recoverRestores({
-        quarantine_root: restoreRoot.trim(),
-        source_roots: restoreSourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
-      } as wails.RecoverRestoresRequest);
-      if (results.length === 0) {
-        setRecoveryResults("无需恢复 — 没有卡住的恢复操作");
-      } else {
-        setRecoveryResults(results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
-      }
-      pushToast("success", "恢复操作完成", `处理了 ${results.length} 条`);
-    } catch (e: unknown) {
-      pushToast("error", "恢复失败", (e as Error).message);
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
-
-  const handleRecoverPurges = async () => {
-    setRecoveryLoading(true);
-    try {
-      const results = await api.recovery.recoverPurges(purgeRoot.trim());
-      if (results.length === 0) {
-        setRecoveryResults("无需恢复 — 没有卡住的清理操作");
-      } else {
-        setRecoveryResults(results.map((r) => `${r.plan_id || "未知"}: ${r.status}`).join("\n"));
-      }
-      pushToast("success", "清理恢复完成", `处理了 ${results.length} 条`);
-    } catch (e: unknown) {
-      pushToast("error", "恢复失败", (e as Error).message);
+      const results = kind === "source" ? await api.recovery.recoverSource()
+        : kind === "restore" ? await api.recovery.recoverRestores({
+          quarantine_root: restoreRoot.trim(),
+          source_roots: restoreSourceRoots.split("\n").map((s) => s.trim()).filter(Boolean),
+        } as wails.RecoverRestoresRequest)
+        : await api.recovery.recoverPurges(purgeRoot.trim());
+      const status = await refreshRecoveryLock();
+      setRecoveryStatus(status);
+      const feedback = recoveryFeedback(kind, results, status);
+      setRecoveryResults(feedback.summary);
+      pushToast(feedback.tone, feedback.title, feedback.summary);
+      await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
+    } catch {
+      const status = await refreshRecoveryLock().catch(() => null);
+      setRecoveryStatus(status);
+      setRecoveryResults(RECOVERY_REQUEST_FAILED);
+      pushToast("error", "恢复未获确认", RECOVERY_REQUEST_FAILED);
     } finally {
       setRecoveryLoading(false);
     }
@@ -956,25 +924,25 @@ export default function ExecutionCenterPage() {
 
             <div className="exec-recovery-actions">
               <h3>恢复操作</h3>
-              <p className="muted">以下操作会将卡住的计划恢复至安全终态（回滚或重置）。恢复锁激活时，此路径仍保持可用。</p>
+              <p className="muted">恢复操作只处理可确认的结果；不确定状态保持锁定并要求人工核对，不保证自动解锁。</p>
               <div className="exec-recovery-buttons">
                 <button
                   className="btn-sm"
-                  onClick={() => void handleRecoverSource()}
+                  onClick={() => void handleRecover("source")}
                   disabled={recoveryLoading || !isReadWrite}
                 >
                   恢复源目录执行
                 </button>
                 <button
                   className="btn-sm"
-                  onClick={() => void handleRecoverRestores()}
+                  onClick={() => void handleRecover("restore")}
                   disabled={recoveryLoading || !isReadWrite}
                 >
                   恢复隔离还原
                 </button>
                 <button
                   className="btn-sm"
-                  onClick={() => void handleRecoverPurges()}
+                  onClick={() => void handleRecover("purge")}
                   disabled={recoveryLoading || !isReadWrite}
                 >
                   恢复清理操作

@@ -1,0 +1,19 @@
+{
+  "source_base": "a1a142cc577203bb0272656fc7cafc94017e3efb",
+  "frozen_beta7_rc": "b09166f4ef5f7a4c9fa899a3c1370163fa373e62",
+  "recorded_at": "2026-10-10T10:19:28.435593+00:00",
+  "frontend_tests": 239,
+  "frontend_files": 28,
+  "go_toolchain": "go version go1.26.9 darwin/arm64",
+  "evidence_layer": "source tests only; not signed App acceptance",
+  "raw_log_sha256": {
+    "before_frontend": "c0b248c4fd31911af921e0faf42f3b47dbd065c46f4206c6ea7d468c13613269",
+    "frontend": "b74e3849c24481778c572e8a0425b367f231ca9427b37f805ce2d724e87805b9",
+    "build": "e9c9c8bba473ca4a341c68ffe3f129404687ecda797b1dc4552160a166a71cd3",
+    "restore_contract": "1a1706ec2a23bbb7ef6b88094cf971586a05ebab23d40ff5671ed1e7e9d37c6e",
+    "go_race": "53eef771431c0f6321888d467cd585a6ec59bf5e4258727ffed09d69b3fe5d62",
+    "go_vet": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "purge_runtime": "NOT RUN",
+  "crash_formal_gate": "INCONCLUSIVE"
+}

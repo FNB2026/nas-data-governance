@@ -16,6 +16,7 @@ const { apiMock, contextMock, pushToastMock } = vi.hoisted(() => ({
     isReadWrite: true,
     dataRevision: 0,
     pushToast: vi.fn(),
+    refreshRecoveryLock: vi.fn(),
   },
   apiMock: {
     governance: { listAll: vi.fn() },
@@ -77,6 +78,7 @@ beforeEach(() => {
   apiMock.execution.executePlans.mockReset().mockResolvedValue(successfulResult);
   apiMock.recovery.checkLock.mockReset().mockResolvedValue({ lock_active: false, executing_count: 0 });
   pushToastMock.mockReset();
+  contextMock.refreshRecoveryLock.mockReset().mockResolvedValue({ lock_active: false, executing_count: 0 });
 });
 
 afterEach(() => {
@@ -164,5 +166,46 @@ describe("ExecutionCenterPage plan execution", () => {
 
     expect(await screen.findByRole("button", { name: "批准" })).toBeDisabled();
     expect(screen.getByText("永久清理危险区")).toBeVisible();
+  });
+});
+
+
+describe("ExecutionCenter recovery feedback", () => {
+  it.each([
+    ["recoverSource", "恢复源目录执行", [{ action: "skipped", errors: ["PRIVATE_CANARY /private/source"] }]],
+    ["recoverRestores", "恢复隔离还原", [{ status: "failed", error: "PRIVATE_CANARY /private/source" }]],
+    ["recoverPurges", "恢复清理操作", [{ status: "failed", error_type: "PRIVATE_CANARY" }]],
+  ] as const)("classifies %s and refreshes the global lock once", async (method, label, results) => {
+    apiMock.recovery[method].mockResolvedValue(results);
+    contextMock.refreshRecoveryLock.mockResolvedValue({ lock_active: true, executing_count: 1 });
+    render(<ExecutionCenterPage />);
+    fireEvent.click(screen.getByRole("button", { name: /^恢复(?: ⚠)?$/ }));
+    const recoveryButton = await screen.findByRole("button", { name: label });
+    await waitFor(() => expect(recoveryButton).toBeEnabled());
+    fireEvent.click(recoveryButton);
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalled());
+    expect(contextMock.refreshRecoveryLock).toHaveBeenCalledTimes(1);
+    expect(apiMock.recovery[method]).toHaveBeenCalledTimes(1);
+    expect(pushToastMock.mock.calls.some(([tone]) => tone === "success")).toBe(false);
+    expect(document.body.textContent).toContain("人工核对");
+    expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
+  });
+});
+
+describe("ExecutionCenter recovery request and lock uncertainty", () => {
+  it.each(["rejected", "unknown", "confirmed"])("handles %s source recovery without a second write request", async (mode) => {
+    apiMock.recovery.recoverSource.mockReset().mockResolvedValue([{ action: "rolled_back" }]);
+    contextMock.refreshRecoveryLock.mockResolvedValue(mode === "confirmed" ? { lock_active: false, executing_count: 0 } : null);
+    if (mode === "rejected") apiMock.recovery.recoverSource.mockRejectedValue(new Error("PRIVATE_CANARY /private/path"));
+    render(<ExecutionCenterPage />);
+    fireEvent.click(screen.getByRole("button", { name: /^恢复(?: ⚠)?$/ }));
+    const button = await screen.findByRole("button", { name: "恢复源目录执行" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalled());
+    expect(apiMock.recovery.recoverSource).toHaveBeenCalledTimes(1);
+    expect(contextMock.refreshRecoveryLock).toHaveBeenCalledTimes(1);
+    expect(pushToastMock.mock.calls.some(([tone]) => tone === "success")).toBe(mode === "confirmed");
+    expect(document.body.textContent).not.toContain("PRIVATE_CANARY");
   });
 });
