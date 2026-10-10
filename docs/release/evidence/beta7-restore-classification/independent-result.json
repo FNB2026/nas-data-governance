@@ -1,0 +1,35 @@
+{
+  "rc": "b09166f4ef5f7a4c9fa899a3c1370163fa373e62",
+  "started_at": "2026-10-10T06:15:21.358206+00:00",
+  "ended_at": "2026-10-10T06:15:26.262426+00:00",
+  "go_version": "go version go1.26.9 darwin/arm64",
+  "effective_go_environment": {
+    "GOARCH": "arm64",
+    "GOENV": "",
+    "GOFLAGS": "",
+    "GOOS": "darwin",
+    "GOTOOLCHAIN": "go1.26.9",
+    "GOVERSION": "go1.26.9",
+    "GOWORK": "off"
+  },
+  "command": [
+    "go",
+    "test",
+    "-race",
+    "-count=1",
+    "-v",
+    "./internal/app",
+    "-run",
+    "^TestBeta7EvidenceRestoreClassification$"
+  ],
+  "archive_sha256": "7d20ab78e7b87d51552930047d4d94671ca98664abc0d3a9a729f0d27f3d4b99",
+  "test_carrier_sha256": "1aed09f6053d44c6d215ef14b8e5f871aebe9366edc929fffcf14d78685a03e8",
+  "runner_sha256": "dbca99dff1cc6f7d0276748428630dcda80718602e331978ca0ff7eec2ff6d82",
+  "frozen_files_checked": 369,
+  "frozen_files_unchanged": true,
+  "exit_code": 0,
+  "subcases_passed": 6,
+  "stdout_sha256": "6b760fa4168a6112a260afe99adf488e42c8fe08822e202f8dd7c950db28aafb",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "evidence_layer": "frozen-source test binary; not signed-App runtime fields"
+}
