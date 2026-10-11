@@ -397,3 +397,19 @@ describe("Restore read and mutation interleaving", () => {
     expect(screen.queryByText("PRIVATE_READ_LEAK_MARKER")).not.toBeInTheDocument();
   });
 });
+
+describe("Beta Purge policy isolation", () => {
+  it("keeps quarantine dry-run usable while Purge is disabled", async () => {
+    contextMock.capabilities.can_execute_purge = false;
+    render(<ExecutionCenterPage />);
+    await selectPlanAndFillRoots();
+    expect(screen.getByRole("button", { name: "执行前试运行" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /清理 \(/ }));
+    expect(screen.getByRole("button", { name: "生成清理草案" })).toBeDisabled();
+  });
+  it("keeps restore draft creation usable while Purge is disabled", async () => {
+    contextMock.capabilities.can_execute_purge = false;
+    await renderRestores([]);
+    expect(screen.getByRole("button", { name: "创建恢复草案" })).toBeEnabled();
+  });
+});

@@ -29,7 +29,7 @@ describe("deriveCapabilities", () => {
     expect(caps.can_edit_reviews).toBe(true);
     expect(caps.can_approve_plans).toBe(true);
     expect(caps.can_execute_quarantine).toBe(true);
-    expect(caps.can_execute_purge).toBe(true);
+    expect(caps.can_execute_purge).toBe(false);
   });
 
   it("disables scan and execution when recovery lock is active", () => {

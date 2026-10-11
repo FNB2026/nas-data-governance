@@ -72,7 +72,9 @@ export default function ExecutionCenterPage() {
   // capability: read-only mode or an active recovery lock both block new
   // writes while the recovery tab stays usable.
   const execWriteDisabled =
-    !capabilities.can_execute_quarantine || !capabilities.can_execute_purge;
+    !capabilities.can_execute_quarantine;
+  const purgeWriteDisabled = !isReadWrite || !capabilities.can_execute_purge;
+  const purgeDisabledReason = capabilities.disabled_reasons?.["purge"] ?? "当前发行版本禁止永久清理";
   const execDisabledReason =
     capabilities.disabled_reasons?.["execution-center"] ??
     (!isReadWrite
@@ -837,10 +839,10 @@ export default function ExecutionCenterPage() {
             )}
           </div>
 
-          {execWriteDisabled && (
+          {purgeWriteDisabled && (
             <DisabledNotice
-              reason={execDisabledReason}
-              hint="生成、批准与执行清理计划需要读写模式且无恢复锁。"
+              reason={purgeDisabledReason}
+              hint="永久清理未开放；历史列表及已有异常状态恢复仍保留。"
             />
           )}
 
@@ -885,7 +887,7 @@ export default function ExecutionCenterPage() {
                             <button
                               className="btn-sm"
                               onClick={() => void handleApprovePurge(plan.id, plan.approval_digest)}
-                              disabled={execWriteDisabled}
+                              disabled={purgeWriteDisabled}
                             >
                               批准
                             </button>
@@ -895,7 +897,7 @@ export default function ExecutionCenterPage() {
                               <button
                                 className="btn-sm secondary"
                                 onClick={() => void handleExecutePurge(plan.id, plan.approval_digest, true)}
-                                disabled={purging || execWriteDisabled}
+                                disabled={purging || purgeWriteDisabled}
                               >
                                 试运行
                               </button>
@@ -921,7 +923,7 @@ export default function ExecutionCenterPage() {
                                 )}
                                 disabled={
                                   purging ||
-                                  execWriteDisabled ||
+                                  purgeWriteDisabled ||
                                   !plan.dry_run_verified_at ||
                                   purgeConfirmations[plan.id] !== plan.confirmation_text
                                 }

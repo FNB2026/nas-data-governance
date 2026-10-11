@@ -137,7 +137,7 @@ describe("SettingsPage security group", () => {
 
     const security = document.getElementById("settings-security") as HTMLElement;
     expect(within(security).getByText("读写")).toBeInTheDocument();
-    expect(within(security).getAllByText("可用")).toHaveLength(3);
+    expect(within(security).getAllByText("可用")).toHaveLength(2);
     expect(within(security).getByText("无")).toBeInTheDocument();
   });
 

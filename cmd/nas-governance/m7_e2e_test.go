@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -134,57 +133,28 @@ func TestM7RestoreAndPermanentPurgeCLI(t *testing.T) {
 		t, dbPath, sourceRoot, quarantineRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour),
 	)
-	purgePlanPath := filepath.Join(tmp, "purge-plan.json")
-	if err := runPurgePlan([]string{"--db", dbPath, "--out", purgePlanPath}); err != nil {
-		t.Fatal(err)
-	}
-	var purgePlans []domain.PurgePlan
-	data, err := os.ReadFile(purgePlanPath)
+	before, err := os.ReadFile(purgeItem.QuarantinePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &purgePlans); err != nil {
-		t.Fatal(err)
+	for _, run := range []func([]string) error{runPurgePlan, runPurgeApprove, runPurgeExecute} {
+		if err := run([]string{"--db", dbPath}); err != app.ErrPurgeReleaseDisabled {
+			t.Fatalf("missing policy refusal: %v", err)
+		}
+		// Refusal precedes even opening a nonexistent project database.
+		absent := filepath.Join(tmp, "must-not-create.db")
+		if err := run([]string{"--db", absent}); err != app.ErrPurgeReleaseDisabled {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(absent); !os.IsNotExist(err) {
+			t.Fatal("policy created database")
+		}
 	}
-	if len(purgePlans) != 1 || purgePlans[0].ItemID != purgeItem.ID {
-		t.Fatalf("unexpected purge plans: %#v", purgePlans)
+	after, err := os.ReadFile(purgeItem.QuarantinePath)
+	if err != nil || string(after) != string(before) {
+		t.Fatal("policy changed quarantine content")
 	}
-	purgePlan := purgePlans[0]
-	secondPlanPath := filepath.Join(tmp, "purge-plan-second.json")
-	if err := runPurgePlan([]string{"--db", dbPath, "--out", secondPlanPath}); err != nil {
-		t.Fatal(err)
-	}
-	var secondPlans []domain.PurgePlan
-	readJSONFile(t, secondPlanPath, &secondPlans)
-	if len(secondPlans) != 0 {
-		t.Fatalf("repeated planning duplicated an active plan: %#v", secondPlans)
-	}
-	if err := runPurgeApprove([]string{
-		"--db", dbPath, "--plan-id", purgePlan.ID, "--digest", purgePlan.ApprovalDigest,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runPurgeExecute([]string{
-		"--db", dbPath, "--plan-id", purgePlan.ID, "--digest", purgePlan.ApprovalDigest,
-		"--quarantine", quarantineRoot, "--dry-run",
-		"--out", filepath.Join(tmp, "purge-dry.json"),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(purgeItem.QuarantinePath); err != nil {
-		t.Fatalf("purge dry-run changed item: %v", err)
-	}
-	if err := runPurgeExecute([]string{
-		"--db", dbPath, "--plan-id", purgePlan.ID, "--digest", purgePlan.ApprovalDigest,
-		"--quarantine", quarantineRoot,
-		"--confirm", app.PurgeConfirmationText(purgePlan),
-		"--out", filepath.Join(tmp, "purge-audit.json"),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(purgeItem.QuarantinePath); !os.IsNotExist(err) {
-		t.Fatalf("purged item still exists: %v", err)
-	}
+
 }
 
 func TestM7L1CopiedFixtureDryRunQuarantineAndRollback(t *testing.T) {
