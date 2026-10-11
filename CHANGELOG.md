@@ -2,6 +2,14 @@
 
 本项目的显著变更按里程碑组织。每个里程碑对应 [开发路线](knowledge/maps/roadmap.md) 中的章节。
 
+## 0.5.0-beta.11 — 首发阻断修复候选
+
+- 后端 Service、Wails、CLI 的永久清理 Create / Approve / Dry Run / Execute 在数据库与文件副作用前默认拒绝，无普通参数、环境变量或通道开关。
+- 永久清理能力独立于隔离、还原和异常恢复；保留历史列表及既有恢复锁语义。
+- source-map-js 更新至 1.2.2，修复 GHSA-68fv-2mgg-jv7q；锁文件其余依赖保持不变。
+- beta.10 及全部历史 Tag、DMG、失败证据保留。本候选必须完成正式签名、公证、身份和 GUI 复验。
+- Release 保持 Draft，Public Beta BLOCKED；全新 Mac 离线首装暂缓但不豁免，不开放 Purge。
+
 ## 0.5.0-beta.10 — Restore 新审批闭环发行候选
 
 - 修复隔离项仍完整、旧 Restore 已安全回滚后，正式 GUI 无法创建新恢复草案的问题（Issue #75 / PR #77）。
