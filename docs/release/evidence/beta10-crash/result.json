@@ -1,0 +1,27 @@
+{
+  "RC": "c1941f84e2d1c836b57cd0750db1c2554ba6c4c9",
+  "UTC_start": "2026-10-11T06:01:40.153066+00:00",
+  "UTC_end": "2026-10-11T06:01:49.999276+00:00",
+  "toolchain": "go version go1.26.9 darwin/arm64",
+  "command": [
+    "go",
+    "test",
+    "-race",
+    "-count=1",
+    "-v",
+    "-run",
+    "^TestBeta10CrashBC|^TestRestoreRecoveryEvidenceMatrix$|^TestRestoreRecoveryDTOAndDurableLock$",
+    "./internal/app",
+    "./internal/adapters/wails"
+  ],
+  "exit_code": 0,
+  "frozen_files": 394,
+  "product_files_unchanged": true,
+  "carrier_SHA256": {
+    "internal/app/crash_bc_acceptance_test.go": "9a80918a4d4d0b9bd58cde0e3d8c77419016a5154bcf6f0c6d7d960e8ea19333",
+    "internal/adapters/wails/crash_bc_acceptance_test.go": "b255872411e288577e0e86a8be0413779a070304140c337b9a6e9769631bacf6"
+  },
+  "runner_SHA256": "a64f0421e96d7feae3ec757e705f4cdb83d5d4d1ccca413d49fae7248e1f33c4",
+  "log_SHA256": "2d11c774c018754650762e9b0db57e07c9802bec1c70856b257b50444557afac",
+  "injection": "test-only panic at real CAS/no-Journal and real completed MoveFile/durable done journal boundaries; adapter separately seeds explicit new test state"
+}
