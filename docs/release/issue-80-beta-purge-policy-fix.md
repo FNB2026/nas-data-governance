@@ -69,6 +69,7 @@ Security 38121604165 succeeded. Immutable beta.11 RC is
 `791f19119542e69b62ee62dd358fed188000837e`; formal Release 38122101720 succeeded.
 Actual Purge-disabled / Quarantine-Restore evidence and distribution/SBOM
 limits are recorded in [beta.11 formal acceptance](beta.11-formal-acceptance-go-no-go-2026-10-11.md).
-Fresh-Mac offline installation remains BLOCKED; broader privacy support scope
-has not been silently waived.
+Fresh-Mac offline installation remains BLOCKED. The user explicitly approved
+limited first-Beta support on 2026-10-11; broader privacy and unknown historical
+Purge recovery remain outside certified scope, not silently marked PASS.
 No public release authorization is implied by any source or test PASS.

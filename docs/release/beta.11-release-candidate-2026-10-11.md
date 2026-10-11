@@ -8,6 +8,12 @@ workflow 38122101720 SUCCESS。发行身份、实际 GUI 与限定日志证据�
 仍未关闭的门禁见 [beta.11 正式验收与 Go/No-Go](beta.11-formal-acceptance-go-no-go-2026-10-11.md)。
 下面保留版本准备时的要求；准备要求不等于全部发布门禁已通过。
 
+2026-10-11 后续用户批准首发限定支持契约：已验收功能、限定窗口日志隐私、
+人工独立源文件与数据库备份。不认证全系统、全进程持续负载隐私或未知历史
+Purge 恢复；不将这些证据缺口改为 PASS。全新 Mac 离线首装仍 BLOCKED，
+Release 仍 Draft，未授权公开发布。下文“完成后裁定支持范围”是准备阶段记录，
+当前裁定以上述正式 Go/No-Go 文档为准。
+
 本 PR 仅同步版本 0.5.0-beta.11 / Bundle build 11、CHANGELOG 和发行准备文档。
 最终 RC 必须是本版本 PR 合并后的 main SHA；不得用修复 PR 的 merge SHA
 代替正式发行身份。新 annotated Tag 与 Draft 签名资产不可覆盖 beta.10。
