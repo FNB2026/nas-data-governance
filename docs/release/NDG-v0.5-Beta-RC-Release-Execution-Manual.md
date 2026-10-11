@@ -1,3 +1,5 @@
+> 2026-10-11 状态校准：下文保留历史规划/执行记录，不作为当前发行状态。当前 beta.10 决策为 NO-GO，见[实时门禁表](beta.10-public-go-no-go-2026-10-11.md)。
+
 # NDG v0.5 Beta — RC / Release Execution & UI Final Polish 执行操作手册
 
 > 项目：NAS Data Governance（NDG）
