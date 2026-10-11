@@ -19,4 +19,4 @@
 
 最终 RC 为 `c1941f84e2d1c836b57cd0750db1c2554ba6c4c9`；版本 PR #78、annotated Tag、Release workflow `38090124629` 已完成，正式签名、公证、Gatekeeper、校验与 Draft 资产通过。
 
-正式 A/D 已完成限定实测；B/C 真实短窗口未冻结，永久保留 INCONCLUSIVE，另依用户明确批准补充冻结 RC 的确定性组合测试。详见 [正式与组合验收记录](beta.10-formal-artifact-crash-acceptance-2026-10-11.md)。当前等待最终独立复核/证据 PR 门禁；Issue #72 / #75 保持 OPEN，Public Beta BLOCKED，Release Draft，Purge NOT RUN。
+正式 A/D 已完成限定实测；B/C 真实短窗口未冻结，永久保留 INCONCLUSIVE，另依用户明确批准补充冻结 RC 的确定性组合测试。详见 [正式与组合验收记录](beta.10-formal-artifact-crash-acceptance-2026-10-11.md)。证据 PR #79 已合并到 `70de4667`，独立复核、CI/Security 与合并后门禁通过；Issue #72 / #75 CLOSED。限定 Crash Recovery PASS；正式 B/C INCONCLUSIVE 与 A 审计限制保留。Public Beta BLOCKED，Release Draft，Purge NOT RUN；实时门禁见 [Go/No-Go](beta.10-public-go-no-go-2026-10-11.md)。
