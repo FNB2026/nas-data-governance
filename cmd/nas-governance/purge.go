@@ -257,6 +257,9 @@ func runPurge(args []string) error {
 }
 
 func runPurgePlan(args []string) error {
+	if !app.PurgeReleaseAllowed() {
+		return app.ErrPurgeReleaseDisabled
+	}
 	fs := flag.NewFlagSet("purge plan", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite database (required)")
 	out := fs.String("out", "./var/purge-plan.json", "private DRAFT plan report")
@@ -285,6 +288,9 @@ func runPurgePlan(args []string) error {
 }
 
 func runPurgeApprove(args []string) error {
+	if !app.PurgeReleaseAllowed() {
+		return app.ErrPurgeReleaseDisabled
+	}
 	fs := flag.NewFlagSet("purge approve", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite database (required)")
 	planID := fs.String("plan-id", "", "exact purge plan ID (single item only)")
@@ -310,6 +316,9 @@ func runPurgeApprove(args []string) error {
 }
 
 func runPurgeExecute(args []string) error {
+	if !app.PurgeReleaseAllowed() {
+		return app.ErrPurgeReleaseDisabled
+	}
 	fs := flag.NewFlagSet("purge execute", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite database (required)")
 	planID := fs.String("plan-id", "", "exact approved purge plan ID")

@@ -16,7 +16,7 @@ export interface AppCapabilities {
   can_execute_purge: boolean;
   recovery_lock_active: boolean;
   /** Disabled route → human-readable reason shown in tooltip / sidebar. */
-  disabled_reasons: Partial<Record<AppRoute, string>>;
+  disabled_reasons: Partial<Record<AppRoute | "purge", string>>;
 }
 
 export function deriveCapabilities(opts: {
@@ -32,7 +32,7 @@ export function deriveCapabilities(opts: {
       ? "read_write"
       : "read_only";
 
-  const disabled_reasons: Partial<Record<AppRoute, string>> = {};
+  const disabled_reasons: Partial<Record<AppRoute | "purge", string>> = { purge: "当前发行版本禁止永久清理" };
 
   if (!projectOpen) {
     disabled_reasons["scan-jobs"] = "请先打开项目";
@@ -60,7 +60,7 @@ export function deriveCapabilities(opts: {
     can_edit_reviews: isReadWrite && !recoveryLock,
     can_approve_plans: isReadWrite && !recoveryLock,
     can_execute_quarantine: isReadWrite && !recoveryLock,
-    can_execute_purge: isReadWrite && !recoveryLock,
+    can_execute_purge: false,
     recovery_lock_active: recoveryLock,
     disabled_reasons,
   };

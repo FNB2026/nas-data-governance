@@ -62,7 +62,7 @@ func TestBeta10CrashBCAdapterContract(t *testing.T) {
 				t.Helper()
 				lock, e := a.CheckRecoveryLock()
 				caps, ce := a.GetAppCapabilities()
-				if e != nil || ce != nil || lock.LockActive != want || caps.RecoveryLockActive != want || caps.CanExecuteQuarantine == want || caps.CanScan == want || caps.CanEditReviews == want || caps.CanApprovePlans == want || caps.CanExecutePurge == want {
+				if e != nil || ce != nil || lock.LockActive != want || caps.RecoveryLockActive != want || caps.CanExecuteQuarantine == want || caps.CanScan == want || caps.CanEditReviews == want || caps.CanApprovePlans == want || caps.CanExecutePurge {
 					t.Fatal("adapter lock/capability mismatch")
 				}
 			}

@@ -1139,6 +1139,9 @@ func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse,
 // whose retention period has expired. Plans are persisted to the database.
 // Requires read-write mode.
 func (a *API) CreatePurgePlans() ([]PurgePlanDTO, error) {
+	if !app.PurgeReleaseAllowed() {
+		return nil, app.ErrPurgeReleaseDisabled
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -1180,6 +1183,9 @@ func (a *API) ListPurgePlans() ([]PurgePlanDTO, error) {
 // ApprovePurgePlan transitions a purge plan from DRAFT to APPROVED using
 // the plan's digest. Requires read-write mode.
 func (a *API) ApprovePurgePlan(planID, digest string) error {
+	if !app.PurgeReleaseAllowed() {
+		return app.ErrPurgeReleaseDisabled
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -1204,6 +1210,9 @@ func (a *API) ApprovePurgePlan(planID, digest string) error {
 // ExecutePurge executes an approved purge plan. When dry_run is true, only
 // validation is performed. Requires read-write mode.
 func (a *API) ExecutePurge(req ExecutePurgeRequest) (ExecutePurgeResponse, error) {
+	if !app.PurgeReleaseAllowed() {
+		return ExecutePurgeResponse{}, app.ErrPurgeReleaseDisabled
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1624,7 +1633,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		mode = "read_write"
 	}
 
-	disabled := map[string]string{}
+	disabled := map[string]string{"purge": "当前发行版本禁止永久清理；历史与异常恢复仍可查看"}
 	if !isRW {
 		disabled["execution-center"] = "只读模式，无法执行写操作"
 	}
@@ -1641,7 +1650,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		CanEditReviews:       isRW && !recoveryLock,
 		CanApprovePlans:      isRW && !recoveryLock,
 		CanExecuteQuarantine: isRW && !recoveryLock,
-		CanExecutePurge:      isRW && !recoveryLock,
+		CanExecutePurge:      isRW && !recoveryLock && app.PurgeReleaseAllowed(),
 		RecoveryLockActive:   recoveryLock,
 		DisabledReasons:      disabled,
 	}, nil

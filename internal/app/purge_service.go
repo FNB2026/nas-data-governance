@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -33,6 +34,34 @@ func NewPurgeService(st *store.SQLiteStore) *PurgeService {
 	return &PurgeService{store: st}
 }
 
+// PurgeReleaseAllowed is a compile-time, default-deny release policy.
+// No channel, UI argument, environment variable or service constructor enables it.
+// Historical listing and conservative recovery remain available.
+func PurgeReleaseAllowed() bool { return false }
+
+var ErrPurgeReleaseDisabled = errors.New("purge disabled by release policy")
+
+func (s *PurgeService) CreatePlans(ctx context.Context) ([]domain.PurgePlan, error) {
+	if !PurgeReleaseAllowed() {
+		return nil, ErrPurgeReleaseDisabled
+	}
+	return s.createPlans(ctx)
+}
+
+func (s *PurgeService) ApprovePlan(ctx context.Context, planID, digest string) error {
+	if !PurgeReleaseAllowed() {
+		return ErrPurgeReleaseDisabled
+	}
+	return s.approvePlan(ctx, planID, digest)
+}
+
+func (s *PurgeService) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (*PurgeExecuteResult, error) {
+	if !PurgeReleaseAllowed() {
+		return nil, ErrPurgeReleaseDisabled
+	}
+	return s.executePurge(ctx, in)
+}
+
 // ListPlans returns all durable purge plans.
 func (s *PurgeService) ListPlans(ctx context.Context) ([]domain.PurgePlan, error) {
 	return s.store.ListPurgePlans(ctx)
@@ -47,7 +76,7 @@ func PurgeConfirmationText(plan domain.PurgePlan) string {
 // CreatePlans builds DRAFT purge plans for all purge-eligible quarantine
 // items. This is a read-only operation: no filesystem writes occur. Plans
 // are persisted to the database and returned for CLI to write to a file.
-func (s *PurgeService) CreatePlans(ctx context.Context) ([]domain.PurgePlan, error) {
+func (s *PurgeService) createPlans(ctx context.Context) ([]domain.PurgePlan, error) {
 	now := time.Now().UTC()
 	items, err := s.store.ListPurgeCandidates(ctx, now)
 	if err != nil {
@@ -64,7 +93,7 @@ func (s *PurgeService) CreatePlans(ctx context.Context) ([]domain.PurgePlan, err
 
 // ApprovePlan transitions a DRAFT purge plan to APPROVED using the digest
 // from the private DRAFT plan file. This is a database-only operation.
-func (s *PurgeService) ApprovePlan(ctx context.Context, planID, digest string) error {
+func (s *PurgeService) approvePlan(ctx context.Context, planID, digest string) error {
 	if planID == "" || digest == "" {
 		return fmt.Errorf("app: ApprovePlan: plan-id and digest are required")
 	}
@@ -96,7 +125,7 @@ type PurgeExecuteResult struct {
 // The digest is verified again at execution time to prevent replay attacks.
 // Purge is restricted to item-by-item permanent deletion within the managed
 // quarantine area.
-func (s *PurgeService) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (*PurgeExecuteResult, error) {
+func (s *PurgeService) executePurge(ctx context.Context, in PurgeExecuteInput) (*PurgeExecuteResult, error) {
 	if in.PlanID == "" || in.Digest == "" || in.QuarantineRoot == "" {
 		return nil, fmt.Errorf("app: ExecutePurge: plan-id, digest, and quarantine are required")
 	}

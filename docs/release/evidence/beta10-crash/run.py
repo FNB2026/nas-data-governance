@@ -10,13 +10,13 @@ import hashlib
 import io
 import json
 import pathlib
-import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 
 RC = "c1941f84e2d1c836b57cd0750db1c2554ba6c4c9"
+CARRIER_REV = "70de4667a3f73719f7ac885da41f6c0cdba22c35"
 REPO = pathlib.Path(__file__).resolve().parents[4]
 OUT = pathlib.Path(sys.argv[1]).resolve()
 OUT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -37,7 +37,8 @@ carriers = ["internal/app/crash_bc_acceptance_test.go",
             "internal/adapters/wails/crash_bc_acceptance_test.go"]
 hashes = {}
 for name in carriers:
-    shutil.copyfile(REPO / name, ROOT / name)
+    # Preserve the original approved beta.10 carrier independently of future tests.
+    (ROOT / name).write_bytes(subprocess.check_output(["git", "show", CARRIER_REV + ":" + name], cwd=REPO))
     hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
 start = datetime.datetime.now(datetime.timezone.utc).isoformat()
 toolchain = subprocess.check_output(["go", "version"], cwd=ROOT, text=True).strip()

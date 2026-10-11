@@ -427,7 +427,7 @@ func TestPurgeService_CreatePlans_NoEligibleItems(t *testing.T) {
 	// Seed an item that is NOT purge-eligible (retainUntil is in the future).
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "a.dat", now, now.Add(30*24*time.Hour))
 
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatalf("create plans: %v", err)
@@ -449,7 +449,7 @@ func TestPurgeService_CreatePlans_WithEligibleItem(t *testing.T) {
 	item := seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
 
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatalf("create plans: %v", err)
@@ -479,7 +479,7 @@ func TestPurgeService_CreatePlans_NoDuplicatePlans(t *testing.T) {
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
 
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	// First call should create 1 plan.
 	plans1, err := svc.CreatePlans(context.Background())
 	if err != nil {
@@ -510,7 +510,7 @@ func TestPurgeService_ApprovePlan(t *testing.T) {
 	now := time.Now().UTC()
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -522,7 +522,7 @@ func TestPurgeService_ApprovePlan(t *testing.T) {
 
 func TestPurgeService_ApprovePlan_EmptyInputs(t *testing.T) {
 	st := openTestStore(t)
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	if err := svc.ApprovePlan(context.Background(), "", "digest"); err == nil {
 		t.Fatal("expected error for empty plan ID")
 	}
@@ -541,7 +541,7 @@ func TestPurgeService_ApprovePlan_WrongDigest(t *testing.T) {
 	now := time.Now().UTC()
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -563,7 +563,7 @@ func TestPurgeService_ExecutePurge_DryRun(t *testing.T) {
 	now := time.Now().UTC()
 	item := seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -607,7 +607,7 @@ func TestPurgeService_ExecutePurge_RealExecution(t *testing.T) {
 	now := time.Now().UTC()
 	item := seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -652,7 +652,7 @@ func TestPurgeService_ExecutePurge_RequiresDryRunAndConfirmation(t *testing.T) {
 	now := time.Now().UTC()
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -686,7 +686,7 @@ func TestPurgeService_ExecutePurge_WrongDigest(t *testing.T) {
 	now := time.Now().UTC()
 	seedQuarantineItem(t, st, sourceRoot, qRoot, "purge.dat",
 		now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	plans, err := svc.CreatePlans(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -707,7 +707,7 @@ func TestPurgeService_ExecutePurge_WrongDigest(t *testing.T) {
 
 func TestPurgeService_ExecutePurge_MissingInputs(t *testing.T) {
 	st := openTestStore(t)
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	// All required fields missing.
 	_, err := svc.ExecutePurge(context.Background(), PurgeExecuteInput{})
 	if err == nil {
@@ -730,7 +730,7 @@ func TestPurgeService_RecoverPurges_EmptyDB(t *testing.T) {
 	qRoot := filepath.Join(tmp, "quarantine")
 	os.MkdirAll(qRoot, 0o700)
 	st := openTestStore(t)
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	results, err := svc.RecoverPurges(context.Background(), qRoot)
 	if err != nil {
 		t.Fatalf("recover on empty DB: %v", err)
@@ -742,9 +742,25 @@ func TestPurgeService_RecoverPurges_EmptyDB(t *testing.T) {
 
 func TestPurgeService_RecoverPurges_EmptyQuarantineRoot(t *testing.T) {
 	st := openTestStore(t)
-	svc := NewPurgeService(st)
+	svc := newPurgeLifecycleFixture(st)
 	_, err := svc.RecoverPurges(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty quarantine root")
 	}
+}
+
+// Test-only access to legacy lifecycle internals; never enables a production service.
+type purgeLifecycleFixture struct{ *PurgeService }
+
+func newPurgeLifecycleFixture(st *store.SQLiteStore) *purgeLifecycleFixture {
+	return &purgeLifecycleFixture{NewPurgeService(st)}
+}
+func (s *purgeLifecycleFixture) CreatePlans(ctx context.Context) ([]domain.PurgePlan, error) {
+	return s.createPlans(ctx)
+}
+func (s *purgeLifecycleFixture) ApprovePlan(ctx context.Context, id, digest string) error {
+	return s.approvePlan(ctx, id, digest)
+}
+func (s *purgeLifecycleFixture) ExecutePurge(ctx context.Context, in PurgeExecuteInput) (*PurgeExecuteResult, error) {
+	return s.executePurge(ctx, in)
 }
