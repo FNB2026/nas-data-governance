@@ -1,5 +1,8 @@
 # NDG v0.5 发布门槛清单
 
+> 历史快照：下列状态只代表 2026-07-30 基线，不能作为当前发行状态。
+> beta.11 实时裁定见 [正式验收与 Go/No-Go](beta.11-formal-acceptance-go-no-go-2026-10-11.md)。
+
 > 基于 `readiness-audit-v0.5.md` 审计结果
 > 审计日期：2026-07-30
 > 基线：`origin/main` = `1bc0959a846336f9e333fe078679199387cc60f0`

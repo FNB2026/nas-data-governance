@@ -56,12 +56,19 @@ version/public/release gates PASS. Exact-head CI 38120717063 and Security
 38120717070 succeeded. Merged as `f0a7c107c3253746e4f9e955ee98dcfa1d5ac176`;
 main CI 38120923212 and Security 38120924183 succeeded.
 
-The old beta.10 DMG is unchanged. Dependency remediation belongs to the next
-candidate and must be verified in its SBOM and formal artifact identity.
+The old beta.10 DMG is unchanged. Dependency remediation belongs to beta.11.
+The formal SBOMs cover Go only, so npm remediation is verified through the
+frozen lockfile, fresh install/audit and formal build identity, not claimed as
+an npm SBOM receipt.
 
 ## Remaining gates
 
-Independent exact-head review, CI/Security, merge/post-merge checks, immutable
-beta.11 version/RC/sign/notarize/staple/Gatekeeper/DMG/checksum/SBOM and official
-GUI Purge-disabled / Quarantine-Restore regression are pending for this fix.
+PR #82 exact independent review and CI/Security passed and merged as
+`f599cf764641ff970293d1ea46c40c64c8785f0b`; post-merge CI 38121602451 and
+Security 38121604165 succeeded. Immutable beta.11 RC is
+`791f19119542e69b62ee62dd358fed188000837e`; formal Release 38122101720 succeeded.
+Actual Purge-disabled / Quarantine-Restore evidence and distribution/SBOM
+limits are recorded in [beta.11 formal acceptance](beta.11-formal-acceptance-go-no-go-2026-10-11.md).
+Fresh-Mac offline installation remains BLOCKED; broader privacy support scope
+has not been silently waived.
 No public release authorization is implied by any source or test PASS.

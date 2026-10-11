@@ -1,5 +1,13 @@
 # beta.11 首发阻断修复候选准备 — 2026-10-11
 
+## 后续冻结与正式验证
+
+版本 PR #83 已合并，最终 RC 为 `791f19119542e69b62ee62dd358fed188000837e`。
+新的 annotated `v0.5.0-beta.11` 和签名 Draft 资产已生成；正式 Release
+workflow 38122101720 SUCCESS。发行身份、实际 GUI 与限定日志证据及
+仍未关闭的门禁见 [beta.11 正式验收与 Go/No-Go](beta.11-formal-acceptance-go-no-go-2026-10-11.md)。
+下面保留版本准备时的要求；准备要求不等于全部发布门禁已通过。
+
 本 PR 仅同步版本 0.5.0-beta.11 / Bundle build 11、CHANGELOG 和发行准备文档。
 最终 RC 必须是本版本 PR 合并后的 main SHA；不得用修复 PR 的 merge SHA
 代替正式发行身份。新 annotated Tag 与 Draft 签名资产不可覆盖 beta.10。
