@@ -1,0 +1,196 @@
+{
+  "RC": "c1941f84e2d1c836b57cd0750db1c2554ba6c4c9",
+  "formal": {
+    "A": "PASS limited pending-output protection; no durable rejection audit claim",
+    "B": "INCONCLUSIVE frozen predicate missed",
+    "C": "INCONCLUSIVE frozen predicate missed",
+    "D": "PASS limited safe reconciliation + new GUI approval + Restore"
+  },
+  "combination_contract": "Human approved for beta.10 B/C only; formal B/C restrictions permanent",
+  "continuous_log": {
+    "start": "2026-10-10T22:12:10.516540+00:00",
+    "end": {
+      "end": "2026-10-11T00:12:16.183200+00:00",
+      "intentional_stop": false,
+      "log_exit": 0,
+      "segments": [
+        {
+          "pid": 21926,
+          "start": "2026-10-10T22:12:10.534918+00:00",
+          "index": 0
+        },
+        {
+          "pid": 25776,
+          "start": "2026-10-10T22:15:48.720567+00:00",
+          "index": 1
+        },
+        {
+          "pid": 26617,
+          "start": "2026-10-10T22:16:36.116995+00:00",
+          "index": 2
+        },
+        {
+          "pid": 38891,
+          "start": "2026-10-10T22:20:37.892032+00:00",
+          "index": 3
+        }
+      ]
+    },
+    "health_samples": 14303,
+    "all_health_log_alive": true,
+    "max_health_gap_s": 0.52452,
+    "duration_seconds": 7205.66666,
+    "markers": 67,
+    "variants": 169,
+    "surfaces": {
+      "app-0-stderr.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-0-stdout.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-1-stderr.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-1-stdout.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-2-stderr.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-2-stdout.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-3-stderr.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "app-3-stdout.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "log-stderr.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "unified.ndjson": {
+        "bytes": 126207491,
+        "sha256": "b5f15ee9d15d0d46fc01585c1dec1ff37d834e5de9428d895f9f25ee74be14a8",
+        "matched_variants": 0,
+        "occurrences": 0
+      }
+    },
+    "unified_json_events": 124836,
+    "non_json_lines": 1,
+    "selected_process_counts": {
+      "NDG": 115499,
+      "com.apple.WebKit.GPU": 4864,
+      "com.apple.WebKit.Networking": 2444,
+      "nsattributedstringagent": 622,
+      "softwareupdated": 20,
+      "WeType": 48,
+      "Finder": 20,
+      "UURemote": 20,
+      "Electron": 195,
+      "MarkEdit": 796,
+      "PreviewExtension": 307,
+      "unknown": 1
+    },
+    "limitations": [
+      "selected App/WebKit predicate only",
+      "PID switches explicitly recorded",
+      "raw GUI input fields and operational DB intentionally contain private paths; not ordinary logs",
+      "no full-system or long-duration privacy claim"
+    ],
+    "unified_log_events": 124835,
+    "unified_end_records": 1,
+    "unified_json_objects": 124836,
+    "counting_note": "legacy unified_json_events field counts JSON objects, including the end record"
+  },
+  "event_privacy": {
+    "D": {
+      "job_events": {
+        "rows": 11,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "operation_logs": {
+        "rows": 7,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "closed_immutable_read": true,
+      "read_db_hash_unchanged": true
+    },
+    "A": {
+      "job_events": {
+        "rows": 11,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "operation_logs": {
+        "rows": 0,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "closed_immutable_read": true,
+      "read_db_hash_unchanged": true
+    },
+    "B": {
+      "job_events": {
+        "rows": 11,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "operation_logs": {
+        "rows": 3,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "closed_immutable_read": true,
+      "read_db_hash_unchanged": true
+    },
+    "C": {
+      "job_events": {
+        "rows": 11,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "operation_logs": {
+        "rows": 3,
+        "matched_variants": 0,
+        "occurrences": 0
+      },
+      "closed_immutable_read": false,
+      "read_db_hash_unchanged": true
+    }
+  },
+  "overall": "PASS limited Crash Recovery Gate under human-approved combination contract; evidence PR CI/merge gates pending",
+  "public_beta": "BLOCKED",
+  "release": "Draft",
+  "independent_review": "APPROVE code, boundaries, actual output, 394 frozen-file SHA, A/D evidence, privacy; A audit0 and formal B/C INCONCLUSIVE permanent"
+}

@@ -1,0 +1,83 @@
+=== RUN   TestBeta10CrashBCCombinationContract
+=== RUN   TestBeta10CrashBCCombinationContract/B_none
+    crash_bc_acceptance_test.go:314: boundary=B state=DRAFT audit=approval_invalidated lock=clear SHA256=matched old_approval=rejected restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/B_audit
+    crash_bc_acceptance_test.go:263: fault=audit classification=skipped lock=retained audit=uncommitted restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/B_state
+    crash_bc_acceptance_test.go:263: fault=state classification=skipped lock=retained audit=uncommitted restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/C_none
+    crash_bc_acceptance_test.go:314: boundary=C state=ROLLED_BACK audit=recovery lock=clear SHA256=matched old_approval=rejected restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/C_audit
+    crash_bc_acceptance_test.go:263: fault=audit classification=skipped lock=retained audit=uncommitted restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/C_journal
+    crash_bc_acceptance_test.go:263: fault=journal classification=skipped lock=retained audit=uncommitted restart=verified
+=== RUN   TestBeta10CrashBCCombinationContract/C_changed
+    crash_bc_acceptance_test.go:263: fault=changed classification=skipped lock=retained audit=uncommitted restart=verified
+--- PASS: TestBeta10CrashBCCombinationContract (1.78s)
+    --- PASS: TestBeta10CrashBCCombinationContract/B_none (0.25s)
+    --- PASS: TestBeta10CrashBCCombinationContract/B_audit (0.26s)
+    --- PASS: TestBeta10CrashBCCombinationContract/B_state (0.26s)
+    --- PASS: TestBeta10CrashBCCombinationContract/C_none (0.25s)
+    --- PASS: TestBeta10CrashBCCombinationContract/C_audit (0.26s)
+    --- PASS: TestBeta10CrashBCCombinationContract/C_journal (0.26s)
+    --- PASS: TestBeta10CrashBCCombinationContract/C_changed (0.25s)
+=== RUN   TestRestoreRecoveryEvidenceMatrix
+=== RUN   TestRestoreRecoveryEvidenceMatrix/absent_target
+=== RUN   TestRestoreRecoveryEvidenceMatrix/partial
+=== RUN   TestRestoreRecoveryEvidenceMatrix/changed_same_size
+=== RUN   TestRestoreRecoveryEvidenceMatrix/both_full
+=== RUN   TestRestoreRecoveryEvidenceMatrix/only_target
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_changed
+=== RUN   TestRestoreRecoveryEvidenceMatrix/both_absent
+=== RUN   TestRestoreRecoveryEvidenceMatrix/target_directory
+=== RUN   TestRestoreRecoveryEvidenceMatrix/target_unreadable
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_unreadable
+=== RUN   TestRestoreRecoveryEvidenceMatrix/target_symlink
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_symlink
+=== RUN   TestRestoreRecoveryEvidenceMatrix/source_root_symlink
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_root_symlink
+=== RUN   TestRestoreRecoveryEvidenceMatrix/source_root_missing
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_root_missing
+=== RUN   TestRestoreRecoveryEvidenceMatrix/source_root_unreadable
+=== RUN   TestRestoreRecoveryEvidenceMatrix/q_root_unreadable
+=== RUN   TestRestoreRecoveryEvidenceMatrix/out_of_scope
+--- PASS: TestRestoreRecoveryEvidenceMatrix (4.26s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/absent_target (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/partial (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/changed_same_size (0.23s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/both_full (0.25s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/only_target (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_changed (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/both_absent (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/target_directory (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/target_unreadable (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_unreadable (0.23s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/target_symlink (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_symlink (0.23s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/source_root_symlink (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_root_symlink (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/source_root_missing (0.21s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_root_missing (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/source_root_unreadable (0.22s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/q_root_unreadable (0.23s)
+    --- PASS: TestRestoreRecoveryEvidenceMatrix/out_of_scope (0.22s)
+PASS
+ok  	github.com/FNB2026/nas-data-governance/internal/app	8.108s
+=== RUN   TestBeta10CrashBCAdapterContract
+=== RUN   TestBeta10CrashBCAdapterContract/B
+    crash_bc_acceptance_test.go:148: mode=B DTO=reset_to_draft restarted_lock=false audit_rows=1
+=== RUN   TestBeta10CrashBCAdapterContract/C
+    crash_bc_acceptance_test.go:148: mode=C DTO=rolled_back restarted_lock=false audit_rows=1
+=== RUN   TestBeta10CrashBCAdapterContract/B_audit_failure
+    crash_bc_acceptance_test.go:148: mode=B_audit_failure DTO=skipped restarted_lock=true audit_rows=0
+=== RUN   TestBeta10CrashBCAdapterContract/C_audit_failure
+    crash_bc_acceptance_test.go:148: mode=C_audit_failure DTO=skipped restarted_lock=true audit_rows=0
+--- PASS: TestBeta10CrashBCAdapterContract (1.05s)
+    --- PASS: TestBeta10CrashBCAdapterContract/B (0.24s)
+    --- PASS: TestBeta10CrashBCAdapterContract/C (0.26s)
+    --- PASS: TestBeta10CrashBCAdapterContract/B_audit_failure (0.26s)
+    --- PASS: TestBeta10CrashBCAdapterContract/C_audit_failure (0.28s)
+=== RUN   TestRestoreRecoveryDTOAndDurableLock
+--- PASS: TestRestoreRecoveryDTOAndDurableLock (0.23s)
+PASS
+ok  	github.com/FNB2026/nas-data-governance/internal/adapters/wails	2.868s
