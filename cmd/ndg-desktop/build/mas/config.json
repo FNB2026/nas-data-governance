@@ -1,0 +1,13 @@
+{
+  "status": "phase0-design-only-not-distributable",
+  "proposedBundleID": "com.fnb.ndg.mas",
+  "registeredAppID": false,
+  "entitlements": "entitlements-readonly.plist",
+  "profileDestination": "Contents/embedded.provisionprofile",
+  "applicationSigning": "Mac App Store application distribution identity required",
+  "packageSigning": "Mac Installer Distribution identity required",
+  "uploadEnabled": false,
+  "sourceAccess": "native picker + app-scoped read-only bookmarks + job leases",
+  "writesEnabled": false,
+  "purgeEnabled": false
+}

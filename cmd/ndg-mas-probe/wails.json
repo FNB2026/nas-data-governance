@@ -1,0 +1,11 @@
+{
+  "name": "NDG MAS Probe",
+  "outputfilename": "NDG MAS Probe",
+  "frontend:install": "",
+  "frontend:build": "",
+  "info": {
+    "productName": "NDG MAS Phase 0",
+    "productVersion": "0.0.1",
+    "companyName": "NDG"
+  }
+}
