@@ -77,7 +77,7 @@ func TestRestoreRecoveryCrashContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == "both" || mode == "neither" {
+			if mode != "quarantine_only" {
 				if results[0].Status != executor.StepFailed || results[0].ErrorType == "" || actual.State != domain.RestoreApproved || len(pending) != 1 {
 					t.Fatal("uncertain restore released lock or reported success")
 				}
@@ -94,12 +94,7 @@ func TestRestoreRecoveryCrashContract(t *testing.T) {
 				if err != nil || got.Hash != item.ContentSHA256 || got.Size != item.FileSize {
 					t.Fatal("quarantine rollback lost bytes")
 				}
-				if mode == "partial_destination" {
-					got, _ := os.ReadFile(item.SourcePath)
-					if string(got) != "partial" {
-						t.Fatal("partial destination deleted without authority")
-					}
-				} else if _, err := os.Stat(item.SourcePath); !os.IsNotExist(err) {
+				if _, err := os.Stat(item.SourcePath); !os.IsNotExist(err) {
 					t.Fatal("unexpected restored duplicate")
 				}
 			}

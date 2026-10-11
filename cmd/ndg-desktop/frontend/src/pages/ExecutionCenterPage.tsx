@@ -1,7 +1,7 @@
 // Execution center page: quarantine lifecycle, purge management, and crash recovery.
 // V7 wiring — connects QuarantineService, PurgeService, and RecoveryService.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProject } from "../state/ProjectContext";
 import { hasWailsRuntime, formatBytes, shortHash, formatDateTime } from "../lib/utils";
 import { recoveryFeedback, RECOVERY_REQUEST_FAILED } from "../lib/recoveryFeedback";
@@ -97,6 +97,9 @@ export default function ExecutionCenterPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
 
   // Restore workflow
+  const [restorePlansReady, setRestorePlansReady] = useState(false);
+  const lifecycleRequest = useRef(0);
+  const lifecycleReadyRequest = useRef(0);
   const [restorePlans, setRestorePlans] = useState<wails.RestorePlanDTO[]>([]);
   const [restoreRoot, setRestoreRoot] = useState("");
   const [restoreSourceRoots, setRestoreSourceRoots] = useState("");
@@ -146,12 +149,18 @@ export default function ExecutionCenterPage() {
 
   const loadLifecyclePlans = useCallback(async () => {
     if (!hasWailsRuntime()) return;
+    const request = ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     try {
       const [restores, purges] = await Promise.all([api.execution.listRestores(), api.execution.listPurges()]);
+      if (request !== lifecycleRequest.current) return;
       setRestorePlans(restores || []);
       setPurgePlans(purges || []);
+      lifecycleReadyRequest.current = request;
+      setRestorePlansReady(true);
     } catch (e: unknown) {
-      setPurgeError((e as Error).message);
+      if (request !== lifecycleRequest.current) return;
+      setPurgeError("恢复与清理计划读取失败，请刷新后人工核对");
     }
   }, []);
 
@@ -263,22 +272,36 @@ export default function ExecutionCenterPage() {
   // ---- Quarantine actions ----
 
   const handleCreateRestorePlan = async (itemId: string) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     setRestoring(true);
     try {
       const plan = await api.execution.createRestorePlan(itemId);
       setRestorePlans((prev) => {
-        const next = prev.filter((p) => p.item_id !== itemId);
+        const next = prev.filter((p) => p.id !== plan.id);
         return [...next, plan];
       });
       pushToast("success", "恢复草案已创建", `计划 ${plan.id}`);
     } catch (e: unknown) {
       pushToast("error", "创建恢复计划失败", (e as Error).message);
     } finally {
+      await loadLifecyclePlans();
       setRestoring(false);
     }
   };
 
   const handleApproveRestore = async (planId: string, digest: string) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
+    setRestoring(true);
     try {
       await api.execution.approveRestore(planId, digest);
       setRestorePlans((prev) =>
@@ -287,10 +310,19 @@ export default function ExecutionCenterPage() {
       pushToast("success", "恢复计划已批准", planId);
     } catch (e: unknown) {
       pushToast("error", "批准失败", (e as Error).message);
+    } finally {
+      await loadLifecyclePlans();
+      setRestoring(false);
     }
   };
 
   const handleExecuteRestore = async (planId: string, digest: string, dryRun: boolean) => {
+    if (!restorePlansReady || lifecycleReadyRequest.current !== lifecycleRequest.current) {
+      pushToast("error", "恢复操作已阻止", "恢复状态尚未确认，请刷新后人工核对");
+      return;
+    }
+    ++lifecycleRequest.current;
+    setRestorePlansReady(false);
     setRestoring(true);
     try {
       const result = await api.execution.executeRestore({
@@ -305,10 +337,11 @@ export default function ExecutionCenterPage() {
       } else {
         pushToast("error", dryRun ? "校验失败" : "恢复执行失败", result.error || result.error_type || planId);
       }
-      await Promise.all([loadQuarantine(), loadLifecyclePlans()]);
+      await loadQuarantine();
     } catch (e: unknown) {
       pushToast("error", "执行恢复失败", (e as Error).message);
     } finally {
+      await loadLifecyclePlans();
       setRestoring(false);
     }
   };
@@ -638,7 +671,7 @@ export default function ExecutionCenterPage() {
                 <option key={s} value={s}>{label}</option>
               ))}
             </select>
-            <button className="btn-sm secondary" onClick={() => void loadQuarantine()} disabled={quarantineLoading}>
+            <button className="btn-sm secondary" onClick={() => void Promise.all([loadQuarantine(), loadLifecyclePlans()])} disabled={quarantineLoading || restoring}>
               {quarantineLoading ? "加载中…" : "刷新"}
             </button>
             {isReadWrite && (
@@ -690,7 +723,15 @@ export default function ExecutionCenterPage() {
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => {
-                    const restorePlan = restorePlans.find((p) => p.item_id === item.id);
+                    const itemRestores = restorePlans.filter((p) => p.item_id === item.id);
+                    // A verified rollback invalidates approval but leaves the item available
+                    // for a new plan. Never select a historical approval by list order.
+                    const unresolvedRestores = itemRestores.filter((p) => p.state !== "ROLLED_BACK");
+                    const restorePlan = unresolvedRestores.length === 1
+                      ? unresolvedRestores[0]
+                      : unresolvedRestores.length === 0 ? itemRestores[0] : undefined;
+                    const canCreateRestore = restorePlansReady && item.status === "QUARANTINED" && unresolvedRestores.length === 0;
+                    const restoreWriteDisabled = !restorePlansReady || restoring || execWriteDisabled || item.status !== "QUARANTINED";
                     return (
                       <tr key={item.id}>
                         <td className="mono">
@@ -711,7 +752,7 @@ export default function ExecutionCenterPage() {
                         <td>{formatDateTime(item.retain_until)}</td>
                         {isReadWrite && (
                           <td>
-                            {item.status === "QUARANTINED" && !restorePlan && (
+                            {canCreateRestore && (
                               <button
                                 className="btn-sm"
                                 onClick={() => void handleCreateRestorePlan(item.id)}
@@ -719,6 +760,10 @@ export default function ExecutionCenterPage() {
                               >
                                 创建恢复草案
                               </button>
+                            )}
+                            {!restorePlansReady && <span>恢复状态尚未确认，请刷新后人工核对</span>}
+                            {unresolvedRestores.length > 1 && (
+                              <span>恢复状态存在冲突，请人工核对</span>
                             )}
                             {restorePlan && (
                               <div className="exec-plan-actions">
@@ -729,7 +774,7 @@ export default function ExecutionCenterPage() {
                                   <button
                                     className="btn-sm"
                                     onClick={() => void handleApproveRestore(restorePlan.id, restorePlan.approval_digest)}
-                                    disabled={execWriteDisabled}
+                                    disabled={restoreWriteDisabled}
                                   >
                                     批准
                                   </button>
@@ -739,14 +784,14 @@ export default function ExecutionCenterPage() {
                                     <button
                                       className="btn-sm secondary"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, true)}
-                                      disabled={restoring || execWriteDisabled}
+                                      disabled={restoreWriteDisabled}
                                     >
                                       试运行
                                     </button>
                                     <button
                                       className="btn-sm"
                                       onClick={() => void handleExecuteRestore(restorePlan.id, restorePlan.approval_digest, false)}
-                                      disabled={restoring || execWriteDisabled}
+                                      disabled={restoreWriteDisabled}
                                     >
                                       执行
                                     </button>

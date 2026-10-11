@@ -113,22 +113,33 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, plan *domain.Resto
 		return result
 	}
 	if err := MoveFile(item.QuarantinePath, item.SourcePath, item.ContentSHA256); err != nil {
-		_ = e.store.MarkRestoreRolledBack(ctx, plan.ID, e.now().UTC())
-		plan.State = domain.RestoreRolledBack
 		result.Err, result.ErrorType, result.Status = errActionFailed, "restore_move_failed", StepFailed
+		// A failed move is not proof of rollback. Preserve pending unless the
+		// complete quarantine and confirmed absent destination are reverified.
+		entry := domain.RestoreJournalEntry{PlanID: plan.ID, QuarantinePath: item.QuarantinePath, RestorePath: item.SourcePath, ContentSHA256: item.ContentSHA256, FileSize: item.FileSize}
+		rollback := e.reconcileRestore(ctx, entry)
+		if rollback.Status == StepOK {
+			plan.State = domain.RestoreRolledBack
+		} else {
+			result.ErrorType = rollback.ErrorType
+		}
 		result.FinalState = plan.State
 		return result
 	}
 	completedAt := e.now().UTC()
 	if err := e.store.MarkRestoreCompleted(ctx, plan.ID, item.ID, completedAt); err != nil {
-		rollbackErr := MoveFile(item.SourcePath, item.QuarantinePath, item.ContentSHA256)
-		_ = e.store.MarkRestoreRolledBack(ctx, plan.ID, e.now().UTC())
-		plan.State = domain.RestoreRolledBack
+		// Completion persistence failed after the filesystem move. There is
+		// no durable destination identity authorizing its deletion/move back.
+		// Leave the journal pending and full destination intact for review.
 		result.Err, result.ErrorType, result.Status = errActionFailed, "journal_complete_failed", StepFailed
-		if rollbackErr != nil {
-			result.ErrorType = "restore_rollback_failed"
-		}
 		result.FinalState = plan.State
+		if audit, ok := e.store.(interface {
+			RecordRestoreBlocked(context.Context, string, string, time.Time) error
+		}); ok {
+			if audit.RecordRestoreBlocked(ctx, plan.ID, "journal_complete_failed", e.now().UTC()) != nil {
+				result.ErrorType = "recovery_audit_failed"
+			}
+		}
 		return result
 	}
 	plan.State, plan.RestoredAt = domain.RestoreCompleted, &completedAt
@@ -137,55 +148,60 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, plan *domain.Resto
 	return result
 }
 
-// RecoverRestores rolls incomplete restores back into managed quarantine.
+// RecoverRestores reconciles only a proven unchanged pre-operation state.
+// Unknown output identity is never authority to delete or move either file.
 func (e *RestoreExecutor) RecoverRestores(ctx context.Context) []RestoreResult {
 	entries, err := e.store.ListPendingRestores(ctx)
 	if err != nil {
-		return []RestoreResult{{Status: StepFailed, ErrorType: "journal_read_failed", Err: err}}
+		return []RestoreResult{{Status: StepFailed, ErrorType: "journal_read_failed", Err: errActionFailed}}
 	}
 	results := make([]RestoreResult, 0, len(entries))
 	for _, entry := range entries {
-		result := RestoreResult{PlanID: entry.PlanID, Status: StepFailed}
-		if _, ok := rootFor(entry.QuarantinePath, []string{e.quarantineRoot}); !ok {
-			result.ErrorType, result.Err = "scope_validation_failed", errOutOfScope
-			results = append(results, result)
-			continue
-		}
-		if _, ok := rootFor(entry.RestorePath, e.sourceRoots); !ok {
-			result.ErrorType, result.Err = "scope_validation_failed", errOutOfScope
-			results = append(results, result)
-			continue
-		}
-		qSnapshot, qErr := Snapshot(entry.QuarantinePath, true)
-		rSnapshot, rErr := Snapshot(entry.RestorePath, true)
-		qMatches := qErr == nil && qSnapshot.Size == entry.FileSize && qSnapshot.Hash == entry.ContentSHA256
-		rMatches := rErr == nil && rSnapshot.Size == entry.FileSize && rSnapshot.Hash == entry.ContentSHA256
-		switch {
-		case qMatches && !rMatches:
-			// No completed move survived.
-		case !qMatches && rMatches:
-			if err := MoveFile(entry.RestorePath, entry.QuarantinePath, entry.ContentSHA256); err != nil {
-				result.ErrorType, result.Err = "rollback_failed", errActionFailed
-				results = append(results, result)
-				continue
-			}
-		case qMatches && rMatches:
-			// Identical content is not authority to delete either instance.
-			// A user may have recreated the destination after the crash.
-			result.ErrorType, result.Err = "ambiguous_duplicate_state", errActionFailed
-			results = append(results, result)
-			continue
-		default:
-			result.ErrorType, result.Err = "ambiguous_recovery_state", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		if err := e.store.MarkRestoreRolledBack(ctx, entry.PlanID, e.now().UTC()); err != nil {
-			result.ErrorType, result.Err = "journal_rollback_failed", err
-		} else {
-			result.Status, result.FinalState = StepOK, domain.RestoreRolledBack
-		}
-		results = append(results, result)
+		results = append(results, e.reconcileRestore(ctx, entry))
 	}
 	return results
+}
+
+func (e *RestoreExecutor) reconcileRestore(ctx context.Context, entry domain.RestoreJournalEntry) RestoreResult {
+	result := RestoreResult{PlanID: entry.PlanID, FinalState: domain.RestoreApproved, Status: StepFailed}
+	blocked := func(kind string) RestoreResult {
+		result.ErrorType, result.Err = kind, errActionFailed
+		if audit, ok := e.store.(interface {
+			RecordRestoreBlocked(context.Context, string, string, time.Time) error
+		}); ok {
+			if err := audit.RecordRestoreBlocked(ctx, entry.PlanID, kind, e.now().UTC()); err != nil {
+				result.ErrorType = "recovery_audit_failed"
+			}
+		}
+		return result
+	}
+	if ctx.Err() != nil {
+		return blocked("cancelled")
+	}
+	qRoot, qOK := rootFor(entry.QuarantinePath, []string{e.quarantineRoot})
+	rRoot, rOK := rootFor(entry.RestorePath, e.sourceRoots)
+	if !qOK || !rOK {
+		return blocked("scope_validation_failed")
+	}
+	_, qMatches, qErr := probeRestorePath(qRoot, entry.QuarantinePath, entry.ContentSHA256, entry.FileSize)
+	rExists, _, rErr := probeRestorePath(rRoot, entry.RestorePath, entry.ContentSHA256, entry.FileSize)
+	if qErr != nil || rErr != nil {
+		return blocked("recovery_evidence_unavailable")
+	}
+	if !qMatches || rExists {
+		// Even a full matching destination may be an externally recreated
+		// instance. The old journal contains no durable output inode identity.
+		return blocked("manual_reconciliation_required")
+	}
+	// Recheck both live bindings immediately before terminal persistence.
+	_, qMatches, qErr = probeRestorePath(qRoot, entry.QuarantinePath, entry.ContentSHA256, entry.FileSize)
+	rExists, _, rErr = probeRestorePath(rRoot, entry.RestorePath, entry.ContentSHA256, entry.FileSize)
+	if qErr != nil || rErr != nil || !qMatches || rExists {
+		return blocked("recovery_evidence_unavailable")
+	}
+	if err := e.store.MarkRestoreRolledBack(ctx, entry.PlanID, e.now().UTC()); err != nil {
+		return blocked("journal_rollback_failed")
+	}
+	result.Status, result.FinalState = StepOK, domain.RestoreRolledBack
+	return result
 }
