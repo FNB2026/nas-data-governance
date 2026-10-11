@@ -26,7 +26,7 @@ A/D 字节、只读 DB 与恢复锁证据已由独立复核确认。历史 GUI/�
 
 人工明确批准仅对 beta.10 B/C 使用组合证据；A/D 仍以正式签名 App 实测为要求。正式 B/C 均维持 INCONCLUSIVE，以下测试层不会改写它们。
 
-[复现 runner](evidence/beta10-crash/run.py) 从精确 RC `git archive` 导出独立临时源码，仅添加两个 test-only carrier。394 个冻结文件运行前后 SHA-256 完全不变，未注入或修改正式 App、历史 DB 或文件。工具链 `go1.26.9 darwin/arm64`；实际 `-race -count=1` 输出与哈希见 [result.json](evidence/beta10-crash/result.json) 和 [race.log](evidence/beta10-crash/race.log)。
+[复现 runner](evidence/beta10-crash/run.py) 从精确 RC `git archive` 导出独立临时源码，仅添加两个 test-only carrier。394 个冻结文件运行前后 SHA-256 完全不变，未注入或修改正式 App、历史 DB 或文件。工具链 `go1.26.9 darwin/arm64`；实际 `-race -count=1` 输出与哈希见 [result.json](evidence/beta10-crash/result.json) 和 [race-output.txt](evidence/beta10-crash/race-output.txt)。
 
 - B carrier 在真实 executor 的 SQLite CAS 已持久化 STALE_CHECKED 后、BeginJournal 前 panic 截断，避免模拟错误走正常失败回滚；不是手工构造正式运行 Journal。
 - C carrier 在真实 MoveFile 与真实 MarkJournalDone 提交后、executor/app 最终结案前 panic 截断。真实文件操作完整、源缺失、done Journal 得到核验。
