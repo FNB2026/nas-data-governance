@@ -189,7 +189,8 @@
       "read_db_hash_unchanged": true
     }
   },
-  "overall": "PENDING independent final review and evidence PR gates",
+  "overall": "PASS limited Crash Recovery Gate under human-approved combination contract; evidence PR CI/merge gates pending",
   "public_beta": "BLOCKED",
-  "release": "Draft"
+  "release": "Draft",
+  "independent_review": "APPROVE code, boundaries, actual output, 394 frozen-file SHA, A/D evidence, privacy; A audit0 and formal B/C INCONCLUSIVE permanent"
 }

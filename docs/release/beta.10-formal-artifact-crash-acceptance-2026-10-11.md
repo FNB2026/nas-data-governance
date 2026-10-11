@@ -47,6 +47,8 @@ A/D 字节、只读 DB 与恢复锁证据已由独立复核确认。历史 GUI/�
 
 ## 最终裁定
 
-当前等待本证据 PR exact HEAD 独立复核及 CI/Security。仅所有证据闭合后，按明确批准的组合标准裁定限定 Crash Recovery Gate；不扩展为 Public Beta 许可。
+独立复核已核对载体代码、注入位置、实际 race 输出、全部 394 个冻结文件 SHA、正式 A/D 字节/DB、连续健康记录及事件/日志标记扫描，结论 APPROVE。**按明确批准的组合标准，限定 Crash Recovery Gate：PASS**。其范围仅 A 未确认输出保锁、D 正式安全结案与新审批恢复闭环、B/C 确定性组合合同与限定隐私窗口；不包含 A 拒绝操作的新持久审计，也不把正式 B/C 改为 PASS。
+
+本证据 PR 仍需 exact HEAD CI/Security 与合并后门禁完成归档；不扩展为 Public Beta 许可。
 
 Issue #72 / #75 暂保持 OPEN，beta.8/beta.9 历史失败不转 PASS。Release Draft、Public Beta BLOCKED、Purge NOT RUN。其余门禁（全新 Mac 离线首装、依赖安全告警、其他隐私与首发范围）单独收口。
