@@ -8,6 +8,20 @@ regression following independent read-only evidence review. It does not waive a 
 offline first installation, certify all historical Purge recovery states, or
 replace the approved beta.10 Crash Recovery evidence contract.
 
+### Approved first-Beta support contract
+
+On 2026-10-11, the user explicitly answered **“批准上述限定支持范围”** to
+the proposed contract: accepted functions, limited captured-window log privacy,
+and manual independent source-file/database backups. This is a support-scope
+approval, not additional runtime evidence or public publication authorization.
+
+Full-system privacy, all-process sustained-load privacy and unknown historical
+Purge recovery are outside the certified first-Beta scope. Their original
+evidence limitations remain; they are not relabeled PASS. Manual backups remain
+user-managed, with no automatic backup/restore or forced unlocking claim.
+The separate new-Mac offline first-install gate remains BLOCKED, not waived.
+Formal Crash B/C INCONCLUSIVE and A audit limitations remain permanent.
+
 ## Frozen identity and build receipts
 
 - Product RC: `791f19119542e69b62ee62dd358fed188000837e` (PR #83 merge).
@@ -135,15 +149,18 @@ network-capture proof, long-load privacy or a whole-system zero-leak guarantee.
 | Limited captured-window privacy | PASS | Independent reconstruction of marker set and zero hits; defined predicate/window only |
 | Limited beta.10 Crash Recovery | PASS by approved combination | Formal B/C permanently INCONCLUSIVE; A unknown-output lock/audit limitation retained; not rerun here |
 | New-Mac beta.11 offline first installation | BLOCKED | No unused test Mac; user deferred, not waived |
-| Full-process / sustained-load privacy minimum | BLOCKED pending explicit support-scope decision | Current capture cannot establish it; do not automatically lower criteria |
+| First-Beta limited privacy / manual-backup support contract | APPROVED | Explicit user decision on 2026-10-11; accepts the defined evidence boundary, not broader proof |
+| Full-system / all-process sustained-load privacy | DEFERRED / NOT CERTIFIED for first Beta | Explicitly excluded by approved support contract; original evidence gap remains, not PASS |
 | Manual backup support documentation | PASS documentation only | DB backup is not source backup; independent source copies required; no overwriting unresolved scenes or forced unlock |
 | Historical unknown Purge recovery broad support | DEFERRED from certified scope | Preserve existing safe lock/history; separate evidence needed for uncertain stage identity |
 | Public publication | BLOCKED / NOT AUTHORIZED | Release remains Draft; obtain final authorization only after gates close |
 
 No Purge execution, new Crash injection, new feature or extra candidate was
-introduced. The next concrete dependency is an unused Mac for official DMG
-offline first installation and a decision on the remaining privacy support
-scope. Neither source tests nor this normal GUI regression replaces those gates.
+introduced. The remaining required runtime dependency in this scoped decision
+is an unused Mac for official DMG offline first installation. Support scope is
+now explicitly approved; public publication still requires separate final
+authorization after required gates close. Source tests and this normal GUI
+regression do not replace the first-install gate.
 
 ## Independent review receipt
 
