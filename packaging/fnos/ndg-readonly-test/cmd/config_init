@@ -1,0 +1,5 @@
+#!/bin/sh
+# No supported initializer/exporter/migration exists in this research package.
+set -eu
+printf '%s\n' 'ndg_fnos: unsupported_lifecycle_operation' >&2
+exit 1

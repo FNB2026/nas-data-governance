@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "ndg-readonly-test.main": {
+      "title": "NDG Research (Not Installable)",
+      "icon": "images/icon_{0}.png",
+      "type": "url",
+      "protocol": "http",
+      "port": "18080",
+      "url": "/",
+      "allUsers": false,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}

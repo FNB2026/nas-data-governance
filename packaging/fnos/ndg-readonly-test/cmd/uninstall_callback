@@ -1,0 +1,5 @@
+#!/bin/sh
+# Intentionally no deletion, Docker volume removal or system cleanup.
+# Platform-owned data retention is NOT RUN and must be verified independently.
+set -eu
+exit 0
