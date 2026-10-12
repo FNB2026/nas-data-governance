@@ -2,7 +2,11 @@
 
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
 func TestInvalidBookmarkFailsClosed(t *testing.T) {
 	for _, raw := range []string{"", "not a base64 bookmark", "bm90LWEtYm9va21hcms="} {
@@ -18,5 +22,32 @@ func TestProjectIdentitySeparated(t *testing.T) {
 	}
 	if storageID("/synthetic/a") != storageID("/synthetic/a") {
 		t.Fatal("root identity must survive restart")
+	}
+}
+
+func TestShutdownCancelsBeforeWaitingAndRejectsNewScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &Probe{ctx: ctx, cancel: cancel}
+	p.mu.Lock() // An active scan holds its scoped resource.
+	done := make(chan struct{})
+	go func() { p.shutdown(); close(done) }()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not cancel scan")
+	}
+	select {
+	case <-done:
+		t.Fatal("scope released before operation returned")
+	default:
+	}
+	p.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish")
+	}
+	if v := p.Scan(); v.Error != "shutting_down" || !v.Locked {
+		t.Fatal("new scan accepted during shutdown")
 	}
 }

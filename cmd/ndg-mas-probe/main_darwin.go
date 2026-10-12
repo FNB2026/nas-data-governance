@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -59,10 +60,13 @@ type View struct {
 	Network               bool   `json:"network"`
 }
 type Probe struct {
-	mu      sync.Mutex
-	dir     string
-	current grant
-	view    View
+	mu       sync.Mutex
+	ctx      context.Context
+	cancel   context.CancelFunc
+	stopping atomic.Bool
+	dir      string
+	current  grant
+	view     View
 }
 
 func native(p *C.char) string { defer C.free(unsafe.Pointer(p)); return C.GoString(p) }
@@ -92,6 +96,9 @@ func (p *Probe) block(kind string) View {
 func (p *Probe) Select() View {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.stopping.Load() {
+		return p.block("shutting_down")
+	}
 	defer C.ndg_stop()
 	// Test-only initial panel location; never grants authority without Open.
 	initial := C.CString(os.Getenv("NDG_PROBE_PICKER_START"))
@@ -121,6 +128,9 @@ func (p *Probe) Select() View {
 func (p *Probe) Scan() View {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.stopping.Load() {
+		return p.block("shutting_down")
+	}
 	if p.current.Bookmark == "" {
 		return p.block("authorization_required")
 	}
@@ -147,7 +157,10 @@ func (p *Probe) Scan() View {
 	if p.save() != nil {
 		return p.block("bookmark_persist_failed")
 	}
-	ctx := context.Background()
+	ctx := p.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Root paths exist only in private container metadata, never GUI/log errors.
 	id := storageID(g.Path)
 	st, err := store.Open(ctx, filepath.Join(p.dir, id+".db"))
@@ -233,6 +246,19 @@ func (p *Probe) BoundaryProbe() View {
 }
 
 func (p *Probe) Status() View { p.mu.Lock(); defer p.mu.Unlock(); return p.view }
+
+// Shutdown cancels before waiting for the operation mutex. The scope remains
+// held until scanner workers and SQLite accesses have returned.
+func (p *Probe) shutdown() {
+	p.stopping.Store(true)
+	if p.cancel != nil {
+		p.cancel()
+	}
+	C.ndg_cancel_picker()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	C.ndg_stop()
+}
 func main() {
 	dir := native(C.ndg_support())
 	// Abort if Foundation failed to choose the sandbox container.
@@ -242,13 +268,15 @@ func main() {
 	if os.MkdirAll(dir, 0700) != nil {
 		panic("private container unavailable")
 	}
-	p := &Probe{dir: dir, view: View{State: "NO_GRANT", Locked: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &Probe{ctx: ctx, cancel: cancel, dir: dir, view: View{State: "NO_GRANT", Locked: true}}
 	if b, e := os.ReadFile(filepath.Join(dir, "grant.json")); e == nil {
 		if json.Unmarshal(b, &p.current) == nil {
 			p.view.State = "BOOKMARK_SAVED"
 		}
 	}
-	if err := wails.Run(&options.App{Title: "NDG MAS Phase 0 — disposable read-only", Width: 900, Height: 600, AssetServer: &assetserver.Options{Assets: assets}, Bind: []any{p}, OnShutdown: func(context.Context) { C.ndg_stop() }}); err != nil {
+	if err := wails.Run(&options.App{Title: "NDG MAS Phase 0 — disposable read-only", Width: 900, Height: 600, AssetServer: &assetserver.Options{Assets: assets}, Bind: []any{p}, OnBeforeClose: func(context.Context) bool { p.shutdown(); return false }, OnShutdown: func(context.Context) { cancel() }}); err != nil {
 		panic("prototype runtime failed")
 	}
 }

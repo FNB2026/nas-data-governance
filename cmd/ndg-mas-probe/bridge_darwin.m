@@ -3,6 +3,11 @@
 #import <sys/mount.h>
 #import "bridge_darwin.h"
 static NSURL *activeURL;
+// Main-queue-only picker reference; it is valid while runModal is active.
+static NSOpenPanel *activePanel;
+void ndg_cancel_picker(void) {
+ dispatch_async(dispatch_get_main_queue(), ^{ if (activePanel) [activePanel cancel:nil]; });
+}
 static char *encode(NSDictionary *d) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
     return strdup([[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease].UTF8String);
@@ -35,7 +40,10 @@ char *ndg_pick(const char *initial) {
         p.canChooseFiles=NO; p.canChooseDirectories=YES; p.allowsMultipleSelection=NO;
         p.title=@"选择人工创建的 Phase 0 测试目录（只读）";
         if (initial && initial[0]) p.directoryURL=[NSURL fileURLWithPath:[NSString stringWithUTF8String:initial]];
-        result=([p runModal]==NSModalResponseOK) ? activate(p.URL,NO) : failure(@"cancelled");
+        activePanel=p;
+        NSModalResponse response=[p runModal];
+        activePanel=nil;
+        result=(response==NSModalResponseOK) ? activate(p.URL,NO) : failure(@"cancelled");
     };
     if (NSThread.isMainThread) pick(); else dispatch_sync(dispatch_get_main_queue(),pick);
     return result;
