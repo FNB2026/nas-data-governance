@@ -11,6 +11,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ndg-server ./cmd/ndg-server
 COPY internal ./internal
+COPY schemas ./schemas
 COPY --from=web /src/internal/apihttp/webdist ./internal/apihttp/webdist
 ARG TARGETOS=linux
 ARG TARGETARCH

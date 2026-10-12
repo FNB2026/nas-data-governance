@@ -26,10 +26,11 @@ type config struct {
 	Sources        map[string]string `json:"sources"`
 }
 
-func run() error {
-	file := flag.String("config", "", "operator-owned configuration file")
-	flag.Parse()
-	if *file == "" {
+func run(args []string) (result error) {
+	flags := flag.NewFlagSet("ndg-server", flag.ContinueOnError)
+	flags.SetOutput(io.Discard) // Flag errors can contain private paths or supplied credentials.
+	file := flags.String("config", "", "operator-owned configuration file")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || *file == "" {
 		return errors.New("configuration required")
 	}
 	info, e := os.Lstat(*file)
@@ -65,7 +66,11 @@ func run() error {
 	if e != nil {
 		return errors.New("state or source boundary rejected")
 	}
-	defer b.Close()
+	defer func() {
+		if b.Close() != nil {
+			result = errors.New("state close rejected")
+		}
+	}()
 	h, e := apihttp.New(apihttp.Config{Origin: c.Origin, Password: strings.TrimSpace(string(p)), Secure: strings.HasPrefix(c.Origin, "https://")}, b)
 	if e != nil {
 		return errors.New("HTTP configuration rejected")
@@ -92,7 +97,7 @@ func run() error {
 	return nil
 }
 func main() {
-	if run() != nil {
+	if run(os.Args[1:]) != nil {
 		_, _ = os.Stderr.WriteString("ndg-server: startup or shutdown rejected; private details omitted\n")
 		os.Exit(1)
 	}

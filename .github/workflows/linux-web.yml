@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
@@ -23,7 +25,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build amd64 container without publishing
-        run: docker build --build-arg TARGETARCH=amd64 --build-arg SOURCE_SHA="$GITHUB_SHA" -f packaging/docker/Dockerfile -t ndg-disposable:test .
+        run: docker build --build-arg TARGETARCH=amd64 --build-arg SOURCE_SHA="$(git rev-parse HEAD)" -f packaging/docker/Dockerfile -t ndg-disposable:test .
       - name: Synthetic read-only and restart acceptance
         run: sudo python3 scripts/packaging/test-linux-container.py
