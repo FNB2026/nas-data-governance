@@ -31,7 +31,7 @@
 - 独立 AI reviewer `/root/phase1c_review` 对上述 exact HEAD 出具范围限定报告；不是作者自批 GitHub APPROVE。tree `28a25e3dcdcbe3d93cca9bc9dda2afbfb1a6bee3`，base..HEAD diff SHA-256 `3df8c05b64272fd44e800afc340ff596944cfeeece3717c1ccb8a49063f74820`。
 - [CI post-merge 38269775992](https://github.com/FNB2026/nas-data-governance/actions/runs/38269775992)：SUCCESS；[Security post-merge 38269821359](https://github.com/FNB2026/nas-data-governance/actions/runs/38269821359)：SUCCESS；两者 source SHA 为 merge SHA。两者最终结论已只读核对为 SUCCESS；仅 Phase 1C 预检原型 CLOSED。
 - [Phase 1C 容器/兼容性原型证据](../mas/phase1c-container-and-compatibility-2026-10-12.md)：调用方必须证明 staging owner、ACL、容器和全调用稳定性；0700 不等于证明；未连 Wails，正式导入 NOT RUN / BLOCKED。
-- 新 Required Reason API 专项与直接版 exporter 设计：[Draft PR #92](https://github.com/FNB2026/nas-data-governance/pull/92)，exact HEAD `f61366acf6b9f6b9066e2dfb0229fc7794fbf713`。独立 `/root/phase1c_review` 研究范围 PASS；patch SHA-256 `3c213510023b1f1c227117cdfdae79ad0f809b7c24c2f3c331da88c9ad7ae716`（总控回执）。[CI 38270937225](https://github.com/FNB2026/nas-data-governance/actions/runs/38270937225) 本次只读采样 in_progress；[Security 38270937211](https://github.com/FNB2026/nas-data-governance/actions/runs/38270937211) SUCCESS；两者 headSha 与 exact HEAD 相同。尚未证明网络卷历史身份等价，未取得正式导入/商店运行认证；研究审查不替代门禁。
+- 新 Required Reason API 专项与直接版 exporter 设计：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92)，exact HEAD `f61366acf6b9f6b9066e2dfb0229fc7794fbf713`。独立 `/root/phase1c_review` 研究范围 PASS；patch SHA-256 `3c213510023b1f1c227117cdfdae79ad0f809b7c24c2f3c331da88c9ad7ae716`（总控回执）。[CI 38270937225](https://github.com/FNB2026/nas-data-governance/actions/runs/38270937225) SUCCESS；[Security 38270937211](https://github.com/FNB2026/nas-data-governance/actions/runs/38270937211) SUCCESS；两者 headSha 与 exact HEAD 相同。尚未证明网络卷历史身份等价，未取得正式导入/商店运行认证；研究审查不替代运行门禁。合并提交 `4f9ed9762f5754e4073eba01230f021b05788f79`；合并后门禁独立执行中。
 
 ## 本工作包验证回执
 
@@ -41,7 +41,7 @@
 
 ## Docker / fnOS
 
-G4 独立实现工作包已启动，但无可发布 OCI digest、正式 Web GUI/容器 PASS 或 fnOS FPK。本机 Docker 未发现；官方 fnpack 1.2.3 已私有下载，help 与模板测试 PASS（总控工具回执，非 Developer ID 签名证明）。`codex/fnos-readonly-package` 正在实现非可安装研究骨架与 fail-closed validator，尚无固定 OCI digest 或 FPK 真机 PASS；工具 --help、交叉编译或源码测试不是部署证据。CI/实际架构、镜像、设备、SBOM 与 provenance 取得后按 source SHA/digest/测试层分别新增，不改写历史 NOT RUN。
+G4 独立实现工作包已启动，但无可发布 OCI digest、正式 Web GUI/容器 PASS 或 fnOS FPK。本机 Docker 未发现；官方 fnpack 1.2.3 已私有下载，help 与模板测试 PASS（总控工具回执，非 Developer ID 签名证明）。`codex/fnos-readonly-package` 已提交非可安装研究骨架与 fail-closed validator（`6025bf7f5f38df372bb7a232b59bd5b38eb0e9c9`，独立复审中），尚无固定 OCI digest 或 FPK 真机 PASS；工具 --help、交叉编译或源码测试不是部署证据。CI/实际架构、镜像、设备、SBOM 与 provenance 取得后按 source SHA/digest/测试层分别新增，不改写历史 NOT RUN。
 
 - 本机签名环境（总控只读回执）：Developer ID Application identity=1；Apple Distribution / Mac Installer Distribution 未发现。该证据只覆盖当前机器可见 identity，账户资格、Profile 与 App ID 仍未证实。
 - [fnOS 官方测试应用规范](https://developer.fnnas.com/docs/quick-started/test-application/) 2026-10-12 读取成功：手动安装只允许本地测试，不作为公开分发方式；外部分发政策需咨询，不能把生成 FPK 自动解释为可公开发布。

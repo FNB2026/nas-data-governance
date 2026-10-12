@@ -16,4 +16,4 @@
 
 正式 Crash Recovery B/C 原 App 记录永久 INCONCLUSIVE，限定 Gate 依据仅获准的组合证据；A 的审计限制永久保留。Phase 1C 合并只关闭预检原型，不开放正式导入。所有新渠道复用 Go 核心及相同恢复安全语义，不重写三套算法。
 
-MAS 兼容性研究 [Draft PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) 已取得范围限定的独立复审，但不改变授权运行、身份等价或商店发行状态。本机签名 identity 数量不等于账户资格；fnpack 工具运行不等于 FPK 安装/开发者签名/上架。
+MAS 兼容性研究 [PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) 已取得范围限定的独立复审，但不改变授权运行、身份等价或商店发行状态。本机签名 identity 数量不等于账户资格；fnpack 工具运行不等于 FPK 安装/开发者签名/上架。

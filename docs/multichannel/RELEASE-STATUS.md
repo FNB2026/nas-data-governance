@@ -14,10 +14,10 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 | G2 Phase 1A | 代码已合并 | 正式完整运行 INCONCLUSIVE | Codex / 独立测试环境负责人 | 可证明隔离的 Mac/SMB 环境 |
 | G2 Phase 1B | PR #90 已合并 | 运行 INCONCLUSIVE；独立环境 BLOCKED；CarbonCore 历史 FAIL | Codex / 环境负责人 | 证明测试服务、挂载、App 与日志进程身份，不接管现有 QEMU |
 | G2 Phase 1C 预检原型 | CLOSED：仅预检原型 | exact HEAD 独立复审及 CI/Security post-merge PASS；正式导入 NOT RUN / BLOCKED | Codex / 独立 reviewer | 后续正式 exporter/importer 先关闭项目锁、来源信任与 staging 边界 |
-| G2 Required Reason API 兼容性 | REVIEW：[Draft PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security PASS / CI 正在运行；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
+| G2 Required Reason API 兼容性 | 已合并研究：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security / CI PASS；合并后门禁另记；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
 | G3 MAS 分发与商店审核 | BLOCKED / NO-GO | App ID 未确认注册；本机未发现 Apple Distribution/Mac Installer Distribution identity（仅环境证据）；Profile/运行门禁/合规未闭合，未上传 | 账户持有人 + Codex | G2 闭合后集中办理真实账户步骤与最终提交授权 |
 | G4 Linux/Docker 安全只读 MVP | ACTIVE：`codex/linux-web-mvp` | 尚无可发布镜像 digest 或容器运行 PASS；本机 Docker 未发现 | Codex 实现 writer / 独立 reviewer | 源码、认证、路径边界测试后实际两架构容器验收 |
-| G5 fnOS FPK | ACTIVE：`codex/fnos-readonly-package` | 官方 fnpack 1.2.3 私有下载及 help/template PASS；非可安装研究骨架与 fail-closed validator 实现中；OCI digest / FPK 真机仍 BLOCKED | Codex / 隔离设备负责人 | 固定已验收 OCI digest；研究骨架不代表 FPK 安装；核对官方提交政策及独立设备 |
+| G5 fnOS FPK | ACTIVE：`codex/fnos-readonly-package` | 官方 fnpack 1.2.3 私有下载及 help/template PASS；非可安装研究骨架与 fail-closed validator 已提交，独立复审中；OCI digest / FPK 真机仍 BLOCKED | Codex / 隔离设备负责人 | 固定已验收 OCI digest；研究骨架不代表 FPK 安装；核对官方提交政策及独立设备 |
 | G6 多渠道维护机制 | ACTIVE：证据与风险台账 | 单一状态/能力/证据/风险入口已建立；未来流水线 NOT RUN | Codex 总控 | 随各独立渠道门禁增量维护 |
 
 ## 连续执行与 writer 边界
