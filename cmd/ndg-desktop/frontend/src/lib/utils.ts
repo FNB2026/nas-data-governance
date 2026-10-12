@@ -1,6 +1,6 @@
 // Shared constants and utility functions for the NDG desktop frontend.
 
-export const TERMINAL_STATES = new Set(["PAUSED_NETWORK", "COMPLETED", "FAILED", "CANCELLED"]);
+export const TERMINAL_STATES = new Set(["PAUSED_AUTHORIZATION", "PAUSED_NETWORK", "COMPLETED", "FAILED", "CANCELLED"]);
 
 export const STAGE_LABELS: Record<string, string> = {
   PREPARING_RESUME: "读取已保存的扫描进度",
@@ -20,6 +20,7 @@ export const STATE_LABELS: Record<string, string> = {
   QUEUED: "排队中",
   RUNNING: "运行中",
   CANCEL_REQUESTED: "取消中",
+  PAUSED_AUTHORIZATION: "授权失效，已暂停",
   PAUSED_NETWORK: "网络中断，已暂停",
   COMPLETED: "已完成",
   FAILED: "已失败",
@@ -31,6 +32,7 @@ export const EVENT_LABELS: Record<string, string> = {
   "job:stage": "阶段切换",
   "job:progress": "进度更新",
   "job:warning": "警告",
+  "job:paused_authorization": "授权失效暂停",
   "job:paused_network": "网络中断暂停",
   "job:completed": "完成",
   "job:failed": "失败",
@@ -52,6 +54,10 @@ export function errorText(error: unknown): string {
 export function friendlyError(error: unknown): string {
   const raw = errorText(error).toLowerCase();
 
+  if (raw.includes("authorization_required")) return "目录授权缺失或失效，请重新选择源目录授权后继续。";
+  if (raw.includes("source_unavailable")) return "源目录当前不可用，请核对目录是否仍存在。";
+  if (raw.includes("network_paused")) return "网络源不可用，已暂停；请重新挂载后继续。";
+  if (raw.includes("mas_write_disabled")) return "商店只读预验证禁止隔离、恢复和永久清理写入。";
   // Project / database errors
   if (raw.includes("no such table") || raw.includes("schema mismatch")) {
     return "数据库结构不兼容。请以读写模式重新打开项目以执行自动迁移。";

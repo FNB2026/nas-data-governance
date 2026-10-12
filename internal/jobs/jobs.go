@@ -40,18 +40,19 @@ import (
 type JobState string
 
 const (
-	StateQueued          JobState = "QUEUED"
-	StateRunning         JobState = "RUNNING"
-	StateCancelRequested JobState = "CANCEL_REQUESTED"
-	StatePausedNetwork   JobState = "PAUSED_NETWORK"
-	StateCompleted       JobState = "COMPLETED"
-	StateFailed          JobState = "FAILED"
-	StateCancelled       JobState = "CANCELLED"
+	StateQueued              JobState = "QUEUED"
+	StateRunning             JobState = "RUNNING"
+	StateCancelRequested     JobState = "CANCEL_REQUESTED"
+	StatePausedAuthorization JobState = "PAUSED_AUTHORIZATION"
+	StatePausedNetwork       JobState = "PAUSED_NETWORK"
+	StateCompleted           JobState = "COMPLETED"
+	StateFailed              JobState = "FAILED"
+	StateCancelled           JobState = "CANCELLED"
 )
 
 // IsTerminal returns true if no further state transitions are possible.
 func (s JobState) IsTerminal() bool {
-	return s == StatePausedNetwork || s == StateCompleted || s == StateFailed || s == StateCancelled
+	return s == StatePausedAuthorization || s == StatePausedNetwork || s == StateCompleted || s == StateFailed || s == StateCancelled
 }
 
 // validTransitions defines the legal state machine edges.
@@ -62,10 +63,11 @@ var validTransitions = map[JobState]map[JobState]bool{
 		StateFailed:    true, // crash recovery: QUEUED job never started
 	},
 	StateRunning: {
-		StateCancelRequested: true,
-		StatePausedNetwork:   true,
-		StateCompleted:       true,
-		StateFailed:          true,
+		StateCancelRequested:     true,
+		StatePausedAuthorization: true,
+		StatePausedNetwork:       true,
+		StateCompleted:           true,
+		StateFailed:              true,
 	},
 	StateCancelRequested: {
 		StateCancelled: true,
@@ -230,3 +232,5 @@ var ErrCancellationRequested = errors.New("jobs: cancellation requested")
 // ErrNetworkPaused stops a scan without treating a temporary remote-source
 // outage as a failed job. The durable scan checkpoint remains resumable.
 var ErrNetworkPaused = errors.New("jobs: paused because network source is unavailable")
+
+var ErrAuthorizationPaused = errors.New("AUTHORIZATION_REQUIRED")

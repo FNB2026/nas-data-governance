@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"strings"
 	"time"
 
@@ -56,7 +57,14 @@ func (a *API) SetDirectoryPicker(picker DirectoryPicker) {
 func (a *API) PickDirectory(title string) (string, error) {
 	a.mu.RLock()
 	picker := a.dirPicker
+	sandbox, access, closing := a.sandbox, a.access, a.closing
 	a.mu.RUnlock()
+	if sandbox {
+		if access == nil || closing {
+			return "", fileaccess.ErrAuthorizationRequired
+		}
+		return access.Select(context.Background())
+	}
 	if picker == nil {
 		return "", errors.New("wails: directory picker is not configured")
 	}
@@ -69,6 +77,15 @@ func (a *API) PickDirectory(title string) (string, error) {
 func (a *API) CreateProjectFromSource(input CreateProjectInput) (ProjectInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return ProjectInfo{}, fileaccess.ErrAuthorizationRequired
+	}
+	lease, e := a.sourceLease(input.SourcePath)
+	if e != nil {
+		return ProjectInfo{}, e
+	}
+	defer lease.Release()
+	input.SourcePath = lease.Root
 	if a.store != nil {
 		return ProjectInfo{}, ErrProjectAlreadyOpen
 	}
@@ -76,6 +93,9 @@ func (a *API) CreateProjectFromSource(input CreateProjectInput) (ProjectInfo, er
 		Name: input.Name, SourcePath: input.SourcePath,
 	})
 	if err != nil {
+		if a.sandbox {
+			return ProjectInfo{}, safeAccessError(err)
+		}
 		return ProjectInfo{}, fmt.Errorf("wails: create project from source: %w", err)
 	}
 	a.initReadWriteServicesLocked(created.Store)
@@ -95,11 +115,23 @@ func (a *API) CreateProjectFromSource(input CreateProjectInput) (ProjectInfo, er
 func (a *API) RegisterScanSource(root string) (StorageInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return StorageInfo{}, fileaccess.ErrAuthorizationRequired
+	}
+	lease, e := a.sourceLease(root)
+	if e != nil {
+		return StorageInfo{}, e
+	}
+	defer lease.Release()
+	root = lease.Root
 	if a.store == nil {
 		return StorageInfo{}, ErrNoProjectOpen
 	}
 	storage, err := a.projectService().RegisterScanSource(context.Background(), a.store, root, a.path)
 	if err != nil {
+		if a.sandbox {
+			return StorageInfo{}, safeAccessError(err)
+		}
 		return StorageInfo{}, fmt.Errorf("wails: register scan source: %w", err)
 	}
 	return mapStorages([]domain.Storage{storage})[0], nil

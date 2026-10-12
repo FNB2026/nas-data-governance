@@ -293,3 +293,10 @@ describe("hasWailsRuntime", () => {
     expect(hasWailsRuntime()).toBe(false);
   });
 });
+
+it("recognizes authorization pause as stopped work and explains reauthorization", () => {
+  expect(TERMINAL_STATES.has("PAUSED_AUTHORIZATION")).toBe(true);
+  expect(stateLabel("PAUSED_AUTHORIZATION")).toBe("授权失效，已暂停");
+  expect(friendlyError("AUTHORIZATION_REQUIRED")).toContain("重新选择");
+  expect(friendlyError("MAS_WRITE_DISABLED")).toContain("禁止");
+});

@@ -15,15 +15,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-
-	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	api := wails.NewAPI()
+	api := newDesktopAPI()
 
 	err := wailsapp.Run(&options.App{
 		Title:     "NDG — 数据治理工作台",
@@ -51,6 +49,12 @@ func main() {
 					ShowHiddenFiles: true,
 				})
 			})
+		},
+		OnBeforeClose: func(ctx context.Context) bool {
+			if sandboxDesktop {
+				api.ShutdownAccess()
+			}
+			return false
 		},
 		OnShutdown: func(ctx context.Context) {
 			// Ensure the project database is closed on exit.
