@@ -20,3 +20,7 @@ The probe mutex serializes native scope and scans. Source grants are private 060
 ## Phase 1A product authorization layer
 
 See [Phase 1A report](phase1a-2026-10-12.md) for the build-time MAS policy, actual product GUI evidence and remaining INCONCLUSIVE scenarios. Build the separate local sandbox product with `scripts/mas/build-phase1a.sh`. This is a dev/ad hoc capability validation App, not an App Store distribution or a replacement for the GitHub DMG.
+
+## Phase 1C container and Apple compatibility
+
+See [Phase 1C design and local preflight evidence](phase1c-container-and-compatibility-2026-10-12.md). The backup validator is experimental, not wired to the product, and does not enable migration or MAS distribution. Open Phase 1B runtime scenarios remain in a separate [pending-test checklist](phase1b-pending-tests-2026-10-12.md).
