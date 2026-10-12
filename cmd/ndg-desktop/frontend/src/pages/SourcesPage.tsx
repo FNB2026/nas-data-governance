@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import ProjectPanel from "../components/ProjectPanel";
 import ProjectStartCard from "../components/ProjectStartCard";
 import StorageList from "../components/StorageList";
+import SourceAuthorizationPanel from "../components/SourceAuthorizationPanel";
 import DiagnosticPanel from "../components/DiagnosticPanel";
 import GettingStartedRail from "../components/GettingStartedRail";
 import { useProject } from "../state/ProjectContext";
@@ -36,6 +37,37 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
 
   const [readiness, setReadiness] = useState<wails.ProjectReadinessDTO | null>(null);
   const [sourceProfiles, setSourceProfiles] = useState<Record<string, wails.SourcePreflightDTO | null>>({});
+  const [canReauthorizeSources, setCanReauthorizeSources] = useState(false);
+  const [authorizingSource, setAuthorizingSource] = useState(false);
+  const [sourceAuthorizationError, setSourceAuthorizationError] = useState<string | null>(null);
+  const [sourceAuthorizationNotice, setSourceAuthorizationNotice] = useState<string | null>(null);
+
+  const handleAuthorizeSource = useCallback(async () => {
+    if (!project || !isReadWrite || authorizingSource || busy || !hasWailsRuntime()) return;
+    setAuthorizingSource(true);
+    setSourceAuthorizationError(null);
+    setSourceAuthorizationNotice(null);
+    try {
+      const root = await api.project.pickDirectory("选择或重新授权扫描目录");
+      if (!root) {
+        setSourceAuthorizationNotice("未选择目录；项目和扫描状态未更改。");
+        return;
+      }
+      await api.project.registerScanSource(root);
+      await refreshProject();
+      setSourceAuthorizationNotice("授权已登记。没有启动扫描或 Resume，也没有解除恢复锁；请核对存储身份后手动继续。");
+    } catch (e: unknown) {
+      const message = (e as Error).message || "";
+      // Avoid reflecting backend paths or other source details in the UI.
+      setSourceAuthorizationError(
+        /AUTHORIZATION_REQUIRED|授权|取消/i.test(message)
+          ? "目录授权未完成；没有启动扫描或 Resume。请重新选择经确认的目录。"
+          : "目录登记失败；没有启动扫描或 Resume。请刷新项目并人工复核。",
+      );
+    } finally {
+      setAuthorizingSource(false);
+    }
+  }, [project, isReadWrite, authorizingSource, busy, refreshProject]);
 
   const loadReadiness = useCallback(async () => {
     if (!hasWailsRuntime()) return;
@@ -47,6 +79,19 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
       setReadiness(null);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCanReauthorizeSources(false);
+    if (!project || !hasWailsRuntime()) return () => { cancelled = true; };
+    void api.capabilities.get().then((capabilities) => {
+      if (!cancelled) setCanReauthorizeSources(capabilities.can_reauthorize_sources === true);
+    }).catch(() => {
+      // Fail closed: a distribution identity error must not show MAS-only copy.
+      if (!cancelled) setCanReauthorizeSources(false);
+    });
+    return () => { cancelled = true; };
+  }, [project]);
 
   useEffect(() => {
     if (project) {
@@ -107,6 +152,14 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
 
       {project && (
         <>
+          <SourceAuthorizationPanel
+            enabled={canReauthorizeSources}
+            busy={busy || authorizingSource}
+            isReadWrite={isReadWrite}
+            onAuthorize={() => void handleAuthorizeSource()}
+            error={sourceAuthorizationError}
+            notice={sourceAuthorizationNotice}
+          />
           {/* Readiness checklist */}
           {readiness && (
             <section className="card card--full readiness-panel">

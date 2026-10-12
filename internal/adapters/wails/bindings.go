@@ -1749,9 +1749,10 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 
 	if a.store == nil {
 		return AppCapabilitiesDTO{
-			ProjectOpen:    false,
-			ProjectMode:    "closed",
-			CanViewResults: false,
+			ProjectOpen:           false,
+			ProjectMode:           "closed",
+			CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
+			CanViewResults:        false,
 			DisabledReasons: map[string]string{
 				"scan-jobs":         "请先打开项目",
 				"duplicate-results": "请先打开项目",
@@ -1789,16 +1790,17 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	}
 
 	return AppCapabilitiesDTO{
-		ProjectOpen:          true,
-		ProjectMode:          mode,
-		CanScan:              isRW && !recoveryLock,
-		CanViewResults:       true,
-		CanEditReviews:       isRW && !recoveryLock,
-		CanApprovePlans:      isRW && !recoveryLock,
-		CanExecuteQuarantine: isRW && !recoveryLock && !a.sandbox,
-		CanExecutePurge:      isRW && !recoveryLock && !a.sandbox && app.PurgeReleaseAllowed(),
-		RecoveryLockActive:   recoveryLock,
-		DisabledReasons:      disabled,
+		ProjectOpen:           true,
+		ProjectMode:           mode,
+		CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
+		CanScan:               isRW && !recoveryLock,
+		CanViewResults:        true,
+		CanEditReviews:        isRW && !recoveryLock,
+		CanApprovePlans:       isRW && !recoveryLock,
+		CanExecuteQuarantine:  isRW && !recoveryLock && !a.sandbox,
+		CanExecutePurge:       isRW && !recoveryLock && !a.sandbox && app.PurgeReleaseAllowed(),
+		RecoveryLockActive:    recoveryLock,
+		DisabledReasons:       disabled,
 	}, nil
 }
 

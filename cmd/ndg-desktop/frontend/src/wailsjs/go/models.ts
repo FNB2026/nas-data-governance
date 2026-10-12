@@ -823,6 +823,7 @@ export namespace wails {
 	export class AppCapabilitiesDTO {
 	    project_open: boolean;
 	    project_mode: string;
+	    can_reauthorize_sources: boolean;
 	    can_scan: boolean;
 	    can_view_results: boolean;
 	    can_edit_reviews: boolean;
@@ -840,6 +841,7 @@ export namespace wails {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project_open = source["project_open"];
 	        this.project_mode = source["project_mode"];
+	        this.can_reauthorize_sources = source["can_reauthorize_sources"];
 	        this.can_scan = source["can_scan"];
 	        this.can_view_results = source["can_view_results"];
 	        this.can_edit_reviews = source["can_edit_reviews"];
