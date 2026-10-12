@@ -78,10 +78,11 @@ func (a *API) denySourceWrites() error {
 	return nil
 }
 
-// ShutdownAccess must run in OnBeforeClose while the main event loop is active.
+// ShutdownSandboxAPI must run in OnBeforeClose while the main event loop is active.
 // Cancel jobs, drain their cleanup, then close the repository and DB. Uncertain
 // durable Journal states are never changed by regaining a source grant.
-func (a *API) ShutdownAccess() {
+func ShutdownSandboxAPI(a *API) { a.shutdownAccess() }
+func (a *API) shutdownAccess() {
 	a.mu.Lock()
 	a.closing = true
 	if a.scanCancel != nil {

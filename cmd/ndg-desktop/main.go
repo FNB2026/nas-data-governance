@@ -10,6 +10,7 @@ import (
 	"context"
 	"embed"
 
+	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 	wailsapp "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -52,7 +53,7 @@ func main() {
 		},
 		OnBeforeClose: func(ctx context.Context) bool {
 			if sandboxDesktop {
-				api.ShutdownAccess()
+				wails.ShutdownSandboxAPI(api)
 			}
 			return false
 		},

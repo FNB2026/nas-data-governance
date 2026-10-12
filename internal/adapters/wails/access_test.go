@@ -40,7 +40,7 @@ func sandboxTestAPI(t *testing.T) (*API, *nativeTestGrant, string) {
 		t.Fatal(e)
 	}
 	a := NewSandboxAPI(m, base)
-	t.Cleanup(func() { a.ShutdownAccess() })
+	t.Cleanup(func() { a.shutdownAccess() })
 	return a, n, root
 }
 func TestSandboxDirectEntryPointsFailBeforeSideEffects(t *testing.T) {
