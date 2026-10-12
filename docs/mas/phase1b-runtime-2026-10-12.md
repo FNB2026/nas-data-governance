@@ -59,6 +59,12 @@ The earlier strict unified-log result remains an environment-level privacy **FAI
 
 The three requested controlled groups (synthetic SMB service only; NDG idle without SMB access; NDG authorized SMB scan) were **NOT RUN** in this update. At inspection time, the ad-hoc NDG test app was open on a disposable local project, an isolated test SMB listener was still present, and the host had other SMB activity. The available evidence did not prove that the mounted SMB endpoint belonged exclusively to the isolated test service. Starting or stopping a service, closing the app, or changing a mount could have contaminated attribution or affected an unrelated session, so no such action was taken. Consequently, there is no new process-correlated comparison for CarbonCore, NDG, WebKit children, or stdout/stderr. The prior stdout/stderr result remains **INCONCLUSIVE** because those streams were not attached. Raw system logs remain local and private.
 
+| Controlled group | CarbonCore | NDG main | Identifiable WebKit children | stdout/stderr | Result |
+|---|---|---|---|---|---|
+| Synthetic SMB service only, no NDG | NOT RUN | NOT RUN | NOT RUN | NOT RUN | BLOCKED: the NDG test app and unrelated SMB activity were already present; no clean process-free window was established. |
+| NDG idle, no SMB access | NOT RUN | NOT RUN | NOT RUN | NOT RUN | BLOCKED: although the visible app was on a local disposable project, other SMB activity was present and no separate captured window proved zero SMB access. |
+| NDG authorized SMB scan | NOT RUN | NOT RUN | NOT RUN | NOT RUN | BLOCKED: the active test listener could not be proven to own the mounted endpoint; no scan was started. |
+
 ### Updated verification
 
 Local verification on the Phase 1B worktree:
