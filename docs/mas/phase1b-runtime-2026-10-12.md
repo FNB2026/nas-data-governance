@@ -43,26 +43,45 @@ Phase 1B remains **INCONCLUSIVE**. The local, ad-hoc sandbox App demonstrated ex
 
 ## Code and automated verification
 
-The product change is deliberately narrow: an already-open writable project can ask the native picker to reselect a source and register that selected root. It displays a path-safe error, clearly says that reauthorization does not scan, Resume, migrate an old checkpoint, or clear a recovery lock, and disables the action in read-only mode or while the UI is busy. Backend bookmark/lease acquisition remains the existing Wails sandbox gate. New root identities are separate storage records; `RegisterStorage` is idempotent for the same root and refuses to rebind an ID to a different root.
+### PR #90 independent review and channel correction
+
+PR #90 was reviewed at exact HEAD `f266e0f6836294ce5bbf8c96e8ead1655b3ede7e` against base `a878e04e615439439321198388e6e7e984d0c561`. The review found a channel-specific UX/security defect: the authorization panel was shown to ordinary Developer ID/DMG builds even though those builds do not persist sandbox-scoped directory bookmarks. The UI therefore overstated the authorization guarantee for that distribution.
+
+The correction adds backend-derived `can_reauthorize_sources` capability (`sandboxBuild`), and the Sources page hides the panel by default until that capability is positively returned. The panel copy now names the Mac App Store sandbox build. API lookup failures fail closed. This keeps the ordinary DMG behavior and authorization path unchanged; it does not create a new authorization mechanism.
+
+The source-registration call chain remains separate from scan and recovery actions. `PickDirectory` only obtains the selected root; `RegisterScanSource` acquires and releases the sandbox lease while persisting a distinct storage identity. It does not start a scan, Resume, migrate checkpoint rows, or change Recovery Lock. A new business-call-chain regression registers a second disposable root while a recovery lock is active, verifies no scan job is created, verifies the lock remains active, and verifies Resume remains blocked. A build-capability regression covers both ordinary and sandbox configurations. These tests do not substitute for the still-unrun GUI scenario with a live unresolved Journal lock.
+
+No Quarantine, Restore, or Purge write was enabled or performed. No beta.11 artifact, tag, or release asset was changed.
+
+### Log attribution comparison
+
+The earlier strict unified-log result remains an environment-level privacy **FAIL**: the synthetic fixture marker was present in the observed unified-log window. Records were attributed to the Apple CarbonCore subsystem; this identifies the emitting subsystem, but does not prove whether the marker was derived from NDG activity. It remains a failure of the strict environment-wide zero-marker criterion, and causal product attribution is **INCONCLUSIVE**. It is not waived solely because the subsystem is Apple-owned.
+
+The three requested controlled groups (synthetic SMB service only; NDG idle without SMB access; NDG authorized SMB scan) were **NOT RUN** in this update. At inspection time, the ad-hoc NDG test app was open on a disposable local project, an isolated test SMB listener was still present, and the host had other SMB activity. The available evidence did not prove that the mounted SMB endpoint belonged exclusively to the isolated test service. Starting or stopping a service, closing the app, or changing a mount could have contaminated attribution or affected an unrelated session, so no such action was taken. Consequently, there is no new process-correlated comparison for CarbonCore, NDG, WebKit children, or stdout/stderr. The prior stdout/stderr result remains **INCONCLUSIVE** because those streams were not attached. Raw system logs remain local and private.
+
+### Updated verification
 
 Local verification on the Phase 1B worktree:
 
-- `go test -race ./...` — PASS.
+- `go test -race ./...` — PASS after the channel-capability and business-side-effect regressions.
 - `go vet ./...` — PASS.
-- Frontend suite — 29 files, 263 tests PASS.
-- Targeted `SourceAuthorizationPanel` tests — 2 tests PASS.
+- MAS-tagged targeted Wails tests for channel capability and registration side effects — PASS.
+- Frontend suite — 29 files, 264 tests PASS.
+- Targeted `SourceAuthorizationPanel` tests — 3 tests PASS, including the default-hidden case.
 - Frontend production build — PASS.
 - Ad-hoc sandbox app build from clean commit `7fc299b660e27abb08c5178d81a51dd7aa7a7516` and `codesign --verify --deep --strict` — PASS for local development validation only. The built executable SHA-256 was `e3b7651bc7a95f10bb7dbd1ea151523e6b18f344291e984ad1fc659b9c3e4c79`; About displayed the same full commit. A GUI smoke check opened the disposable project and visibly exposed the new authorization panel. This is not a formal MAS-signed artifact.
 - `npm ci` reported a Node engine warning: installed Node 25.9.0 is outside jsdom's declared supported ranges. Tests and build completed, but the toolchain warning should be removed by running the release CI under a declared supported Node version.
 
+The full Wails test suite is not a supported MAS-tag invocation: legacy tests in that package assume ordinary-build permissions. Running the entire package with `-tags mas` executes those unrelated assumptions and fails; the two MAS-specific tests above were run selectively and passed. This limitation is recorded rather than represented as a successful full MAS suite.
+
 ## Remaining Phase 1B work
 
-1. Repeat the SMB changed-identity case with a verified isolated mount-to-server mapping; then explicitly reselect that SMB root through the product panel and test same-checkpoint Resume.
+1. Repeat the SMB changed-identity case with a verified isolated mount-to-server mapping; then explicitly reselect that SMB root through the product panel and test same-checkpoint Resume. Do not alter the currently unidentified SMB sessions.
 2. Obtain targeted TCC revoke/regrant evidence on a disposable host where macOS exposes the bundle in the relevant control.
 3. Exercise a live recovery lock during source reauthorization and prove it stays locked.
 4. Capture a reliable native-panel close/cancel path and measure cancellation/lease drain for stalled SMB reads without force-unmounting or killing the App.
 5. Run the full cancel → normal quit → relaunch → Resume sequence; verify SQLite with a supported same-app/export path and compare DB hashes/checkpoint to independent source baselines.
-6. Decide whether Apple CarbonCore's synthetic marker is an accepted OS-level disclosure or a release blocker. Capture stdout/stderr in a separate properly scoped test window.
-7. Rebuild the committed source at an immutable SHA, verify its About identity/signature, and repeat any evidence that must bind to that exact build. Formal MAS-signed GUI acceptance remains a later gate.
+6. Run the three process-attributed log comparison groups in a clean, isolated window with a verified SMB service/mount mapping; capture NDG main process, identifiable WebKit children, CarbonCore, and stdout/stderr separately. Resolve the strict environment marker FAIL using source evidence, not an Apple-process exemption.
+7. Rebuild the corrected source at an immutable SHA, verify its About identity/signature, and repeat evidence that must bind to that exact build. Formal MAS-signed GUI acceptance remains a later gate.
 
 **Phase 1A runtime acceptance: INCONCLUSIVE. Phase 1B: INCONCLUSIVE. beta.11 assets unchanged. App Store Connect: NOT USED.**

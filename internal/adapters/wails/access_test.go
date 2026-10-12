@@ -200,6 +200,74 @@ func TestReauthorizationNeverClearsRecoveryLock(t *testing.T) {
 	}
 }
 
+func TestRegisterScanSourceIsSandboxOnlyAndHasNoScanOrRecoverySideEffects(t *testing.T) {
+	api, grant, firstRoot := sandboxTestAPI(t)
+	secondRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.PickDirectory(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.CreateProjectFromSource(CreateProjectInput{Name: "register-only", SourcePath: firstRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.CreateTask(context.Background(), domain.OperationTask{ID: "pending-task", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.SavePlans(context.Background(), "pending-task", []domain.OperationPlan{{
+		ID: "pending-plan", TaskID: "pending-task", State: domain.PlanExecuting,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	beforeJobs, err := api.store.ListJobsByProject(context.Background(), api.jobScope, 20)
+	if err != nil || len(beforeJobs) != 0 {
+		t.Fatalf("initial jobs = %d, err=%v; want none", len(beforeJobs), err)
+	}
+
+	grant.mu.Lock()
+	grant.root = secondRoot
+	grant.mu.Unlock()
+	if _, err := api.PickDirectory(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.RegisterScanSource(secondRoot); err != nil {
+		t.Fatal(err)
+	}
+	storages, err := api.store.ListStorages(context.Background())
+	if err != nil || len(storages) != 2 {
+		t.Fatalf("registered storages = %d, err=%v; want two distinct roots", len(storages), err)
+	}
+	afterJobs, err := api.store.ListJobsByProject(context.Background(), api.jobScope, 20)
+	if err != nil || len(afterJobs) != 0 {
+		t.Fatalf("registration created scan jobs: count=%d err=%v", len(afterJobs), err)
+	}
+	lock, err := api.CheckRecoveryLock()
+	if err != nil || !lock.LockActive {
+		t.Fatalf("recovery lock after registration = %+v, err=%v; want active", lock, err)
+	}
+	if _, err := api.StartScan(StartScanRequest{Root: secondRoot, Resume: true}); err == nil {
+		t.Fatal("source registration cleared recovery lock and allowed Resume")
+	}
+	finalJobs, err := api.store.ListJobsByProject(context.Background(), api.jobScope, 20)
+	if err != nil || len(finalJobs) != 0 {
+		t.Fatalf("blocked Resume created scan jobs: count=%d err=%v", len(finalJobs), err)
+	}
+}
+
+func TestReauthorizationCapabilityFollowsSandboxBuild(t *testing.T) {
+	regular := NewAPI()
+	regularCapabilities, err := regular.GetAppCapabilities()
+	if err != nil || regularCapabilities.CanReauthorizeSources != sandboxBuild {
+		t.Fatalf("default build reauthorization capability = %v, err=%v; want sandboxBuild=%v", regularCapabilities.CanReauthorizeSources, err, sandboxBuild)
+	}
+	mas := NewSandboxAPI(nil, t.TempDir())
+	masCapabilities, err := mas.GetAppCapabilities()
+	if err != nil || !masCapabilities.CanReauthorizeSources {
+		t.Fatalf("sandbox build reauthorization capability = %v, err=%v; want true", masCapabilities.CanReauthorizeSources, err)
+	}
+}
+
 func TestAllSandboxFilesystemEntryPointsStayDeniedWithoutAuthority(t *testing.T) {
 	a, _, root := sandboxTestAPI(t)
 	if e := a.ValidateProjectPath(filepath.Join(root, "governance.db")); !errors.Is(e, fileaccess.ErrAuthorizationRequired) {

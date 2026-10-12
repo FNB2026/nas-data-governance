@@ -37,6 +37,7 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
 
   const [readiness, setReadiness] = useState<wails.ProjectReadinessDTO | null>(null);
   const [sourceProfiles, setSourceProfiles] = useState<Record<string, wails.SourcePreflightDTO | null>>({});
+  const [canReauthorizeSources, setCanReauthorizeSources] = useState(false);
   const [authorizingSource, setAuthorizingSource] = useState(false);
   const [sourceAuthorizationError, setSourceAuthorizationError] = useState<string | null>(null);
   const [sourceAuthorizationNotice, setSourceAuthorizationNotice] = useState<string | null>(null);
@@ -78,6 +79,19 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
       setReadiness(null);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCanReauthorizeSources(false);
+    if (!project || !hasWailsRuntime()) return () => { cancelled = true; };
+    void api.capabilities.get().then((capabilities) => {
+      if (!cancelled) setCanReauthorizeSources(capabilities.can_reauthorize_sources === true);
+    }).catch(() => {
+      // Fail closed: a distribution identity error must not show MAS-only copy.
+      if (!cancelled) setCanReauthorizeSources(false);
+    });
+    return () => { cancelled = true; };
+  }, [project]);
 
   useEffect(() => {
     if (project) {
@@ -139,6 +153,7 @@ export default function SourcesPage({ onNavigate }: SourcesPageProps) {
       {project && (
         <>
           <SourceAuthorizationPanel
+            enabled={canReauthorizeSources}
             busy={busy || authorizingSource}
             isReadWrite={isReadWrite}
             onAuthorize={() => void handleAuthorizeSource()}

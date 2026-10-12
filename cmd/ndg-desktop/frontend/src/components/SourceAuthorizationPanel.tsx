@@ -1,4 +1,5 @@
 export interface SourceAuthorizationPanelProps {
+  enabled: boolean;
   busy: boolean;
   isReadWrite: boolean;
   onAuthorize: () => void;
@@ -7,17 +8,20 @@ export interface SourceAuthorizationPanelProps {
 }
 
 export default function SourceAuthorizationPanel({
+  enabled,
   busy,
   isReadWrite,
   onAuthorize,
   error,
   notice,
 }: SourceAuthorizationPanelProps) {
+  if (!enabled) return null;
+
   return (
     <section className="card card--full" aria-labelledby="source-authorization-title">
       <h2 id="source-authorization-title">源目录授权</h2>
       <p className="muted">
-        只会为你在系统目录选择器中选中的目录保存只读授权。重新授权不会自动扫描、Resume 或解除恢复锁；请先核对 SMB 服务器与共享身份。
+        Mac App Store 沙盒版只会为你在系统目录选择器中选中的目录保存只读授权。重新授权不会自动扫描、Resume 或解除恢复锁；请先核对 SMB 服务器与共享身份。
         新位置会登记为独立存储，不会自动迁移旧检查点。
       </p>
       <div className="button-row">

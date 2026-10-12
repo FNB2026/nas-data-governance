@@ -830,16 +830,17 @@ func mapExecutionResult(r app.ExecutionResult) ExecutePlanResultDTO {
 // project state. The backend derives this from real store/service
 // availability, not just the open/close flag.
 type AppCapabilitiesDTO struct {
-	ProjectOpen          bool              `json:"project_open"`
-	ProjectMode          string            `json:"project_mode"` // closed, read_only, read_write
-	CanScan              bool              `json:"can_scan"`
-	CanViewResults       bool              `json:"can_view_results"`
-	CanEditReviews       bool              `json:"can_edit_reviews"`
-	CanApprovePlans      bool              `json:"can_approve_plans"`
-	CanExecuteQuarantine bool              `json:"can_execute_quarantine"`
-	CanExecutePurge      bool              `json:"can_execute_purge"`
-	RecoveryLockActive   bool              `json:"recovery_lock_active"`
-	DisabledReasons      map[string]string `json:"disabled_reasons"`
+	ProjectOpen           bool              `json:"project_open"`
+	ProjectMode           string            `json:"project_mode"` // closed, read_only, read_write
+	CanReauthorizeSources bool              `json:"can_reauthorize_sources"`
+	CanScan               bool              `json:"can_scan"`
+	CanViewResults        bool              `json:"can_view_results"`
+	CanEditReviews        bool              `json:"can_edit_reviews"`
+	CanApprovePlans       bool              `json:"can_approve_plans"`
+	CanExecuteQuarantine  bool              `json:"can_execute_quarantine"`
+	CanExecutePurge       bool              `json:"can_execute_purge"`
+	RecoveryLockActive    bool              `json:"recovery_lock_active"`
+	DisabledReasons       map[string]string `json:"disabled_reasons"`
 }
 
 // ReadinessCheckDTO is a single readiness dimension with pass/fail and
