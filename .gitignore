@@ -36,3 +36,10 @@ cmd/ndg-desktop/build/darwin/Info.dev.plist
 # Local AI/IDE workspace
 .trae/
 .workbuddy/
+
+# Isolated MAS capability probe artifacts
+cmd/ndg-mas-probe/build/bin/
+cmd/ndg-mas-probe/frontend/dist/*
+!cmd/ndg-mas-probe/frontend/dist/.gitkeep
+cmd/ndg-mas-probe/build/appicon.png
+cmd/ndg-mas-probe/frontend/wailsjs/
