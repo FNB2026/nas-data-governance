@@ -12,14 +12,15 @@
 | R06 | exporter 来源、全项目锁与闭合 SQLite 备份未建立 | 不复制 live DB/共享实时 WAL；校验 hash 不是真实性证明；独立设计来源契约/快照/不可变备份 | exporter 设计负责人 |
 | R07 | MAS Phase 1A/1B INCONCLUSIVE；独立环境 BLOCKED | 不接管已有 QEMU、不卸载未知 SMB；新环境身份可证后补实际场景 | 环境负责人 |
 | R08 | CarbonCore 严格零命中历史 FAIL；来源未闭合 | 三窗口对照与 App/WebKit/stdout 分层归因；Apple 名称不自动豁免；不声称全系统无痕 | 隐私 reviewer |
-| R09 | MAS 注册/签名/Profile/外部审核未知，NO-GO | 设计 ID 不等于已注册；账户资格、协议和最终送审批准到实际需要时集中办理 | 账户持有人 |
+| R09 | MAS 注册/签名/Profile/外部审核未知，NO-GO | 当前本机仅见 Developer ID Application=1，未见两项 MAS identity；不推定账户无资格；设计 ID 不等于已注册；账户资格、协议和最终送审批准到实际需要时集中办理 | 账户持有人 |
 | R10 | Docker 容器/两架构运行没有证据 | 本机无 Docker 不伪造运行；先源码安全 MVP，再隔离宿主或 CI 两架构/可信仿真实测 | G4 writer |
 | R11 | Web 任意路径、认证/CSRF/rebinding/日志暴露 | 固定服务端别名，权限/路径校验、无默认密码、只读策略 API 负例；默认回环 | API writer / reviewer |
 | R12 | Linux DB 多 writer/网络 WAL/重启或升级损坏 | 私有本地状态卷；全进程所有权锁；持久化/恢复锁/快照回滚独立验证 | G4 writer |
-| R13 | fnOS 工具/平台/真机/OCI 依赖未就绪 | G4 固定 digest 优先；官方模板校准；无 FPK 不称上架；生产宿主仅授权独立测试区 | G5负责人 |
+| R13 | fnOS 官方 fnpack help/template PASS；平台/真机/OCI 依赖未就绪 | G4 固定 digest 优先；研究骨架不是可安装 FPK；工具证据不是签名证明；无 FPK 不称上架；生产宿主仅授权独立测试区 | G5负责人 |
 | R14 | 新渠道开启破坏性操作扩大认证范围 | MAS Quarantine/Restore/Purge 禁止；Docker/fnOS 首发只读；新写能力需要分离执行和正式门禁 | 总控 / 安全 reviewer |
 | R15 | 多 IDE/agent 并发碰同工作树或历史现场 | 原子 lease + 单 writer + 独立分支/数据；不抢 lease、不 reset/clean；交接 exact diff | 总控 |
 | R16 | 公开仓库出现私人路径、日志、凭据或 Bookmark | raw仅私有归档；每 PR public-check/secret gate + 人工边界复核；manifest/provenance 不带 secret | 各 writer/reviewer |
 | R17 | AI review 被误当作者批准，或 CI跨 SHA | exact HEAD reviewer与实际 ruleset；不 admin bypass；每次主干合并后重新绑定 gates | 总控 |
+| R18 | fnOS 公开自安装 FPK 路线存在外部政策阻断 | [官方规范](https://developer.fnnas.com/docs/quick-started/test-application/) 限手动安装于本地测试；不得以主手册旧快照自安装 Beta 表述公开分发；向平台咨询可获批准渠道和开发者提交权限 | 平台负责人 / 总控 |
 
 若发现字节损坏、错误解锁、虚假回滚、源根逃逸或审计不一致，立即对应渠道 FAIL / SECURITY_BLOCKER，保护现场；不得清理真实数据取得 PASS。旧 beta.11、历史数据库、资产及失败记录保持不可变。

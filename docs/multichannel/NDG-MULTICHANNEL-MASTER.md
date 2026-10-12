@@ -2,6 +2,8 @@
 >
 > **2026-10-12 实时校准**：下文第 1、5、10、12 节中的 beta.11 Draft / 未授权公开 / 未使用 Mac 待办是附件原始快照，不能代表当前发行事实。beta.11 已于 `2026-10-11T16:01:08Z` 公开为 Pre-release；用户已明确豁免全新 Mac 离线首装并授权该次公开，该项记 `WAIVED_BY_OWNER`，不是 `PASS`。PR #91 已合并为 `584aafeb4cf1bb68cbda3bde2d26698b05555640`。最新门禁与责任人仅以 [RELEASE-STATUS](RELEASE-STATUS.md) 和 [EVIDENCE-INDEX](EVIDENCE-INDEX.md) 为准。历史正文及失败证据保留。后续其他渠道公开与外部提审仍须其专属最终授权。
 
+> **fnOS 政策校准**：2026-10-12 读取[官方测试应用规范](https://developer.fnnas.com/docs/quick-started/test-application/)，手动安装只用于本地测试、不应作为公开分发方式。下文第 8/10 节历史“自安装 Beta”不是现行公开分发许可。官方 fnpack 1.2.3 help/template 的本地验证不证明签名、安装、平台审核或分发权。外部路线须另取平台确认。
+
 # NDG 三端开发、验收与上线总执行手册（Codex 主控版）
 
 > **文档日期**：2026-10-12（项目状态快照；执行时须重新读取实时 GitHub / 本地仓库）
