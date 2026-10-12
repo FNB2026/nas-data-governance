@@ -258,13 +258,19 @@ func TestRegisterScanSourceIsSandboxOnlyAndHasNoScanOrRecoverySideEffects(t *tes
 func TestReauthorizationCapabilityFollowsSandboxBuild(t *testing.T) {
 	regular := NewAPI()
 	regularCapabilities, err := regular.GetAppCapabilities()
-	if err != nil || regularCapabilities.CanReauthorizeSources != sandboxBuild {
-		t.Fatalf("default build reauthorization capability = %v, err=%v; want sandboxBuild=%v", regularCapabilities.CanReauthorizeSources, err, sandboxBuild)
+	if err != nil || regularCapabilities.CanReauthorizeSources {
+		t.Fatalf("default API without an authorization manager exposed reauthorization = %v, err=%v; want false", regularCapabilities.CanReauthorizeSources, err)
 	}
-	mas := NewSandboxAPI(nil, t.TempDir())
+	unconfiguredSandbox := NewSandboxAPI(nil, t.TempDir())
+	unconfiguredCapabilities, err := unconfiguredSandbox.GetAppCapabilities()
+	if err != nil || unconfiguredCapabilities.CanReauthorizeSources {
+		t.Fatalf("sandbox API without an authorization manager exposed reauthorization = %v, err=%v; want false", unconfiguredCapabilities.CanReauthorizeSources, err)
+	}
+
+	mas, _, _ := sandboxTestAPI(t)
 	masCapabilities, err := mas.GetAppCapabilities()
 	if err != nil || !masCapabilities.CanReauthorizeSources {
-		t.Fatalf("sandbox build reauthorization capability = %v, err=%v; want true", masCapabilities.CanReauthorizeSources, err)
+		t.Fatalf("sandbox API with an authorization manager capability = %v, err=%v; want true", masCapabilities.CanReauthorizeSources, err)
 	}
 }
 

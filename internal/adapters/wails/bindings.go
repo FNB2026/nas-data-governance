@@ -1751,7 +1751,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		return AppCapabilitiesDTO{
 			ProjectOpen:           false,
 			ProjectMode:           "closed",
-			CanReauthorizeSources: a.sandbox,
+			CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
 			CanViewResults:        false,
 			DisabledReasons: map[string]string{
 				"scan-jobs":         "请先打开项目",
@@ -1792,7 +1792,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	return AppCapabilitiesDTO{
 		ProjectOpen:           true,
 		ProjectMode:           mode,
-		CanReauthorizeSources: a.sandbox,
+		CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
 		CanScan:               isRW && !recoveryLock,
 		CanViewResults:        true,
 		CanEditReviews:        isRW && !recoveryLock,
