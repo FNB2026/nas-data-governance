@@ -1,11 +1,14 @@
 //go:build darwin && masprobe
 #import <Cocoa/Cocoa.h>
 #import <sys/mount.h>
+#import <stdatomic.h>
 #import "bridge_darwin.h"
 static NSURL *activeURL;
 // Main-queue-only picker reference; it is valid while runModal is active.
 static NSOpenPanel *activePanel;
+static atomic_bool closing;
 void ndg_cancel_picker(void) {
+ atomic_store(&closing,true);
  dispatch_async(dispatch_get_main_queue(), ^{ if (activePanel) [activePanel cancel:nil]; });
 }
 static char *encode(NSDictionary *d) {
@@ -34,8 +37,10 @@ static char *activate(NSURL *url, BOOL stale) {
     return encode(@{@"path":url.path,@"bookmark":[bookmark base64EncodedStringWithOptions:0],@"stale":@(stale),@"network":@(network)});
 }
 char *ndg_pick(const char *initial) {
+    if (atomic_load(&closing)) return failure(@"shutting_down");
     __block char *result=NULL;
     void (^pick)(void)=^{
+        if (atomic_load(&closing)) { result=failure(@"shutting_down"); return; }
         NSOpenPanel *p=NSOpenPanel.openPanel;
         p.canChooseFiles=NO; p.canChooseDirectories=YES; p.allowsMultipleSelection=NO;
         p.title=@"选择人工创建的 Phase 0 测试目录（只读）";

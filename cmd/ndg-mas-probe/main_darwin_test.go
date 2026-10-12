@@ -51,3 +51,9 @@ func TestShutdownCancelsBeforeWaitingAndRejectsNewScan(t *testing.T) {
 		t.Fatal("new scan accepted during shutdown")
 	}
 }
+
+func TestNativeCloseBeforePickerNeverEntersModal(t *testing.T) {
+	if got := nativePickAfterClose(); got != `{"error":"shutting_down"}` {
+		t.Fatal("late picker must reject close latch")
+	}
+}

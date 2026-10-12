@@ -69,7 +69,8 @@ type Probe struct {
 	view     View
 }
 
-func native(p *C.char) string { defer C.free(unsafe.Pointer(p)); return C.GoString(p) }
+func native(p *C.char) string      { defer C.free(unsafe.Pointer(p)); return C.GoString(p) }
+func nativePickAfterClose() string { C.ndg_cancel_picker(); return native(C.ndg_pick(nil)) }
 func resolveBookmark(bookmark string) (grant, error) {
 	raw := C.CString(bookmark)
 	defer C.free(unsafe.Pointer(raw))
