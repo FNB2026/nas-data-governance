@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Only CI/local disposable containers with fresh owned state; never existing services."""
-import hashlib, http.cookiejar, json, os, pathlib, secrets, subprocess, tempfile, time, urllib.request, urllib.error
+import hashlib, http.cookiejar, json, os, pathlib, platform, re, secrets, subprocess, tempfile, time, urllib.request, urllib.error
 
 def run(*args, check=True):
     return subprocess.run(args, check=check, capture_output=True, text=True, timeout=90)
+
+architecture = os.environ.get("NDG_EXPECT_ARCH", "amd64")
+assert architecture in {"amd64", "arm64"}
+assert platform.machine() == {"amd64": "x86_64", "arm64": "aarch64"}[architecture]
+assert run("docker", "image", "inspect", "--format", "{{.Architecture}}", "ndg-disposable:test").stdout.strip() == architecture
 
 with tempfile.TemporaryDirectory(prefix="ndg-disposable-") as temp:
     root = pathlib.Path(temp); source = root / "source"; state = root / "state"; config = root / "config"
@@ -36,9 +41,22 @@ with tempfile.TemporaryDirectory(prefix="ndg-disposable-") as temp:
         raise AssertionError("container did not become healthy")
     try:
         run("docker", "run", "-d", "--name", name, "-p", "127.0.0.1:18083:8080", *common, "ndg-disposable:test"); ready()
+        expected_sha = run("git", "rev-parse", "HEAD").stdout.strip()
+        image_sha = run("docker", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}', name).stdout.strip()
+        assert image_sha == expected_sha
+        with client.open(settings["origin"] + "/", timeout=5) as response:
+            html = response.read().decode()
+            assert response.headers["Content-Security-Policy"] and 'id="root"' in html and "assets not built" not in html
+        assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', html)
+        assert any(asset.endswith(".js") for asset in assets)
+        for asset in assets:
+            with client.open(settings["origin"] + asset, timeout=5) as response:
+                assert response.status == 200 and len(response.read()) > 0
         try: request("/api/scan", {"alias": "source_a"}); raise AssertionError("unauthenticated scan accepted")
         except urllib.error.HTTPError as e: assert e.code == 401
         csrf = request("/api/login", {"password": password})["csrf"]
+        identity = request("/api/version")
+        assert identity["commit"] == expected_sha and identity["channel"] == "web-experimental"
         for endpoint in ["/api/quarantine/execute", "/api/restore/execute", "/api/purge/execute"]:
             try: request(endpoint, {}); raise AssertionError("execution accepted")
             except urllib.error.HTTPError as e: assert e.code == 403
@@ -60,6 +78,6 @@ with tempfile.TemporaryDirectory(prefix="ndg-disposable-") as temp:
         logs = run("docker", "logs", name).stdout + run("docker", "logs", name).stderr
         assert "synthetic_marker" not in logs and password not in logs and str(root) not in logs
         assert "synthetic_marker" not in json.dumps(result) and "/sources/" not in json.dumps(result)
-        print("PASS: disposable amd64 container auth, source bytes, 7 quick / 6 full / 3 groups, execution refusal, single writer and restart")
+        print(f"PASS: disposable native {architecture} container exact SHA, embedded Web assets, auth, source bytes, 7 quick / 6 full / 3 groups, execution refusal, single writer and restart")
     finally:
         run("docker", "rm", "-f", name, check=False)

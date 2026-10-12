@@ -7,7 +7,17 @@ permissions:
   contents: read
 jobs:
   linux-core:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            architecture: amd64
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -16,18 +26,32 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
+      - name: Require native runner architecture
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
       - run: go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store
       - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/ndg-server-amd64 ./cmd/ndg-server
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/ndg-server-arm64 ./cmd/ndg-server
   disposable-container:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            architecture: amd64
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Build amd64 container without publishing
-        run: docker build --build-arg TARGETARCH=amd64 --build-arg SOURCE_SHA="$(git rev-parse HEAD)" -f packaging/docker/Dockerfile -t ndg-disposable:test .
+      - name: Require native runner architecture
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+      - name: Build native container without publishing
+        run: docker build --build-arg TARGETARCH="${{ matrix.architecture }}" --build-arg SOURCE_SHA="$(git rev-parse HEAD)" -f packaging/docker/Dockerfile -t ndg-disposable:test .
       - name: Synthetic read-only and restart acceptance
-        run: sudo python3 scripts/packaging/test-linux-container.py
+        run: sudo env NDG_EXPECT_ARCH="${{ matrix.architecture }}" python3 scripts/packaging/test-linux-container.py
