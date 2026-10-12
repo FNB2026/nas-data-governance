@@ -485,8 +485,19 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 
 	if err != nil {
+		accessErr := recheckScanAuthority(ctx, in, stats.Errors, err)
 		if result.CheckpointID != 0 && s.store != nil {
-			_ = s.store.CompleteCheckpoint(ctx, result.CheckpointID, "aborted")
+			status := "aborted"
+			if errors.Is(accessErr, fileaccess.ErrNetworkPaused) {
+				status = "paused_network"
+			}
+			cpErr := s.store.CompleteCheckpoint(ctx, result.CheckpointID, status)
+			if in.AccessCheck != nil && cpErr != nil {
+				return nil, errors.New("checkpoint pause persistence failed")
+			}
+		}
+		if accessErr != nil {
+			return nil, accessErr
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
@@ -524,7 +535,18 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			// candidate is not a successful recovery. Keep the checkpoint resumable
 			// rather than silently certifying its cached hashes as current.
 			if selectedErr != nil || len(selectedStats.Errors) != 0 || len(observed) != len(selected) {
-				_ = s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, "aborted")
+				accessErr := recheckScanAuthority(ctx, in, selectedStats.Errors, selectedErr)
+				status := "aborted"
+				if errors.Is(accessErr, fileaccess.ErrNetworkPaused) {
+					status = "paused_network"
+				}
+				cpErr := s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, status)
+				if in.AccessCheck != nil && cpErr != nil {
+					return nil, errors.New("checkpoint pause persistence failed")
+				}
+				if accessErr != nil {
+					return nil, accessErr
+				}
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
@@ -771,4 +793,25 @@ func hashWithRetry(ctx context.Context, path string, size int64, attempts int, d
 		}
 	}
 	return "", attempts, errors.New("hash attempts exhausted")
+}
+
+// Permission denials in early traversal/prefix validation must use the same
+// sandbox classification as final reconciliation. Other boundary failures keep
+// their existing generic failure semantics. Never propagate a raw OS path.
+func recheckScanAuthority(ctx context.Context, in ScanInput, entries []scanner.ErrorEntry, cause error) error {
+	if in.AccessCheck == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(cause, os.ErrPermission) {
+		return fileaccess.ErrAuthorizationRequired
+	}
+	for _, entry := range entries {
+		if errors.Is(entry.Error, os.ErrPermission) {
+			return fileaccess.ErrAuthorizationRequired
+		}
+	}
+	return in.AccessCheck(ctx)
 }

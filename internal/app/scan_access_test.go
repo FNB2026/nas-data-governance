@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -104,5 +106,51 @@ func TestSandboxJobAuthorizationPauseIsExplicit(t *testing.T) {
 	all, e := mgr.ListRecent(ctx, "synthetic", 10)
 	if e != nil || len(all) != 1 || all[0].State != jobs.StatePausedAuthorization {
 		t.Fatal("authorization not durably paused")
+	}
+}
+
+func TestResumePrefixPermissionDenialIsAuthorizationPause(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "source")
+	prefix := filepath.Join(root, "prefix")
+	if e := os.MkdirAll(prefix, 0700); e != nil {
+		t.Fatal(e)
+	}
+	for _, name := range []string{"one", "two"} {
+		if e := os.WriteFile(filepath.Join(prefix, name), []byte("synthetic duplicate"), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	st, e := store.Open(ctx, filepath.Join(tmp, "governance.db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer st.Close()
+	initial := NewScanServiceWithHashFunc(st, fingerprint.Quick, func(string, int64) (string, error) { return "", syscall.ENETDOWN })
+	in := ScanInput{Root: root, StorageID: "prefix-permission", Workers: 1, HashAttempts: 1, NetworkSource: true}
+	if _, e = initial.Scan(ctx, in); !errors.Is(e, ErrNetworkSourceUnavailable) {
+		t.Fatal("fixture did not persist unfinished prefix candidates")
+	}
+	if e = os.Chmod(prefix, 0000); e != nil {
+		t.Fatal(e)
+	}
+	defer os.Chmod(prefix, 0700)
+	if _, e = os.ReadDir(prefix); !os.IsPermission(e) {
+		t.Skip("host bypasses POSIX permission fixture; classification not certified by this test")
+	}
+	in.Resume = true
+	in.AccessCheck = func(context.Context) error { return nil }
+	_, e = NewScanService(st).Scan(ctx, in)
+	if !errors.Is(e, fileaccess.ErrAuthorizationRequired) {
+		t.Fatalf("permission rejection classified incorrectly: %v", e)
+	}
+	files, e := st.ListFiles(ctx, in.StorageID)
+	if e != nil || len(files) != 2 {
+		t.Fatal("prefix records lost")
+	}
+	cp, e := st.LastCheckpoint(ctx, in.StorageID)
+	if e != nil || cp.Status != "aborted" {
+		t.Fatal("permission rejection certified content completion")
 	}
 }

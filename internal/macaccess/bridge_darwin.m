@@ -23,7 +23,7 @@ static char *activate(NSURL *url, void **scope) {
  if (!url || atomic_load(&closing)) return failure(@"AUTHORIZATION_REQUIRED");
  if (![url startAccessingSecurityScopedResource]) return failure(@"AUTHORIZATION_REQUIRED");
  struct stat st; struct statfs fs;
- if (lstat(url.path.fileSystemRepresentation,&st)!=0) { [url stopAccessingSecurityScopedResource]; return failure(errno==ENOENT ? @"SOURCE_UNAVAILABLE":@"AUTHORIZATION_REQUIRED"); }
+ if (lstat(url.path.fileSystemRepresentation,&st)!=0) { int savedErrno=errno; [url stopAccessingSecurityScopedResource]; return failure(savedErrno==ENOENT ? @"SOURCE_UNAVAILABLE":@"AUTHORIZATION_REQUIRED"); }
  if (!S_ISDIR(st.st_mode) || statfs(url.path.fileSystemRepresentation,&fs)!=0) { [url stopAccessingSecurityScopedResource];return failure(@"AUTHORIZATION_REQUIRED"); }
  NSError *err=nil;
  NSData *data=[url bookmarkDataWithOptions:(NSURLBookmarkCreationWithSecurityScope|NSURLBookmarkCreationSecurityScopeAllowOnlyReadAccess) includingResourceValuesForKeys:nil relativeToURL:nil error:&err];
