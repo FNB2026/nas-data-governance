@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 
 	"github.com/FNB2026/nas-data-governance/internal/dircontext"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -77,6 +80,10 @@ func NewHashFailure(file domain.FileInstance, stage string, attempts int, status
 
 // ScanInput defines parameters for a scan run.
 type ScanInput struct {
+	// AccessCheck is backend-only capability revalidation, never a frontend input.
+	AccessCheck func(context.Context) error
+	// AccessContext cancels sandbox jobs without cancelling persistence contexts.
+	AccessContext context.Context
 	// Root is the root directory to scan (required).
 	Root string
 	// StorageID is the storage identifier for DB persistence.
@@ -224,6 +231,11 @@ func (s *ScanService) setStage(in ScanInput, stage string) {
 // The returned ScanResult contains all data the CLI needs to write
 // JSONL, hash-failure manifests, and print summary lines.
 func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, error) {
+	if in.AccessCheck != nil {
+		if e := in.AccessCheck(ctx); e != nil {
+			return nil, e
+		}
+	}
 	if in.Root == "" {
 		return nil, fmt.Errorf("app: Scan: --root is required")
 	}
@@ -305,6 +317,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	// Scan with incremental hash reuse.
 	var files []domain.FileInstance
 	var filesMu sync.Mutex
+	var authorizationLost atomic.Bool
 	var hashFailures []HashFailure
 	var failuresMu sync.Mutex
 	var networkUnavailable atomic.Bool
@@ -425,6 +438,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			}
 			q, used, qerr := hashWithRetry(ctx, file.Path, file.Size, in.HashAttempts, in.HashRetryDelay, hash)
 			if qerr != nil {
+				if in.AccessCheck != nil && errors.Is(qerr, os.ErrPermission) {
+					authorizationLost.Store(true)
+				}
 				if in.NetworkSource && scanner.IsNetworkUnavailableError(qerr) {
 					networkUnavailable.Store(true)
 				}
@@ -470,8 +486,19 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 	}
 
 	if err != nil {
+		accessErr := recheckScanAuthority(ctx, in, stats.Errors, err)
 		if result.CheckpointID != 0 && s.store != nil {
-			_ = s.store.CompleteCheckpoint(ctx, result.CheckpointID, "aborted")
+			status := "aborted"
+			if errors.Is(accessErr, fileaccess.ErrNetworkPaused) {
+				status = "paused_network"
+			}
+			cpErr := s.store.CompleteCheckpoint(ctx, result.CheckpointID, status)
+			if in.AccessCheck != nil && cpErr != nil {
+				return nil, errors.New("checkpoint pause persistence failed")
+			}
+		}
+		if accessErr != nil {
+			return nil, accessErr
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
@@ -509,7 +536,18 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			// candidate is not a successful recovery. Keep the checkpoint resumable
 			// rather than silently certifying its cached hashes as current.
 			if selectedErr != nil || len(selectedStats.Errors) != 0 || len(observed) != len(selected) {
-				_ = s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, "aborted")
+				accessErr := recheckScanAuthority(ctx, in, selectedStats.Errors, selectedErr)
+				status := "aborted"
+				if errors.Is(accessErr, fileaccess.ErrNetworkPaused) {
+					status = "paused_network"
+				}
+				cpErr := s.store.CompleteCheckpoint(context.Background(), result.CheckpointID, status)
+				if in.AccessCheck != nil && cpErr != nil {
+					return nil, errors.New("checkpoint pause persistence failed")
+				}
+				if accessErr != nil {
+					return nil, accessErr
+				}
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
@@ -586,6 +624,9 @@ fullHashSubmission:
 					ferr = errors.New("empty full fingerprint")
 				}
 				if ferr != nil {
+					if in.AccessCheck != nil && errors.Is(ferr, os.ErrPermission) {
+						authorizationLost.Store(true)
+					}
 					if in.NetworkSource && scanner.IsNetworkUnavailableError(ferr) {
 						networkUnavailable.Store(true)
 					}
@@ -627,6 +668,29 @@ fullHashSubmission:
 	s.setStage(in, "persisting")
 
 	result.Files = files
+	if in.AccessCheck != nil {
+		for _, failure := range stats.Errors {
+			if errors.Is(failure.Error, os.ErrPermission) {
+				authorizationLost.Store(true)
+			}
+		}
+		accessErr := in.AccessCheck(ctx)
+		if authorizationLost.Load() {
+			accessErr = fileaccess.ErrAuthorizationRequired
+		}
+		if accessErr != nil {
+			if result.CheckpointID != 0 && s.store != nil {
+				status := "aborted"
+				if errors.Is(accessErr, fileaccess.ErrNetworkPaused) {
+					status = "paused_network"
+				}
+				if e := s.store.CompleteCheckpoint(ctx, result.CheckpointID, status); e != nil {
+					return result, errors.New("checkpoint pause persistence failed")
+				}
+			}
+			return result, accessErr
+		}
+	}
 	result.HashFailures = hashFailures
 	result.ScanErrors = len(stats.Errors)
 
@@ -730,4 +794,25 @@ func hashWithRetry(ctx context.Context, path string, size int64, attempts int, d
 		}
 	}
 	return "", attempts, errors.New("hash attempts exhausted")
+}
+
+// Permission denials in early traversal/prefix validation must use the same
+// sandbox classification as final reconciliation. Other boundary failures keep
+// their existing generic failure semantics. Never propagate a raw OS path.
+func recheckScanAuthority(ctx context.Context, in ScanInput, entries []scanner.ErrorEntry, cause error) error {
+	if in.AccessCheck == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(cause, os.ErrPermission) {
+		return fileaccess.ErrAuthorizationRequired
+	}
+	for _, entry := range entries {
+		if errors.Is(entry.Error, os.ErrPermission) {
+			return fileaccess.ErrAuthorizationRequired
+		}
+	}
+	return in.AccessCheck(ctx)
 }

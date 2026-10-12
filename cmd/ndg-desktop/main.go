@@ -23,7 +23,7 @@ import (
 var assets embed.FS
 
 func main() {
-	api := wails.NewAPI()
+	api := newDesktopAPI()
 
 	err := wailsapp.Run(&options.App{
 		Title:     "NDG — 数据治理工作台",
@@ -51,6 +51,12 @@ func main() {
 					ShowHiddenFiles: true,
 				})
 			})
+		},
+		OnBeforeClose: func(ctx context.Context) bool {
+			if sandboxDesktop {
+				wails.ShutdownSandboxAPI(api)
+			}
+			return false
 		},
 		OnShutdown: func(ctx context.Context) {
 			// Ensure the project database is closed on exit.

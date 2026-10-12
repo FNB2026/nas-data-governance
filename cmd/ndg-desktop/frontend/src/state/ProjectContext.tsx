@@ -383,6 +383,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             );
           } else if (p.state === "CANCELLED") {
             pushToast("warning", "扫描已取消");
+          } else if (p.state === "PAUSED_AUTHORIZATION") {
+            pushToast("warning", "目录授权失效，扫描已暂停", "请重新选择源目录授权；尚未解决的恢复锁仍然有效");
           } else if (p.state === "PAUSED_NETWORK") {
             void loadStorages();
             pushToast(

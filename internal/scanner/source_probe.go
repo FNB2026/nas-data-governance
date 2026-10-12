@@ -68,17 +68,32 @@ type sourceProbeResult struct {
 // waiting when ctx expires. At most one in-flight syscall remains for a timed
 // out probe, and its result is discarded when it eventually returns.
 func ProbeSource(ctx context.Context, root string) (SourceProfile, error) {
+	return ProbeSourceWithCleanup(ctx, root, nil)
+}
+
+// ProbeSourceWithCleanup releases a borrowed resource only when the real IO
+// worker returns, even if its caller timed out. It never releases mid-syscall.
+func ProbeSourceWithCleanup(ctx context.Context, root string, cleanup func()) (SourceProfile, error) {
 	if err := ctx.Err(); err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
 		return SourceProfile{Status: SourceUnavailable}, &ProbeError{Code: "timeout"}
 	}
 	absRoot, err := filepath.Abs(strings.TrimSpace(root))
 	if err != nil || strings.TrimSpace(root) == "" {
+		if cleanup != nil {
+			cleanup()
+		}
 		return SourceProfile{Status: SourceUnavailable}, &ProbeError{Code: "unavailable"}
 	}
 
 	started := time.Now()
 	resultCh := make(chan sourceProbeResult, 1)
 	go func() {
+		if cleanup != nil {
+			defer cleanup()
+		}
 		resultCh <- inspectSource(absRoot)
 	}()
 

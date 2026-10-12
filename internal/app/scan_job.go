@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+
 	"github.com/FNB2026/nas-data-governance/internal/jobs"
 )
 
@@ -68,12 +70,21 @@ func (r *ScanJobRunner) RunScanAsJob(ctx context.Context, projectID string, in S
 // job creation; the job runs under its own lifecycle managed by
 // JobManager. To cancel an async scan, call JobManager.RequestCancel.
 func (r *ScanJobRunner) StartScanJob(ctx context.Context, projectID string, in ScanInput) (string, error) {
+	return r.StartScanJobWithCleanup(ctx, projectID, in, nil)
+}
+
+// StartScanJobWithCleanup transfers a resource lease only after job creation.
+// cleanup runs after persistence and progress workers finish, including cancel.
+func (r *ScanJobRunner) StartScanJobWithCleanup(ctx context.Context, projectID string, in ScanInput, cleanup func()) (string, error) {
 	jobID, err := r.jobs.Create(ctx, projectID, jobs.JobScan)
 	if err != nil {
 		return "", fmt.Errorf("app: scan job: create: %w", err)
 	}
 
 	go func() {
+		if cleanup != nil {
+			defer cleanup()
+		}
 		_, _ = r.runScanJob(ctx, jobID, in)
 	}()
 
@@ -87,6 +98,13 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 	var scanErr error
 
 	err := r.jobs.Run(ctx, jobID, func(jobCtx context.Context, reporter *jobs.Reporter) error {
+		if in.AccessContext != nil {
+			scopedCtx, cancel := context.WithCancel(jobCtx)
+			stop := context.AfterFunc(in.AccessContext, cancel)
+			defer stop()
+			defer cancel()
+			jobCtx = scopedCtx
+		}
 		// ScanService reports stage changes synchronously. This guarantees
 		// short stages such as persistence/finalization are recorded instead
 		// of disappearing between one-second progress polls.
@@ -152,7 +170,16 @@ func (r *ScanJobRunner) runScanJob(ctx context.Context, jobID string, in ScanInp
 
 		if scanErr != nil {
 			if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
+				if in.AccessContext != nil {
+					_ = r.jobs.RequestCancel(context.Background(), jobID)
+				}
 				return jobs.ErrCancellationRequested
+			}
+			if errors.Is(scanErr, fileaccess.ErrAuthorizationRequired) {
+				return jobs.ErrAuthorizationPaused
+			}
+			if errors.Is(scanErr, fileaccess.ErrNetworkPaused) {
+				return jobs.ErrNetworkPaused
 			}
 			if errors.Is(scanErr, ErrNetworkSourceUnavailable) {
 				return jobs.ErrNetworkPaused

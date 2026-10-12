@@ -5,6 +5,7 @@ p=argparse.ArgumentParser()
 p.add_argument('action',choices=['prepare','serve','mount','unmount','verify'])
 p.add_argument('--manifest',default='/tmp/ndg-mas-phase0-private.json')
 p.add_argument('--port',type=int,default=2445)
+p.add_argument('--read-delay-ms',type=int,default=0,choices=range(0,251),help='Disposable server SMB READ delay only; no product injection')
 a=p.parse_args();dest=pathlib.Path(a.manifest)
 if a.action=='prepare':
     if dest.exists(): raise SystemExit('Manifest exists; choose a new filename. No overwrite.')
@@ -27,6 +28,15 @@ else:
         from impacket.smbserver import SimpleSMBServer
         s=SimpleSMBServer(listenAddress='127.0.0.1',listenPort=m['port'])
         s.addShare(m['share'],str(root/'export'),'Disposable read-only phase0',readOnly='yes')
+        if a.read_delay_ms:
+            import time
+            from impacket import smb3structs
+            server=s.getServer()
+            def delayed_read(*args,**kwargs):
+                time.sleep(a.read_delay_ms/1000)
+                return original_read(*args,**kwargs)
+            original_read=server.hookSmb2Command(smb3structs.SMB2_READ,delayed_read)
+            if original_read is None: raise SystemExit('SMB read hook unavailable; refuse pretend delay')
         s.setSMB2Support(True);s.setLogFile(str(root/'evidence'/'smb-private.log'));s.start()
     elif a.action=='mount':
         subprocess.run(['/sbin/mount_smbfs','-N',f'//guest@127.0.0.1:{m["port"]}/{m["share"]}',str(root/'mount')],check=True)

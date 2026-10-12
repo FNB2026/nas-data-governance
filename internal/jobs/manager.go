@@ -193,6 +193,9 @@ func (m *JobManager) Run(ctx context.Context, jobID string, fn JobFunc) error {
 		if errors.Is(jobErr, ErrCancellationRequested) || errors.Is(jobErr, context.Canceled) {
 			finalState = StateCancelled
 			eventType = events.EventCancelled
+		} else if errors.Is(jobErr, ErrAuthorizationPaused) {
+			finalState = StatePausedAuthorization
+			eventType = events.EventPausedAuthorization
 		} else if errors.Is(jobErr, ErrNetworkPaused) {
 			finalState = StatePausedNetwork
 			eventType = events.EventPausedNetwork

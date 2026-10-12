@@ -18,7 +18,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -94,6 +97,14 @@ var ErrProjectNotReadWrite = errors.New("wails: project is open read-only; reope
 // dir (~/Library/Application Support/NDG/projects/<id>/governance.db on
 // macOS) with 0700/0600 perms, never inside the scan source.
 type API struct {
+	sandbox       bool
+	access        *fileaccess.Manager
+	support       string
+	scanCtx       context.Context
+	scanCancel    context.CancelFunc
+	scanWG        sync.WaitGroup
+	activeScans   atomic.Int32
+	closing       bool
 	mu            sync.RWMutex
 	store         *store.SQLiteStore
 	dupSvc        *app.DuplicateService
@@ -116,7 +127,7 @@ type API struct {
 // NewAPI creates a new Wails API instance. The store starts nil;
 // OpenProject initializes it.
 func NewAPI() *API {
-	return &API{projectSvc: newProjectService()}
+	return &API{projectSvc: newProjectService(), sandbox: sandboxBuild}
 }
 
 // initReadWriteServicesLocked is composition-root wiring, not project
@@ -173,6 +184,12 @@ func (a *API) GetVersion() VersionInfo {
 func (a *API) OpenProject(path string) (ProjectInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return ProjectInfo{}, fileaccess.ErrAuthorizationRequired
+	}
+	if e := a.authorizeDatabase(path); e != nil {
+		return ProjectInfo{}, e
+	}
 
 	if a.store != nil {
 		return ProjectInfo{}, ErrProjectAlreadyOpen
@@ -231,6 +248,9 @@ func (a *API) OpenProject(path string) (ProjectInfo, error) {
 func (a *API) CloseProject() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.sandbox && a.activeScans.Load() != 0 {
+		return errors.New("SCAN_BUSY")
+	}
 
 	if a.store == nil {
 		return nil
@@ -273,6 +293,11 @@ func (a *API) GetProjectInfo() (ProjectInfo, error) {
 //
 // Returns nil if valid, an error describing the problem otherwise.
 func (a *API) ValidateProjectPath(path string) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if e := a.authorizeDatabase(path); e != nil {
+		return e
+	}
 	return validateProjectPath(path)
 }
 
@@ -431,6 +456,12 @@ func validateProjectPathRW(path string) error {
 func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return ProjectInfo{}, fileaccess.ErrAuthorizationRequired
+	}
+	if e := a.authorizeDatabase(path); e != nil {
+		return ProjectInfo{}, e
+	}
 
 	if a.store != nil {
 		return ProjectInfo{}, ErrProjectAlreadyOpen
@@ -473,8 +504,29 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 // The root directory must exist and be readable. If storage_id is empty,
 // a stable ID is derived from the root path (same as RegisterScanSource).
 func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	// Preserve the legacy DMG read-lock concurrency; MAS alone serializes its
+	// active-scan ownership and lease transfer.
+	if a.sandbox {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+	} else {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+	}
+	if a.sandbox && (a.closing || a.activeScans.Load() != 0) {
+		return StartScanResponse{}, errors.New("SCAN_BUSY")
+	}
+	lease, e := a.sourceLease(req.Root)
+	if e != nil {
+		return StartScanResponse{}, e
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			lease.Release()
+		}
+	}()
+	req.Root = lease.Root
 
 	if a.scanRunner == nil {
 		if a.store != nil {
@@ -490,6 +542,9 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		return StartScanResponse{}, errors.New("wails: root is required")
 	}
 	if err := a.rejectScanRootContainingProjectFiles(req.Root, a.path); err != nil {
+		if a.sandbox {
+			return StartScanResponse{}, safeAccessError(err)
+		}
 		return StartScanResponse{}, err
 	}
 
@@ -499,6 +554,9 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	// maps to the same ID, regardless of what the frontend sends.
 	derivedID := projectsvc.GenerateStorageID(req.Root)
 	if storageID != "" && storageID != derivedID {
+		if a.sandbox {
+			return StartScanResponse{}, fileaccess.ErrAuthorizationRequired
+		}
 		return StartScanResponse{}, fmt.Errorf(
 			"wails: storage_id %q does not match the ID derived from root %q (expected %q); "+
 				"storage ID is determined by the scan root and cannot be set manually",
@@ -508,7 +566,7 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 	storageID = derivedID
 
 	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 5*time.Second)
-	profile, err := scanner.ProbeSource(probeCtx, req.Root)
+	profile, err := a.probeSource(probeCtx, req.Root)
 	cancelProbe()
 	if err != nil {
 		return StartScanResponse{}, fmt.Errorf("wails: source preflight: %w", err)
@@ -527,7 +585,32 @@ func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
 		HashRetryDelay: 1 * time.Second,
 	}
 
-	jobID, err := a.scanRunner.StartScanJob(context.Background(), a.jobScope, in)
+	var jobID string
+	if a.sandbox {
+		in.AccessContext = a.scanCtx
+		in.AccessCheck = func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			l, e := a.access.Acquire(ctx, in.Root)
+			if e != nil {
+				return e
+			}
+			l.Release()
+			return nil
+		}
+		a.scanWG.Add(1)
+		a.activeScans.Add(1)
+		cleanup := func() { lease.Release(); a.activeScans.Add(-1); a.scanWG.Done() }
+		jobID, err = a.scanRunner.StartScanJobWithCleanup(context.Background(), a.jobScope, in, cleanup)
+		if err != nil {
+			cleanup()
+		} else {
+			transferred = true
+		}
+	} else {
+		jobID, err = a.scanRunner.StartScanJob(context.Background(), a.jobScope, in)
+	}
 	if err != nil {
 		return StartScanResponse{}, fmt.Errorf("wails: start scan: %w", err)
 	}
@@ -553,9 +636,17 @@ func scanWorkersForProfile(requested int, profile scanner.SourceProfile) int {
 // PreflightSource performs the same bounded, read-only source check used by
 // StartScan without creating a job or changing project state.
 func (a *API) PreflightSource(root string) (SourcePreflightDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	lease, e := a.sourceLease(root)
+	if e != nil {
+		return SourcePreflightDTO{Status: e.Error()}, e
+	}
+	defer lease.Release()
+	root = lease.Root
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	profile, err := scanner.ProbeSource(ctx, root)
+	profile, err := a.probeSource(ctx, root)
 	if err != nil {
 		return SourcePreflightDTO{Status: string(scanner.SourceUnavailable)}, err
 	}
@@ -739,6 +830,10 @@ func (a *API) GetJobDetail(jobID string) (JobDetailResponse, error) {
 //
 // The project must be open (read-only or read-write).
 func (a *API) DiagnoseFormats(req DiagnoseFormatsRequest) (*formatdiag.Report, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -762,6 +857,10 @@ func (a *API) DiagnoseFormats(req DiagnoseFormatsRequest) (*formatdiag.Report, e
 // All generated plans are DRAFT. The service refuses non-draft results.
 // The project must be open (read-only or read-write).
 func (a *API) DiagnoseGovernance(req DiagnoseGovernanceRequest) (*governancediag.Report, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -784,6 +883,10 @@ func (a *API) DiagnoseGovernance(req DiagnoseGovernanceRequest) (*governancediag
 //
 // The project must be open (read-only or read-write).
 func (a *API) DiagnoseMerges(req DiagnoseMergesRequest) (*merge.DiagnosticReport, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -1051,6 +1154,10 @@ func (a *API) ListRestorePlans() ([]RestorePlanDTO, error) {
 // CreateRestorePlan builds a DRAFT restore plan for a single quarantine item.
 // The plan is persisted to the database. Requires read-write mode.
 func (a *API) CreateRestorePlan(itemID string) (RestorePlanDTO, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return RestorePlanDTO{}, e
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -1073,6 +1180,10 @@ func (a *API) CreateRestorePlan(itemID string) (RestorePlanDTO, error) {
 // ApproveRestorePlan transitions a restore plan from DRAFT to APPROVED using
 // the plan's digest. Requires read-write mode.
 func (a *API) ApproveRestorePlan(planID, digest string) error {
+	if e := a.denySourceWrites(); e != nil {
+		return e
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -1097,6 +1208,10 @@ func (a *API) ApproveRestorePlan(planID, digest string) error {
 // ExecuteRestore executes an approved restore plan. When dry_run is true,
 // only validation is performed. Requires read-write mode.
 func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return ExecuteRestoreResponse{}, e
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1139,6 +1254,10 @@ func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse,
 // whose retention period has expired. Plans are persisted to the database.
 // Requires read-write mode.
 func (a *API) CreatePurgePlans() ([]PurgePlanDTO, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	if !app.PurgeReleaseAllowed() {
 		return nil, app.ErrPurgeReleaseDisabled
 	}
@@ -1183,6 +1302,10 @@ func (a *API) ListPurgePlans() ([]PurgePlanDTO, error) {
 // ApprovePurgePlan transitions a purge plan from DRAFT to APPROVED using
 // the plan's digest. Requires read-write mode.
 func (a *API) ApprovePurgePlan(planID, digest string) error {
+	if e := a.denySourceWrites(); e != nil {
+		return e
+	}
+
 	if !app.PurgeReleaseAllowed() {
 		return app.ErrPurgeReleaseDisabled
 	}
@@ -1210,6 +1333,10 @@ func (a *API) ApprovePurgePlan(planID, digest string) error {
 // ExecutePurge executes an approved purge plan. When dry_run is true, only
 // validation is performed. Requires read-write mode.
 func (a *API) ExecutePurge(req ExecutePurgeRequest) (ExecutePurgeResponse, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return ExecutePurgeResponse{}, e
+	}
+
 	if !app.PurgeReleaseAllowed() {
 		return ExecutePurgeResponse{}, app.ErrPurgeReleaseDisabled
 	}
@@ -1297,6 +1424,10 @@ func checkRecoveryLock(ctx context.Context, st recoveryLockStore) (RecoveryStatu
 // them to a safe state (rolled back, fresh DRAFT, or explicitly blocked).
 // Requires read-write mode.
 func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1325,6 +1456,10 @@ func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
 // RecoverRestores coordinates crash recovery for non-terminal restore
 // operations. Requires read-write mode.
 func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResultDTO, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1360,6 +1495,10 @@ func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResu
 // RecoverPurges coordinates crash recovery for non-terminal purge
 // operations. Requires read-write mode.
 func (a *API) RecoverPurges(quarantineRoot string) ([]PurgeRecoveryResultDTO, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return nil, e
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1508,6 +1647,10 @@ func (a *API) SaveDraftPlans(storageID string) ([]PlanDTO, error) {
 // re-loads plans from the database by plan_ids — it does not trust
 // frontend-supplied plan data.
 func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error) {
+	if e := a.denySourceWrites(); e != nil {
+		return ExecutePlansResponse{}, e
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1634,6 +1777,9 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	}
 
 	disabled := map[string]string{"purge": "当前发行版本禁止永久清理；历史与异常恢复仍可查看"}
+	if a.sandbox {
+		disabled["execution-center"] = "商店只读预验证禁止文件写入及恢复操作"
+	}
 	if !isRW {
 		disabled["execution-center"] = "只读模式，无法执行写操作"
 	}
@@ -1649,8 +1795,8 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		CanViewResults:       true,
 		CanEditReviews:       isRW && !recoveryLock,
 		CanApprovePlans:      isRW && !recoveryLock,
-		CanExecuteQuarantine: isRW && !recoveryLock,
-		CanExecutePurge:      isRW && !recoveryLock && app.PurgeReleaseAllowed(),
+		CanExecuteQuarantine: isRW && !recoveryLock && !a.sandbox,
+		CanExecutePurge:      isRW && !recoveryLock && !a.sandbox && app.PurgeReleaseAllowed(),
 		RecoveryLockActive:   recoveryLock,
 		DisabledReasons:      disabled,
 	}, nil
