@@ -403,9 +403,11 @@ func (b *LocalBackend) Snapshot(alias string) (Snapshot, error) {
 		v.Processed = p.Processed
 		v.Failed = p.Failed
 	}
-	if cp, e := s.st.LastCheckpoint(ctx, alias); e == nil {
+	if cp, e := s.st.LatestCheckpointSummary(ctx, alias); e == nil {
 		v.Checkpoint = cp.Status
-		v.Scanned = cp.ScannedCount
+		v.Scanned = cp.Scanned
+	} else if !errors.Is(e, store.ErrNotFound) {
+		return Snapshot{}, ErrDenied
 	}
 	summary, e := s.st.ScanSummary(ctx, alias)
 	if e != nil {
