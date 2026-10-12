@@ -11,6 +11,8 @@ npm ci --ignore-scripts
 npm run build
 cd "$ROOT"
 mkdir -p cmd/ndg-mas-phase1a/frontend/dist
+# Use the canonical product icon, never the Wails placeholder fallback.
+cp cmd/ndg-desktop/build/appicon.png cmd/ndg-desktop/build/mas-phase1a/appicon.png
 cp cmd/ndg-desktop/main.go cmd/ndg-desktop/access_mas_darwin.go cmd/ndg-desktop/access_mas_other.go cmd/ndg-mas-phase1a/
 cp -R cmd/ndg-desktop/frontend/dist/. cmd/ndg-mas-phase1a/frontend/dist/
 python3 - <<'PYCFG'

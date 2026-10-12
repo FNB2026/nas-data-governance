@@ -16,3 +16,7 @@ Prerequisites: macOS Apple Silicon, Xcode/CLT, Go matching go.mod, Wails CLI 2.1
 Native tests (build frontend first): `go test -tags 'masprobe,production' ./cmd/ndg-mas-probe`; `go vet -tags 'masprobe,production' ./cmd/ndg-mas-probe`. Core regression: `go test ./internal/scanner ./internal/fingerprint ./internal/store`. Tests run outside App Sandbox; actual GUI observations supply OS authorization evidence.
 
 The probe mutex serializes native scope and scans. Source grants are private 0600 data in a 0700 Foundation Application Support container. It refuses a resolved root relocation; prototype `locked` refers only to authorization. Production Journal/Recovery Lock integration, general migration and every write path are future work. Prototype has no executor/Purge API. Production MAS config is only a proposed read-only target until those changes are reviewed.
+
+## Phase 1A product authorization layer
+
+See [Phase 1A report](phase1a-2026-10-12.md) for the build-time MAS policy, actual product GUI evidence and remaining INCONCLUSIVE scenarios. Build the separate local sandbox product with `scripts/mas/build-phase1a.sh`. This is a dev/ad hoc capability validation App, not an App Store distribution or a replacement for the GitHub DMG.
