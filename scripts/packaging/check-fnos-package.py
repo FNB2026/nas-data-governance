@@ -5,7 +5,9 @@ The Compose document deliberately uses the JSON subset of YAML. This checker
 does not claim fnOS runtime, receipt authenticity, or fnpack equivalence.
 """
 import argparse
+import ctypes
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -44,17 +46,134 @@ def document(path):
 
 
 def check_tree(root):
-    # The checkout itself is a trusted stable caller-owned research input. No
-    # security claim is made for roots concurrently replaced by another writer.
-    require(root.is_dir() and not root.is_symlink(), "invalid_package_root")
-    for member in root.rglob("*"):
-        info = member.lstat()
-        require(not stat.S_ISLNK(info.st_mode), "package_symlink")
-        require(stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode), "special_package_entry")
-        require(not member.name.startswith("."), "hidden_package_entry")
-        require(member.suffix.lower() not in {".fpk", ".db", ".sqlite", ".log", ".pem", ".key"}, "private_or_generated_entry")
-        require(not info.st_mode & 0o022, "unsafe_package_mode")
-        require(info.st_size <= 1024 * 1024, "oversized_package_entry")
+    check_tree_with_boundaries(root)
+
+
+def linux_mountpoints(text):
+    """mountinfo includes same-device bind mounts and mount-on-file entries."""
+    points = set()
+    for line in text.splitlines():
+        fields = line.split()
+        require(len(fields) >= 10 and "-" in fields[6:], "invalid_mount_boundary_source")
+        raw = fields[4]
+        # Kernel mountinfo escapes space, tab, newline and backslash as octal.
+        require(not re.search(r"\\(?![0-7]{3})", raw), "invalid_mount_boundary_source")
+        decoded = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), raw)
+        require(decoded.startswith("/") and "\x00" not in decoded, "invalid_mount_boundary_source")
+        points.add(Path(os.path.normpath(decoded)))
+    require(Path("/") in points, "invalid_mount_boundary_source")
+    return points
+
+
+def darwin_mountpoints():
+    """64-bit Darwin statfs ABI, getmntinfo with MNT_NOWAIT.
+
+    Only mount target names are used. No mount syscall, source-volume probe,
+    available-space reason, or application-runtime privacy claim is introduced.
+    Unsupported ABI/symbol/error is a rejection, never an empty boundary set.
+    """
+    require(ctypes.sizeof(ctypes.c_void_p) == 8, "unsupported_mount_boundary_platform")
+    architecture = os.uname().machine
+    require(architecture in {"arm64", "x86_64"}, "unsupported_mount_boundary_platform")
+
+    class StatFS64(ctypes.Structure):
+        _fields_ = [("bsize", ctypes.c_uint32), ("iosize", ctypes.c_int32),
+                    ("blocks", ctypes.c_uint64), ("bfree", ctypes.c_uint64),
+                    ("bavail", ctypes.c_uint64), ("files", ctypes.c_uint64),
+                    ("ffree", ctypes.c_uint64), ("fsid", ctypes.c_int32 * 2),
+                    ("owner", ctypes.c_uint32), ("type", ctypes.c_uint32),
+                    ("flags", ctypes.c_uint32), ("subtype", ctypes.c_uint32),
+                    ("fstypename", ctypes.c_char * 16), ("mntonname", ctypes.c_char * 1024),
+                    ("mntfromname", ctypes.c_char * 1024), ("flags_ext", ctypes.c_uint32),
+                    ("reserved", ctypes.c_uint32 * 7)]
+
+    require(ctypes.sizeof(StatFS64) == 2168 and StatFS64.mntonname.offset == 88, "unsupported_mount_boundary_platform")
+    try:
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+        # Darwin arm64 only exports the 64-bit inode ABI under the plain name.
+        # x86_64 has legacy ABI aliases: require the explicit INODE64 symbol.
+        function = getattr(libc, "getmntinfo" if architecture == "arm64" else "getmntinfo$INODE64")
+        function.argtypes = [ctypes.POINTER(ctypes.POINTER(StatFS64)), ctypes.c_int]
+        function.restype = ctypes.c_int
+        entries = ctypes.POINTER(StatFS64)()
+        count = function(ctypes.byref(entries), 2)  # MNT_NOWAIT; no volume I/O refresh.
+        require(entries and 0 < count <= 65536, "mount_boundary_unavailable")
+        points = set()
+        for index in range(count):
+            name = bytes(entries[index].mntonname)
+            require(0 < len(name) < 1024, "invalid_mount_boundary_source")
+            decoded = os.fsdecode(name)
+            require(decoded.startswith("/"), "invalid_mount_boundary_source")
+            points.add(Path(os.path.normpath(decoded)))
+        require(Path("/") in points, "invalid_mount_boundary_source")
+        return points
+    except (OSError, AttributeError):
+        raise Rejected("mount_boundary_unavailable") from None
+
+
+def mountpoints():
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/self/mountinfo", encoding="utf-8", errors="surrogateescape") as source:
+                text = source.read(4 * 1024 * 1024 + 1)
+            require(len(text) <= 4 * 1024 * 1024, "invalid_mount_boundary_source")
+            return linux_mountpoints(text)
+        except OSError:
+            raise Rejected("mount_boundary_unavailable") from None
+    if sys.platform == "darwin":
+        return darwin_mountpoints()
+    raise Rejected("unsupported_mount_boundary_platform")
+
+
+def trusted_ancestry(root):
+    """Owner/mode/identity preflight, not proof of ACLs or future stability.
+
+    Caller must retain an exclusive lease for this stable checkout throughout
+    validation. System-owned sticky temp ancestors are permitted; private root
+    itself must be caller-owned and cannot be a link or writable by another UID.
+    """
+    root = Path(os.path.abspath(root))
+    identities = []
+    for ancestor in reversed((root, *root.parents)):
+        info = ancestor.lstat()
+        require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode), "untrusted_package_ancestry")
+        require(info.st_uid in {0, os.getuid()}, "untrusted_package_owner")
+        sticky_system = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+        require(not info.st_mode & 0o022 or sticky_system, "untrusted_package_ancestry")
+        identities.append((ancestor, info.st_dev, info.st_ino))
+    require(root.lstat().st_uid == os.getuid(), "untrusted_package_owner")
+    return root, identities
+
+
+def check_tree_with_boundaries(root, *, known_mountpoints=None):
+    root, identities = trusted_ancestry(root)
+    boundaries = mountpoints() if known_mountpoints is None else known_mountpoints
+    require(isinstance(boundaries, set) and all(isinstance(point, Path) and point.is_absolute() for point in boundaries), "invalid_mount_boundary_source")
+    device = root.lstat().st_dev
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        # No child enumeration before that directory's own boundary check.
+        info = directory.lstat()
+        require(info.st_dev == device and (directory == root or directory not in boundaries), "package_mount_boundary")
+        require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode), "package_symlink")
+        for member in directory.iterdir():
+            info = member.lstat()
+            require(not stat.S_ISLNK(info.st_mode), "package_symlink")
+            # Check files as well: Linux bind mounts can replace a single file.
+            require(info.st_dev == device and member not in boundaries, "package_mount_boundary")
+            require(stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode), "special_package_entry")
+            require(not member.name.startswith("."), "hidden_package_entry")
+            require(member.suffix.lower() not in {".fpk", ".db", ".sqlite", ".log", ".pem", ".key"}, "private_or_generated_entry")
+            require(not info.st_mode & 0o022, "unsafe_package_mode")
+            require(info.st_size <= 1024 * 1024, "oversized_package_entry")
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(member)
+    # Detect changed ancestry observed across this preflight; caller must still
+    # prohibit later replacements/remounts until all document reads finish.
+    for ancestor, expected_device, inode in identities:
+        current = ancestor.lstat()
+        require(current.st_dev == expected_device and current.st_ino == inode and stat.S_ISDIR(current.st_mode), "package_ancestry_changed")
 
 
 def manifest(path):

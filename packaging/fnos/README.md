@@ -11,7 +11,7 @@ make fnos-test
 ./scripts/packaging/build-fnos-package.sh
 ```
 
-The first command performs structural checks and 18 synthetic tests. The second
+The first command performs structural checks and 24 synthetic tests. The second
 must exit 1 with `accepted_oci_digest_required` and produces no artifact. Even a
 synthetic receipt saying PASS cannot enable building: the final hard stop is
 `fnos_runtime_integration_not_implemented`. Future enablement requires a new
@@ -56,10 +56,25 @@ Quarantine, Restore and Purge are not mounted or enabled.
 The checker rejects extra Compose fields/services, root users, public listeners,
 writeable sources, rootfs writes, credential environment additions, host socket
 mounts, symlinks/special files, unsafe file modes, hidden/generated/private
-entries, duplicate JSON keys and image tags instead of digests. Errors contain
-classification only. It has a trusted, stable, caller-owned checkout-root
-precondition: it is not an adversarial concurrent filesystem snapshotter or a
-container ownership/ACL verifier. The receipt is a proposed local schema, **not
+entries, duplicate JSON keys and image tags instead of digests. It explicitly
+walks children only after checking the directory boundary; it does not use
+recursive glob. Device changes and nested mount targets are rejected before
+descent/content reads, including Linux same-device bind mounts and mount-on-file
+entries. Linux uses `/proc/self/mountinfo`; macOS arm64 uses 64-bit `getmntinfo`
+with `MNT_NOWAIT`, and x86_64 requires the explicit INODE64 ABI symbol. Unknown
+platforms, unavailable mount tables and malformed records fail closed. Local
+macOS table reading and deterministic injected boundaries are tested; actual
+mount/remount integration and macOS x86_64 are **NOT RUN**.
+
+Errors contain classification only; mount paths and sources are not logged.
+Before enumeration, root and ancestor POSIX ownership/mode/link/identity are
+checked. A system-owned sticky temporary ancestor is allowed, but the package
+root must belong to the caller. This is still a trusted, stable checkout
+precondition: callers must prove ACL safety and retain exclusive ownership/lease
+while all document reads run. 0700 or owner UID alone is not proof of ACLs or
+future mount stability. The checker detects some observed replacements but is
+not an adversarial concurrent filesystem snapshotter or a runtime container
+ownership/ACL verifier. The receipt is a proposed local schema, **not
 cryptographic evidence**. The hard build block prevents it being used to assert
 acceptance today. Tests never call a real Docker daemon.
 

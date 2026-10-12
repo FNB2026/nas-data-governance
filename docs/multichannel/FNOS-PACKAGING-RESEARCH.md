@@ -9,6 +9,8 @@ QEMU process was accessed. No FPK was built or installed.
 |---|---|---|
 | Official public tool download and help/template observation | PASS | fnpack 1.2.3; receipt with observed hash, no publisher signature assertion |
 | Research structure and synthetic lifecycle/config tests | PASS | Offline only; not runtime/source permission acceptance |
+| Pre-descent mount rejection | PASS (injected boundaries) | Device changes, same-device directory/file mounts; no actual mount was created |
+| Actual mount/remount integration | NOT RUN | Local table metadata only; no unrelated mounts or NAS contents accessed |
 | Accepted G4 image digest and receipt | BLOCKED | Empty identity; image cannot be packed |
 | App Center lifecycle/SQLite drain/export/upgrade | NOT RUN | Hooks deliberately reject unsupported operations |
 | Isolated fnOS device/UI/ACL/uninstall retention | BLOCKED | No dedicated administrator-authorized test namespace |
@@ -56,6 +58,29 @@ clean DB close, with device-observed ordering. Upgrade cannot claim success
 before a supported consistent backup/export and schema check exist. Uninstall
 must not silently remove application or source data; platform retention still
 requires an isolated actual install/uninstall test.
+
+## Offline checker boundary
+
+The explicit package walker checks device and mount-table membership before
+enumerating a child directory or opening configuration contents. Linux mountinfo
+also detects same-device bind mounts and mounts on files; macOS uses 64-bit
+`getmntinfo` with `MNT_NOWAIT` to read already-known mount targets only. Mount
+paths and source names remain private and never enter checker errors. Current
+local macOS arm64 metadata reads and deterministic boundary injection pass;
+actual mounted-directory tests and x86_64 runtime are NOT RUN. Unsupported
+platforms or unreadable/malformed tables reject.
+
+Darwin layout/symbol selection was checked against the installed Apple SDK
+`sys/mount.h` and `sys/cdefs.h` (64-bit statfs size 2168, mount-target offset 88;
+arm64 plain symbol versus x86_64 INODE64 alias). This build-time Python checker
+is not shipped inside the MAS App, and introduces no new MAS native API or
+Privacy Manifest reason. It does not certify the Phase 1A/1B runtime boundary.
+
+Root/ancestor ownership, POSIX modes, symlink rejection and observed identities
+are checked first. ACL safety and stability for the complete check remain caller
+responsibilities under an exclusive checkout lease: permissions alone do not
+prove ownership, container identity or immunity to concurrent remount/replacement.
+No hostile/concurrent mount-race certification is claimed.
 
 ## Access model decision still required
 

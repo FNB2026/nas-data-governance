@@ -3,12 +3,14 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent
 SOURCE = SCRIPTS.parents[1] / "packaging/fnos/ndg-readonly-test"
@@ -22,7 +24,7 @@ class PackageChecks(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="ndg-fnos-offline-")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name) / "package"
+        self.root = Path(self.temp.name).resolve() / "package"
         shutil.copytree(SOURCE, self.root)
 
     def compose(self):
@@ -120,6 +122,93 @@ class PackageChecks(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("synthetic_private_marker", result.stdout + result.stderr)
         self.assertNotIn(str(self.root), result.stdout + result.stderr)
+
+    def test_same_device_mount_directory_rejected_before_descent(self):
+        boundary = self.root / "nested-mount"
+        boundary.mkdir()
+        (boundary / "outside-private-marker").write_text("never enumerate this subtree")
+        observed = []
+        original = Path.iterdir
+
+        def enumerate_directory(path):
+            observed.append(path)
+            self.assertNotEqual(path, boundary)
+            return original(path)
+
+        with mock.patch.object(Path, "iterdir", autospec=True, side_effect=enumerate_directory):
+            with self.assertRaisesRegex(check.Rejected, "^package_mount_boundary$"):
+                check.check_tree_with_boundaries(self.root, known_mountpoints={boundary})
+        self.assertNotIn(boundary, observed)
+
+    def test_changed_device_rejected_before_descent(self):
+        boundary = self.root / "nested-device"
+        boundary.mkdir()
+        actual_lstat = Path.lstat
+        actual_iterdir = Path.iterdir
+        observed = []
+
+        def injected_lstat(path):
+            value = actual_lstat(path)
+            if path == boundary:
+                fields = list(value)
+                fields[2] += 1  # stat_result.st_dev
+                return os.stat_result(fields)
+            return value
+
+        def enumerate_directory(path):
+            observed.append(path)
+            self.assertNotEqual(path, boundary)
+            return actual_iterdir(path)
+
+        with mock.patch.object(Path, "lstat", autospec=True, side_effect=injected_lstat), mock.patch.object(Path, "iterdir", autospec=True, side_effect=enumerate_directory):
+            with self.assertRaisesRegex(check.Rejected, "^package_mount_boundary$"):
+                check.check_tree_with_boundaries(self.root, known_mountpoints=set())
+        self.assertNotIn(boundary, observed)
+
+    def test_same_device_mount_file_rejected_before_content_read(self):
+        boundary = self.root / "manifest"
+        with mock.patch.object(check, "mountpoints", return_value={boundary}), mock.patch.object(Path, "read_text", autospec=True) as reader:
+            with self.assertRaisesRegex(check.Rejected, "^package_mount_boundary$"):
+                check.validate(self.root)
+            reader.assert_not_called()
+
+    def test_linux_mountinfo_detects_bind_and_decodes_kernel_paths(self):
+        text = "1 0 8:1 / / rw - ext4 /dev/synthetic rw\n2 1 8:1 /same-device /synthetic\\040mount\\134path rw - ext4 /dev/synthetic rw\n"
+        self.assertEqual(check.linux_mountpoints(text), {Path("/"), Path("/synthetic mount\\path")})
+        for malformed in ["", "truncated", "1 0 8:1 / relative rw - ext4 synthetic rw", "1 0 8:1 / /synthetic\\bad rw - ext4 synthetic rw"]:
+            with self.subTest(value=malformed):
+                with self.assertRaisesRegex(check.Rejected, "^invalid_mount_boundary_source$"):
+                    check.linux_mountpoints(malformed)
+
+    def test_unknown_platform_and_missing_linux_table_fail_closed(self):
+        with mock.patch.object(check.sys, "platform", "unknown"):
+            with self.assertRaisesRegex(check.Rejected, "^unsupported_mount_boundary_platform$"):
+                check.mountpoints()
+        with mock.patch.object(check.sys, "platform", "linux"), mock.patch("builtins.open", side_effect=OSError("synthetic_private_marker")):
+            with self.assertRaisesRegex(check.Rejected, "^mount_boundary_unavailable$"):
+                check.mountpoints()
+
+    def test_root_owner_and_unsafe_ancestry_rejected(self):
+        actual_lstat = Path.lstat
+
+        def injected_owner(path):
+            value = actual_lstat(path)
+            if path == self.root:
+                fields = list(value)
+                fields[4] = os.getuid() + 12345
+                return os.stat_result(fields)
+            return value
+
+        with mock.patch.object(Path, "lstat", autospec=True, side_effect=injected_owner):
+            with self.assertRaisesRegex(check.Rejected, "^untrusted_package_owner$"):
+                check.check_tree_with_boundaries(self.root, known_mountpoints=set())
+        original_mode = self.root.parent.stat().st_mode & 0o7777
+        try:
+            self.root.parent.chmod(0o777)
+            with self.assertRaisesRegex(check.Rejected, "^untrusted_package_ancestry$"):
+                check.check_tree_with_boundaries(self.root, known_mountpoints=set())
+        finally:
+            self.root.parent.chmod(original_mode)
 
 
 class LifecycleChecks(unittest.TestCase):
