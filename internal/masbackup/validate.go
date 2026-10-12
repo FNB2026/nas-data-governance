@@ -55,8 +55,14 @@ type Result struct {
 var ErrInvalidBackup = errors.New("masbackup: backup rejected")
 
 // ValidateClosedBackup validates a two-file backup directory. The caller must
-// hold the native read lease for dir and pass a real, owner-private staging
-// directory inside the MAS container. Input is opened relative to an os.Root,
+// hold the native read lease for dir. The trusted caller must separately prove
+// stagingRoot's owner, ACL, and MAS container membership, and keep the staging
+// root and its ancestry stable for the entire call. A 0700 mode is not proof of
+// those conditions. The mode/path checks here are only prototype preflight;
+// staging creation uses a path, so this function is not a security boundary
+// against concurrent staging-root replacement. Production integration remains
+// blocked until rooted staging creation and runtime containment are verified.
+// Input is opened relative to an os.Root,
 // copied to a private temporary file, then checked read-only. The supplied
 // backup is never modified. The caller remains responsible for ensuring the
 // backup was produced from a cleanly closed project while holding its project
