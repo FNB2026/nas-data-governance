@@ -1,0 +1,29 @@
+name: Linux Web boundary
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - run: go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store
+      - run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/ndg-server-amd64 ./cmd/ndg-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/ndg-server-arm64 ./cmd/ndg-server
+  disposable-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build amd64 container without publishing
+        run: docker build --build-arg TARGETARCH=amd64 --build-arg SOURCE_SHA="$GITHUB_SHA" -f packaging/docker/Dockerfile -t ndg-disposable:test .
+      - name: Synthetic read-only and restart acceptance
+        run: sudo python3 scripts/packaging/test-linux-container.py

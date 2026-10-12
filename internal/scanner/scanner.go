@@ -17,6 +17,9 @@ import (
 
 // Options configures a scan.
 type Options struct {
+	// ReadDirectory is an optional trusted backend descriptor-based reader.
+	// It is never populated from a frontend request.
+	ReadDirectory func(string) ([]os.DirEntry, error)
 	Root          string
 	StorageID     string
 	CrossMounts   bool
@@ -102,7 +105,11 @@ type scanPathKey struct {
 //     path — are distinct instances and are NOT deduplicated, because the key
 //     excludes inode by design.
 func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) error) (Stats, error) {
-	return scan(ctx, opts, visit, os.ReadDir)
+	reader := opts.ReadDirectory
+	if reader == nil {
+		reader = os.ReadDir
+	}
+	return scan(ctx, opts, visit, reader)
 }
 
 // readDir is injected only by package tests to verify the I/O boundary.

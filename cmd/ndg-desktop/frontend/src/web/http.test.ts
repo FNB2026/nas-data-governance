@@ -1,0 +1,5 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { HttpAdapter } from "./http";
+afterEach(()=>vi.unstubAllGlobals());
+it("uses same-origin cookies and memory-only CSRF, with mutation called once",async()=>{const fetcher=vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({csrf:"synthetic_csrf"})}).mockResolvedValueOnce({ok:true,json:async()=>({accepted:true})});vi.stubGlobal("fetch",fetcher);const api=new HttpAdapter();await api.login("synthetic");await api.scan("source_a",true);expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls[1][1]).toMatchObject({credentials:"same-origin",method:"POST",headers:{"X-CSRF-Token":"synthetic_csrf"},body:JSON.stringify({alias:"source_a",resume:true})});});
+it("does not surface raw server errors or retry mutations",async()=>{const fetcher=vi.fn().mockResolvedValue({ok:false,text:async()=>"/private/sensitive/anchor"});vi.stubGlobal("fetch",fetcher);const api=new HttpAdapter();await expect(api.scan("source_a",false)).rejects.not.toThrow("sensitive");expect(fetcher).toHaveBeenCalledTimes(1);});
