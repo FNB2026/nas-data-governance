@@ -24,3 +24,5 @@ See [Phase 1A report](phase1a-2026-10-12.md) for the build-time MAS policy, actu
 ## Phase 1C container and Apple compatibility
 
 See [Phase 1C design and local preflight evidence](phase1c-container-and-compatibility-2026-10-12.md). The backup validator is experimental, not wired to the product, and does not enable migration or MAS distribution. Open Phase 1B runtime scenarios remain in a separate [pending-test checklist](phase1b-pending-tests-2026-10-12.md).
+
+The preflight prototype is now CLOSED after PR #91 and its merge gates. See the [Required Reason / Foundation identity audit](required-reason-volume-identity-2026-10-12.md) for unresolved production compatibility and bounded local probe evidence, and the [supported exporter design](direct-backup-exporter-design-2026-10-12.md) for future ownership, snapshot and provenance requirements. These do not enable a production importer or change Phase 1A/1B runtime states.
