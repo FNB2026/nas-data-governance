@@ -2,10 +2,11 @@ package store
 
 import (
 	"context"
-	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
 
 func TestScanSummaryIncludesReconciliationAndLayeredHashes(t *testing.T) {

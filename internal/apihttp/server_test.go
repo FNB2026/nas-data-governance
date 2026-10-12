@@ -110,12 +110,12 @@ func TestExpiryLogoutAndThrottle(t *testing.T) {
 	s, _ := setup(t)
 	now := time.Now()
 	s.now = func() time.Time { return now }
-	c, csrf := login(t, s)
+	c, _ := login(t, s)
 	now = now.Add(16 * time.Minute)
 	if req(s, "GET", "/api/sources", "", c, "").Code != 401 {
 		t.Fatal("expired session accepted")
 	}
-	c, csrf = login(t, s)
+	c, csrf := login(t, s)
 	if req(s, "POST", "/api/logout", `{}`, c, csrf).Code != 200 || req(s, "GET", "/api/sources", "", c, "").Code != 401 {
 		t.Fatal("logout")
 	}
