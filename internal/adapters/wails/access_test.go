@@ -3,14 +3,17 @@ package wails
 import (
 	"context"
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/domain"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
-	"github.com/FNB2026/nas-data-governance/internal/jobs"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/app"
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
+	"github.com/FNB2026/nas-data-governance/internal/jobs"
 )
 
 type nativeTestGrant struct {
@@ -218,5 +221,64 @@ func TestAllSandboxFilesystemEntryPointsStayDeniedWithoutAuthority(t *testing.T)
 		if e := fn(); !errors.Is(e, fileaccess.ErrWriteDisabled) {
 			t.Fatalf("entry %d escaped policy", i)
 		}
+	}
+}
+
+func TestSandboxConcurrentScanAndCloseCannotOvertakeLiveLease(t *testing.T) {
+	a, _, root := sandboxTestAPI(t)
+	for _, name := range []string{"one", "two"} {
+		if e := os.WriteFile(filepath.Join(root, name), []byte("synthetic duplicate"), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	_, _ = a.PickDirectory("")
+	if _, e := a.CreateProjectFromSource(CreateProjectInput{Name: "concurrent", SourcePath: root}); e != nil {
+		t.Fatal(e)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	svc := app.NewScanServiceWithHashFunc(a.store, fingerprint.Quick, func(path string, _ int64) (string, error) {
+		once.Do(func() { close(entered) })
+		<-release
+		return fingerprint.Full(path)
+	})
+	a.scanRunner = app.NewScanJobRunner(svc, a.jobMgr)
+	j, e := a.StartScan(StartScanRequest{Root: root})
+	if e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocking fixture never entered full hashing")
+	}
+	if _, e = a.StartScan(StartScanRequest{Root: root}); e == nil || e.Error() != "SCAN_BUSY" {
+		t.Fatal("second scan shared progress state")
+	}
+	if e = a.CloseProject(); e == nil || e.Error() != "SCAN_BUSY" {
+		t.Fatal("database closed beneath active IO")
+	}
+	if e = a.CancelScan(j.JobID); e != nil {
+		t.Fatal(e)
+	}
+	if a.activeScans.Load() != 1 {
+		t.Fatal("cancel prematurely released active IO")
+	}
+	close(release)
+	released = true
+	waitSandboxJob(t, a, j.JobID)
+	p, e := a.GetScanProgress(j.JobID)
+	if e != nil || p.State != "CANCELLED" {
+		t.Fatal("cancelled worker did not persist terminal state")
+	}
+	all, e := a.store.ListJobsByProject(context.Background(), a.jobScope, 20)
+	if e != nil || len(all) != 1 {
+		t.Fatal("rejected concurrency created an extra job")
 	}
 }

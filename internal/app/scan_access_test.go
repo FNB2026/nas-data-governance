@@ -3,15 +3,16 @@ package app
 import (
 	"context"
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
-	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
-	"github.com/FNB2026/nas-data-governance/internal/jobs"
-	"github.com/FNB2026/nas-data-governance/internal/store"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"syscall"
 	"testing"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
+	"github.com/FNB2026/nas-data-governance/internal/jobs"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func TestAuthorizationLostBeforeReconcilePreservesDurableCoverage(t *testing.T) {

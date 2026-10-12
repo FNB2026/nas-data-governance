@@ -14,13 +14,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -503,8 +504,15 @@ func (a *API) OpenProjectReadWrite(path string) (ProjectInfo, error) {
 // The root directory must exist and be readable. If storage_id is empty,
 // a stable ID is derived from the root path (same as RegisterScanSource).
 func (a *API) StartScan(req StartScanRequest) (StartScanResponse, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	// Preserve the legacy DMG read-lock concurrency; MAS alone serializes its
+	// active-scan ownership and lease transfer.
+	if a.sandbox {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+	} else {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+	}
 	if a.sandbox && (a.closing || a.activeScans.Load() != 0) {
 		return StartScanResponse{}, errors.New("SCAN_BUSY")
 	}

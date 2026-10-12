@@ -3,10 +3,11 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"github.com/FNB2026/nas-data-governance/internal/macaccess"
-	"path/filepath"
 )
 
 const sandboxDesktop = true

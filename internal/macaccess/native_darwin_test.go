@@ -5,8 +5,9 @@ package macaccess
 import (
 	"context"
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"testing"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 )
 
 func TestMalformedNativeBookmarksDoNotReturnAuthority(t *testing.T) {

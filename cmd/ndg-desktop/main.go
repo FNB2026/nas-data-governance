@@ -10,12 +10,13 @@ import (
 	"context"
 	"embed"
 
-	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 	wailsapp "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/FNB2026/nas-data-governance/internal/adapters/wails"
 )
 
 //go:embed all:frontend/dist

@@ -3,12 +3,13 @@ package wails
 import (
 	"context"
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
-	projectsvc "github.com/FNB2026/nas-data-governance/internal/project"
-	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+	projectsvc "github.com/FNB2026/nas-data-governance/internal/project"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 )
 
 // NewSandboxAPI is a composition-root constructor, not a bound API method.

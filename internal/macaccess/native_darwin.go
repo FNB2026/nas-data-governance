@@ -15,10 +15,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 )
 
 type Native struct{}

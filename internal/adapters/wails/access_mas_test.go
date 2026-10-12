@@ -4,8 +4,9 @@ package wails
 
 import (
 	"errors"
-	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 	"testing"
+
+	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
 )
 
 func TestMASDefaultConstructorAndPickerInjectionCannotBypass(t *testing.T) {
