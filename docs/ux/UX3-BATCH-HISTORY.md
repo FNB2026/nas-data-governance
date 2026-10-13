@@ -6,16 +6,16 @@ This incremental implementation closes the discovery gap left by known-key
 lookup: after losing in-memory client keys, a reopened project can list its
 durable governance batches and query their receipts by opaque batch ID.
 
-It is developed on experimental integration commit
+The original development snapshot was stacked on experimental integration commit
 `77d38efd36e1eb31915c5dcffad2bf4d0a8aadfb`, tree
-`5edcf344e0d89a709c3c7c864930d99648913b49`, which combines PR #96 frontend
+`5edcf344e0d89a709c3c7c864930d99648913b49`, which combined PR #96 frontend
 `8e6d1d1e69ed3b57a5edcd94fc0066221e103dc3` and PR #98 backend
 `e4dfaaadccb94ebf33e9d1be2fc48ba3e060f5e8` from main
-`15328e0054c1c3e476dd756436ce52d6f3c50c1a`. Those dependencies remain Draft
-pending independent review. This is a stacked Draft, not permission to merge
-the experimental integration branch or bypass either dependency's gates.
-Retarget to actual main only after dependency merge and fresh compatibility
-review. No change belongs to frozen beta.11.
+`15328e0054c1c3e476dd756436ce52d6f3c50c1a`. That stack was not merged to main
+as a shortcut. The dependencies have since merged through their own PRs. This
+PR now normally merges current main and is based on main; its only feature diff
+is the UX3 read-only history slice documented here. No change belongs to frozen
+beta.11.
 
 ## Read contract and safety invariants
 
@@ -74,7 +74,7 @@ macOS Sandbox permission certificate.
 Frontend component tests cover remount without keys, RO/recovery-lock lookup,
 partial outcomes and pending status, false COMPLETE accounting, unknown older
 API, scope mismatch, late list/detail after project replacement, safe errors,
-pagination and refresh. The current full suite has 33 files / 304 tests PASS.
+pagination and refresh. The integrated full suite has 33 files / 310 tests PASS.
 Component mocks are distinct from real Go/SQLite tests; neither certifies the
 native GUI. Full required Go/race and frontend build evidence is collected
 separately from Wails SDK generation and development App build.
@@ -113,7 +113,20 @@ refuse without repairing state or writing audit/source data. Reason labels use
 own-property lookup; rendered history tests cover prototype names and never call
 commit. This remains bounded discovery, not automatic recovery of lost requests.
 
-Original green and RED records remain; final source must receive a new exact
-review and fresh gates. The PR is stacked on experimental integration: retarget
-only after dependencies are normally merged into main, then recheck compatibility.
-No experimental integration branch is to be merged as a shortcut.
+Original green and RED records remain. The final integrated source must receive
+an exact review and fresh gates. The original experimental base is preserved as
+provenance only; the PR's current base is main, and the experimental integration
+branch was not merged into main as a shortcut.
+
+## Main compatibility snapshot (2026-10-14)
+
+Current main `ed7287c121ec66a5b4a5e38fbe97bbb50f86d1c2` was merged normally into
+the history branch at `660ed7c121ec66a5b4a5e38fbe97bbb50f86d1c2`. The current
+17-file diff from main contains only UX3 history UI, its read-only Wails/service/
+store contract, generated bindings, tests and this document. Main's SDK/API,
+chronological decision timestamp and governance safety implementations are
+retained. Fresh local required tests, vet, build, release/public checks, full Go
+race, frontend tests/build passed at that snapshot; remote CI, Security and
+Linux Web boundary runs were then dispatched for the same SHA. This does not
+upgrade native/signed GUI, human walkthrough, physical unindexed-stale, automatic
+lost-request recovery or overall P0 acceptance; those remain NOT RUN/open.
