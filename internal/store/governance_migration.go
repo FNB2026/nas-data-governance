@@ -67,6 +67,12 @@ func preflightGovernanceSchema(ctx context.Context, path string) error {
 	// files even through mode=ro. Only the owner-locked, sidecar-free case may
 	// use immutable. Existing WAL must always remain visible. Incomplete or
 	// nonregular sidecar pairs are ambiguous and refused without opening them.
+	// A rollback journal may require recovery before the main-file schema is
+	// authoritative. Do not allow immutable or a writable recovery to bypass
+	// identity checking; even a seemingly empty journal requires manual review.
+	if _, journalErr := os.Lstat(path + "-journal"); !os.IsNotExist(journalErr) {
+		return ErrGovernanceRejected
+	}
 	wal, walErr := os.Lstat(path + "-wal")
 	shm, shmErr := os.Lstat(path + "-shm")
 	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)"

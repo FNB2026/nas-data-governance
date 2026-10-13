@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -180,5 +182,51 @@ func TestIdentityPreflightRefusesAmbiguousSidecars(t *testing.T) {
 				t.Error("sidecar refusal changed evidence")
 			}
 		})
+	}
+}
+
+// A subprocess dies without closing its SQLite transaction. This is a genuine
+// disposable rollback-journal boundary, not a fake marker file or historical DB.
+func TestIdentityHotJournalProcess(t *testing.T) {
+	path := os.Getenv("NDG_TEST_IDENTITY_HOT_JOURNAL")
+	if path == "" {
+		return
+	}
+	db, e := sql.Open("sqlite", path)
+	if e != nil {
+		os.Exit(2)
+	}
+	if _, e = db.Exec(`PRAGMA journal_mode=DELETE; PRAGMA cache_size=4; BEGIN IMMEDIATE; CREATE TABLE synthetic_incomplete_write(value BLOB)`); e != nil {
+		os.Exit(3)
+	}
+	for i := 0; i < 100; i++ {
+		if _, e = db.Exec(`INSERT INTO synthetic_incomplete_write VALUES(zeroblob(4096))`); e != nil {
+			os.Exit(4)
+		}
+	}
+	os.Exit(0) // Deliberately bypass DB/transaction cleanup in this child only.
+}
+
+func TestIdentityPreflightRefusesHotRollbackJournal(t *testing.T) {
+	path := legacyGovernanceDatabase(t, false)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIdentityHotJournalProcess$")
+	cmd.Env = append(os.Environ(), "NDG_TEST_IDENTITY_HOT_JOURNAL="+path)
+	if e := cmd.Run(); e != nil {
+		t.Fatal("disposable journal child failed")
+	}
+	before := databaseEvidence(t, path)
+	j := before["-journal"]
+	if len(j) <= 512 || bytes.Equal(j[:8], make([]byte, 8)) {
+		t.Fatal("actual hot journal required")
+	}
+	if _, ok := before["-wal"]; ok {
+		t.Fatal("rollback fixture unexpectedly WAL")
+	}
+	if s, e := Open(context.Background(), path); e == nil {
+		s.Close()
+		t.Error("ambiguous hot journal accepted")
+	}
+	if !reflect.DeepEqual(before, databaseEvidence(t, path)) {
+		t.Error("refusal changed main/journal or created SQLite sidecars")
 	}
 }

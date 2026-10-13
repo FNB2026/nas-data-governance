@@ -78,6 +78,12 @@ existing exclusive-owner/stable-local-ancestry contract, preflight uses immutabl
 only when both WAL and SHM are absent. Present regular WAL/SHM are read normally
 in the same snapshot; an incomplete/nonregular pair refuses before opening.
 A real uncheckpointed marker change is tested and cannot be hidden by immutable.
+Any rollback-journal presence or unreadable journal metadata refuses before SQLite
+opens: main-file identity cannot authorize journal recovery. A disposable child
+process dies with a real hot rollback journal; refusal retains main/journal bytes
+and creates neither WAL nor SHM. Independent follow-up identified this adjacent
+boundary before approval; the earlier incomplete WAL/SHM-only check is preserved
+as an intermediate limitation.
 Unsupported-layout refusals preserve main DB and existing WAL/SHM/journal bytes
 and create no SQLite sidecars. Owner-lock acquisition is a separate deliberate
 coordination side effect. Older binaries/uncoordinated writers and hostile path
