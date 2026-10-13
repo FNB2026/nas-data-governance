@@ -22,7 +22,7 @@ Governance UX v2 属未来 main 开发线：只读统一证据页和有界意图
 不能归入已冻结 beta.11。MAS/Web/fnOS 仍无批次决定写入许可；后台数据持久化
 不是 Quarantine、Restore 或 Purge 的执行授权。
 
-UX 开发限定证据：#96 前端组件及早期合成浏览器、#98 真实 Go/SQLite 临时
+较早历史快照（由下方最新证据增量取代）：UX 开发限定证据：#96 前端组件及早期合成浏览器、#98 真实 Go/SQLite 临时
 文件后端测试已取得各自证据；尚未合并、尚无最新独立复审与正式原生 GUI。
 G6 #97 为离线 OCI 验证实现，正式 native collector 尚未执行。旧 beta.11
 不参与新项目 owner lease，不得宣称跨旧二进制的全版本互斥。

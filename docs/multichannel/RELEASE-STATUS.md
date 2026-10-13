@@ -1,6 +1,6 @@
 # NDG 多渠道实时执行台账
 
-更新时间：2026-10-13。证据基线：main `c95c55d588c7b9ede71e8931e54c492506080f08`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+更新时间：2026-10-13。证据基线：main `443beeb0e19fa6a737cd8fef5c20e0197bfe4392`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
 
 ## 当前事实与历史校准
 
@@ -18,7 +18,7 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 | G3 MAS 分发与商店审核 | BLOCKED / NO-GO | App ID 未确认注册；本机未发现 Apple Distribution/Mac Installer Distribution identity（仅环境证据）；Profile/运行门禁/合规未闭合，未上传 | 账户持有人 + Codex | G2 闭合后集中办理真实账户步骤与最终提交授权 |
 | G4 Linux/Docker 安全只读 MVP | PR #93 已合并 | 专用 Ubuntu amd64/ARM64 容器合成只读闭环 PASS；固定公开镜像、真实网络源、升级/备份及完整 G4 仍未闭合 | Codex / 独立 reviewer | G6 镜像证据、明确服务身份及独立部署窗口 |
 | G5 fnOS FPK | PR #95 非可安装研究骨架已合并 | 24 合成/离线检查 PASS；嵌套挂载防线已补；无 FPK，实际安装/升级/卸载 NOT RUN，设备/OCI 依赖 BLOCKED | Codex / 隔离设备负责人 | 已验收 OCI digest、独立 fnOS 设备、平台许可；构建 wrapper 持续默认拒绝 |
-| G6 多渠道维护机制 | PR #97 已合并；#101 库存修复收口 | 双架构实验 OCI/runtime、全 frontend lock 双格式库存和对应实际漏洞扫描限定 PASS；签名/重现性/完整 G6 未闭合 | Codex / 独立 reviewer | 正常收口 #101 并核验合并后门禁；不公开镜像 |
+| G6 多渠道维护机制 | PR #97 / #101 已合并 | 双架构实验 OCI/runtime、全 frontend lock 双格式库存和对应实际漏洞扫描限定 PASS；签名/重现性/完整 G6 未闭合 | Codex / 独立 reviewer | 443beeb 合并后八项远端检查及本地 required/race PASS；签名和重现性另验，不公开镜像 |
 
 ## 连续执行与 writer 边界
 
@@ -114,9 +114,9 @@ PR #98 `b1cdae9c` 的 App/SDK 已构建成功，但 MAS 测试因访问容器外
 | UX1 #96 | MERGED，merge c95c55d588c7b9ede71e8931e54c492506080f08；exact独立AI复审、8CI和post-merge PASS | 仅前端切片，不是native/signed/P0 PASS |
 | UX2 #98 | Draft，25f75ae451ca8f01f13e4844e819df8b6bf74084；完整布局及marker、现存WAL、hot-journal拒绝、旧页明确导航已复审；297前端/fullrace PASS，8CI PASS | 新确定时间排序缺陷涉及候选audit；等待独立#102及候选回归，保持Draft |
 | UX3 #100 | 堆叠Draft，fbe32a0d1c8d3a27c3296bedb10e9b8629ebbd52；成员集合与终态/原型码两P2 RED→GREEN；独立复审及309前端/fullrace PASS | manual CI另绑定SHA；依赖正常merge后再retarget；未知请求自动恢复和physical stale仍open |
-| 时间排序 #102 | 独立Draft，f7369c4e8c8a3ceaec8f0a04e8576594489783fc；真实SQLite RED→GREEN，8CI及fullrace PASS | 作者不自批；独立复审中。原timestamp偶发FAIL保留，不追认唯一根因 |
+| 时间排序 #102 | 独立Draft，f7369c4e8c8a3ceaec8f0a04e8576594489783fc；初始排序回归 GREEN，8CI及fullrace PASS | 独立复审发现 UTC 年越界与非法 offset 两项 P2，真实SQLite RED，HOLD；作者不自批。原timestamp偶发FAIL保留，不追认唯一根因 |
 | G6 #97 | MERGED，bacc160111eeebf57388a67301ac0f30135698a8 | 初始真实run38387062893 native/security PASS，但source SBOM dev库存缺失，永久保留 |
-| G6 #101 | 063d0ee980ae8115cc92c0c9df0c5c43e540f14b；代码/实际run38391959321独立复核及8CI PASS | 207lock/202dev/205tuple，双格式全覆盖，npm/go/Grype0；只关闭此次库存缺口，unsigned/repro/fullG6仍open |
+| G6 #101 | MERGED443beeb0e19fa6a737cd8fef5c20e0197bfe4392；exact063d0ee代码/实际run38391959321独立复核及8CI PASS，合并后门禁PASS | 207lock/202dev/205tuple，双格式全覆盖，npm/go/Grype0；只关闭此次库存缺口，unsigned/repro/fullG6仍open |
 | fnOS 当前用户设备 | 已授权测试；只读Linux x86_64/Docker28.5.2/overlay2与12现有容器核验；普通账号Docker拒绝后sudo只读成功 | 尚未建立隔离测试区，不读取真实源、不改现有容器。独立disposable host脚本/复审优先；不是FPK安装或SMB PASS |
 | 各类 NAS | 复用Linux amd64/ARM64只读核心与容器协议 | 每类平台需自己的设备/挂载/权限/安装证据，不能从fnOS推定其他NAS兼容PASS |
 
