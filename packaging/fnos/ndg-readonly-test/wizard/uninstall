@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "Preserve project data",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "This scaffold never deletes source or project data. Platform retention behavior has not been tested; take an independent backup before any device uninstall."
+      }
+    ]
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "services": {
+    "ndg": {
+      "image": "",
+      "container_name": "ndg-readonly-test-web",
+      "restart": "unless-stopped",
+      "user": "${TRIM_UID:?package uid required}:${TRIM_GID:?package gid required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "ports": [
+        "127.0.0.1:18080:8080"
+      ],
+      "tmpfs": [
+        "/tmp:rw,nosuid,nodev,noexec,size=128m"
+      ],
+      "pids_limit": 128,
+      "mem_limit": "512m",
+      "cpus": "1.0",
+      "stop_grace_period": "60s",
+      "labels": {
+        "com.ndg.fnos.app": "ndg-readonly-test",
+        "com.ndg.fnos.channel": "fnos-research"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "${TRIM_PKGVAR:?private state required}",
+          "target": "/data",
+          "read_only": false
+        },
+        {
+          "type": "bind",
+          "source": "${NDG_AUTHORIZED_SOURCE:?source authorization required}",
+          "target": "/sources/source",
+          "read_only": true
+        }
+      ],
+      "environment": {
+        "NDG_WRITE_POLICY": "disabled"
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/usr/local/bin/ndg-server",
+          "healthcheck"
+        ],
+        "interval": "10s",
+        "timeout": "3s",
+        "retries": 3
+      }
+    }
+  }
+}

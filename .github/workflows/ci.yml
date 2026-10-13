@@ -109,6 +109,9 @@ jobs:
       - name: Run release workflow structure tests
         run: ./scripts/release/test-release-workflow.sh
 
+      - name: Check fnOS research scaffold and offline lifecycle safety
+        run: make fnos-test
+
       - name: Run go vet
         run: go vet ./...
 

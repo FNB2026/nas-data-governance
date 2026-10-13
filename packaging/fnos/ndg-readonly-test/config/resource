@@ -1,0 +1,10 @@
+{
+  "docker-project": {
+    "projects": [
+      {
+        "name": "ndg-readonly-test",
+        "path": "docker"
+      }
+    ]
+  }
+}

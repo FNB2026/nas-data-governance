@@ -1,0 +1,16 @@
+appname=ndg-readonly-test
+version=0.0.0-research
+source=thirdparty
+display_name=NDG Read-only Research
+platform=x86
+maintainer=FNB2026
+maintainer_url=https://github.com/FNB2026/nas-data-governance
+distributor=FNB2026
+desc=Non-installable packaging research; runtime acceptance NOT RUN.
+desktop_uidir=ui
+desktop_applaunchname=ndg-readonly-test.main
+ctl_stop=true
+checkport=true
+service_port=18080
+disable_authorization_path=false
+changelog=Research scaffold only; not an installable or published release.
