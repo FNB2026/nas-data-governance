@@ -95,3 +95,25 @@ separately from Wails SDK generation and development App build.
 
 Raw outputs and screenshots remain local private evidence. Public receipts name
 the exact source/tree, scope and return codes without personal paths or markers.
+
+## Independent exact review follow-up
+
+The independent reviewer at 4436342766477c492cdc7efcadd6269e4ad7a425 found two P2
+issues despite green baseline tests. A real SQLite negative replaced a COMPLETE
+outcome's group ID with an unrelated ID while retaining row count; history still
+reported COMPLETE. Separate actual JS probes found inherited reason properties
+(constructor/toString/__proto__) resolving to functions/objects instead of safe
+text. Both newly committed negative regressions first failed on that snapshot.
+
+The read-only history transaction now validates durable preview scope/token,
+unique members, original request member identities and all outcome identities;
+COMPLETE requires exact coverage, never pseudo NOT_COMMITTED. Unknown rows, wrong
+scope/token, duplicate preview, request mismatch and missing/uncommitted outcomes
+refuse without repairing state or writing audit/source data. Reason labels use
+own-property lookup; rendered history tests cover prototype names and never call
+commit. This remains bounded discovery, not automatic recovery of lost requests.
+
+Original green and RED records remain; final source must receive a new exact
+review and fresh gates. The PR is stacked on experimental integration: retarget
+only after dependencies are normally merged into main, then recheck compatibility.
+No experimental integration branch is to be merged as a shortcut.

@@ -42,7 +42,9 @@ export const REASON_LABELS: Record<string, string> = {
 };
 
 export function reasonLabel(code: string): string {
-  return REASON_LABELS[code] ?? "未完成安全校验，请重新载入并人工核对。";
+  return Object.prototype.hasOwnProperty.call(REASON_LABELS, code)
+    ? REASON_LABELS[code]
+    : "未完成安全校验，请重新载入并人工核对。";
 }
 
 export const OUTCOME_LABELS: Record<string, string> = {

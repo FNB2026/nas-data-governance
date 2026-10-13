@@ -87,3 +87,12 @@ it("does not display late receipt data after project replacement",async()=>{
   view.rerender(<GovernanceBatchHistory expectedScope="replacement-scope" refreshSignal=""/>);await screen.findByText(/当前项目没有此页批次记录/);
   await act(async()=>resolve(receipt()));expect(screen.queryByRole("region",{name:"历史批次回执"})).toBeNull();
 });
+
+it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("renders inherited-property reason %s as a fixed safe label", async (code) => {
+  const value=receipt();value.items[1].reason_code=code;bridge.result.mockResolvedValue(value);
+  render(<GovernanceBatchHistory expectedScope="project-a" refreshSignal=""/>);await open();
+  fireEvent.click(screen.getByRole("button",{name:"核对本页批次 1"}));
+  const region=await screen.findByRole("region",{name:"历史批次回执"});
+  expect(within(region).getByText(/未完成安全校验，请重新载入并人工核对/)).toBeVisible();
+  expect(bridge.commit).not.toHaveBeenCalled();
+});

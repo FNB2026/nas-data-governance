@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -42,7 +43,7 @@ func (s *SQLiteStore) ListGovernanceBatches(ctx context.Context, q domain.Govern
 	// Writers store UTC RFC3339Nano. Pad the fractional part for chronological
 	// ordering: variable precision and a whole-second trailing Z cannot be
 	// compared as raw text. Equal instants have a stable ID tie-breaker.
-	rows, e := tx.QueryContext(ctx, `SELECT b.id,b.state,b.requested_count,b.created_at,
+	rows, e := tx.QueryContext(ctx, `SELECT b.id,b.state,b.requested_count,b.created_at,b.scope,b.preview_token,
  COUNT(o.group_id),COALESCE(SUM(CASE WHEN o.status NOT IN ('SAVED','UNCHANGED','CONFLICT','BLOCKED','FAILED') THEN 1 ELSE 0 END),0)
  FROM governance_batches b LEFT JOIN governance_outcomes o ON o.batch_id=b.id
  WHERE `+predicate+` GROUP BY b.id
@@ -52,10 +53,13 @@ func (s *SQLiteStore) ListGovernanceBatches(ctx context.Context, q domain.Govern
 		return v, ErrGovernanceRejected
 	}
 	defer rows.Close()
+	type binding struct{ scope, token string }
+	bindings := []binding{}
 	for rows.Next() {
 		var item domain.GovernanceBatchSummary
 		var invalid int
-		if rows.Scan(&item.BatchID, &item.Status, &item.RequestedCount, &item.CreatedAt, &item.RecordedCount, &invalid) != nil {
+		var b binding
+		if rows.Scan(&item.BatchID, &item.Status, &item.RequestedCount, &item.CreatedAt, &b.scope, &b.token, &item.RecordedCount, &invalid) != nil {
 			return domain.GovernanceBatchPage{}, ErrGovernanceRejected
 		}
 		stamp, err := time.Parse(time.RFC3339Nano, item.CreatedAt)
@@ -72,9 +76,61 @@ func (s *SQLiteStore) ListGovernanceBatches(ctx context.Context, q domain.Govern
 			return domain.GovernanceBatchPage{}, ErrGovernanceRejected
 		}
 		v.Items = append(v.Items, item)
+		bindings = append(bindings, b)
 	}
-	if rows.Err() != nil || rows.Close() != nil || tx.Commit() != nil {
+	if rows.Err() != nil || rows.Close() != nil {
+		return domain.GovernanceBatchPage{}, ErrGovernanceRejected
+	}
+	// All page summaries and their durable membership use the same read
+	// transaction. A row count cannot prove the requested identities completed.
+	for i, item := range v.Items {
+		if validateHistoryMembership(ctx, tx, item, bindings[i].scope, bindings[i].token) != nil {
+			return domain.GovernanceBatchPage{}, ErrGovernanceRejected
+		}
+	}
+	if tx.Commit() != nil {
 		return domain.GovernanceBatchPage{}, ErrGovernanceRejected
 	}
 	return v, nil
+}
+
+func validateHistoryMembership(ctx context.Context, tx *sql.Tx, item domain.GovernanceBatchSummary, scope, token string) error {
+	var raw, payload string
+	if !validKey(token) || tx.QueryRowContext(ctx, `SELECT preview_json,payload_json FROM governance_previews WHERE token=? AND scope=?`, token, scope).Scan(&raw, &payload) != nil || len(raw) > 131072 || len(payload) > 131072 {
+		return ErrGovernanceRejected
+	}
+	var preview domain.GovernancePreview
+	var input domain.PreviewBatchRequest
+	if json.Unmarshal([]byte(raw), &preview) != nil || json.Unmarshal([]byte(payload), &input) != nil || preview.ProjectScope != scope || preview.PreviewToken != token || len(preview.Items) != item.RequestedCount || len(input.Items) != item.RequestedCount {
+		return ErrGovernanceRejected
+	}
+	expected := map[string]bool{}
+	for i, member := range preview.Items {
+		if !validKey(member.GroupID) || expected[member.GroupID] || input.Items[i].GroupID != member.GroupID {
+			return ErrGovernanceRejected
+		}
+		expected[member.GroupID] = true
+	}
+	rows, e := tx.QueryContext(ctx, `SELECT group_id,status,reason_code FROM governance_outcomes WHERE batch_id=?`, item.BatchID)
+	if e != nil {
+		return ErrGovernanceRejected
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var group, status, reason string
+		if rows.Scan(&group, &status, &reason) != nil || !expected[group] || seen[group] || reason == "NOT_COMMITTED" {
+			return ErrGovernanceRejected
+		}
+		switch status {
+		case "SAVED", "UNCHANGED", "CONFLICT", "BLOCKED", "FAILED":
+		default:
+			return ErrGovernanceRejected
+		}
+		seen[group] = true
+	}
+	if rows.Err() != nil || rows.Close() != nil || len(seen) != item.RecordedCount || (item.Status == "COMPLETE" && len(seen) != len(expected)) {
+		return ErrGovernanceRejected
+	}
+	return nil
 }

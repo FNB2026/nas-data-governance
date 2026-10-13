@@ -142,3 +142,72 @@ func TestGovernanceHistoryProjectIsolationAndFractionalTimeOrdering(t *testing.T
 		t.Fatal("foreign batch lookup accepted")
 	}
 }
+
+func TestGovernanceHistoryRejectsForeignOutcomeWithEqualCount(t *testing.T) {
+	ctx := context.Background()
+	s, refs, _ := governanceFixture(t, 1)
+	p := previewFor(t, s, refs, domain.DecisionKeepAll)
+	r, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: governanceTestKey(t)})
+	if e != nil || r.Status != "COMPLETE" {
+		t.Fatal("complete fixture required")
+	}
+	if _, e = s.db.Exec(`UPDATE governance_outcomes SET group_id='synthetic-foreign-group' WHERE batch_id=?`, r.BatchID); e != nil {
+		t.Fatal("foreign outcome injection")
+	}
+	if _, e = s.ListGovernanceBatches(ctx, domain.GovernanceBatchQuery{}); e == nil {
+		t.Fatal("equal row count falsely certified COMPLETE for different group")
+	}
+}
+
+func TestGovernanceHistoryValidatesPreviewIdentityAndTerminalOutcomes(t *testing.T) {
+	for _, mode := range []string{"duplicate-members", "foreign-scope", "wrong-token", "foreign-request-member", "uncommitted-terminal"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			s, refs, before := governanceFixture(t, 2)
+			p := previewFor(t, s, refs, domain.DecisionKeepAll)
+			r, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: governanceTestKey(t)})
+			if e != nil || r.Status != "COMPLETE" {
+				t.Fatal("terminal fixture required")
+			}
+			var raw, payload string
+			if s.db.QueryRow(`SELECT preview_json,payload_json FROM governance_previews WHERE token=?`, p.PreviewToken).Scan(&raw, &payload) != nil {
+				t.Fatal("snapshot fixture")
+			}
+			var snap domain.GovernancePreview
+			var req domain.PreviewBatchRequest
+			if json.Unmarshal([]byte(raw), &snap) != nil || json.Unmarshal([]byte(payload), &req) != nil {
+				t.Fatal("snapshot decode")
+			}
+			switch mode {
+			case "duplicate-members":
+				snap.Items[1].GroupID = snap.Items[0].GroupID
+			case "foreign-scope":
+				snap.ProjectScope = "synthetic-foreign-scope"
+			case "wrong-token":
+				snap.PreviewToken = "synthetic-foreign-token"
+			case "foreign-request-member":
+				req.Items[1].GroupID = "synthetic-foreign-group"
+			case "uncommitted-terminal":
+				if _, e = s.db.Exec(`UPDATE governance_outcomes SET status='FAILED',reason_code='NOT_COMMITTED' WHERE batch_id=?`, r.BatchID); e != nil {
+					t.Fatal("outcome injection")
+				}
+			}
+			b, _ := json.Marshal(snap)
+			q, _ := json.Marshal(req)
+			if _, e = s.db.Exec(`UPDATE governance_previews SET preview_json=?,payload_json=? WHERE token=?`, string(b), string(q), p.PreviewToken); e != nil {
+				t.Fatal("snapshot injection")
+			}
+			if _, e = s.ListGovernanceBatches(ctx, domain.GovernanceBatchQuery{}); e == nil {
+				t.Fatal("inconsistent history accepted")
+			}
+			if auditCount(t, s) != 2 {
+				t.Fatal("read query changed audit")
+			}
+			var state string
+			if s.db.QueryRow(`SELECT state FROM governance_batches WHERE id=?`, r.BatchID).Scan(&state) != nil || state != "COMPLETE" {
+				t.Fatal("query repaired state")
+			}
+			checkSourceBytes(t, before)
+		})
+	}
+}
