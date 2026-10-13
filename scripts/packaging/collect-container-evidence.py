@@ -138,9 +138,14 @@ def main():
         for origin, selector in [("image", "oci-archive:" + str(public / "image.oci.tar")), ("source", "dir:" + str(ROOT))]:
             for standard, output in [("cyclonedx", "cyclonedx-json"), ("spdx", "spdx-json")]:
                 args = [str(private / "syft"), selector, "-o", output, "--exclude", "**/.git/**", "--exclude", "**/node_modules/**", "--exclude", "**/bin/**", "--exclude", "**/dist/**"]
-                result = run(args, private)
+                # Syft source defaults can omit dev dependencies. Make the
+                # reviewed scope explicit; npm audit cannot replace inventory.
+                syft_env = dict(os.environ, SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES="true", SYFT_CHECK_FOR_APP_UPDATE="false")
+                result = run(args, private, env=syft_env)
                 require(result.returncode == 0, "sbom_failed")
                 public_json(public / (origin + "." + standard + ".json"), evidence.json_value(result.stdout), private)
+        frontend_lock = ROOT / "cmd/ndg-desktop/frontend/package-lock.json"
+        inventory = evidence.verify_frontend_sbom_inventory(public, frontend_lock)
         scans = {}
         stage = "npm"
         npm = run(["docker", "run", "--rm", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--tmpfs", "/tmp:rw,nosuid,nodev,size=128m", "--user", "10001:10001", "--env", "HOME=/tmp", "--volume", str(ROOT / "cmd/ndg-desktop/frontend") + ":/source:ro", "--workdir", "/source", lock["node_audit_image"], "npm", "audit", "--package-lock-only", "--json", "--audit-level=high"], private)
@@ -171,9 +176,9 @@ def main():
         scans["grype"] = {"exit_code": grype.returncode, "status": "PASS" if grype.returncode == 0 else "BLOCKED", "scope": "final_oci_runtime_image"}
         public_json(public / "tools.json", tools, private)
         require(run(["git", "status", "--porcelain=v1"], private).stdout.strip() == b"", "checkout_changed_during_evidence")
-        receipt = {"schema": 1, "scope": "experimental_ci_evidence_only", "source": source, "architecture": architecture, "image": identity, "signed_attestation": "NOT_SIGNED", "reproducibility": "NOT_RUN", "scans": scans, "workflow_run": {"id": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "source_sha": os.environ["GITHUB_SHA"]}, "files": {name: hashlib.sha256((public / name).read_bytes()).hexdigest() for name in evidence.ARTIFACTS}}
+        receipt = {"schema": 1, "scope": "experimental_ci_evidence_only", "source": source, "architecture": architecture, "image": identity, "signed_attestation": "NOT_SIGNED", "reproducibility": "NOT_RUN", "source_sbom_inventory": inventory, "scans": scans, "workflow_run": {"id": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "source_sha": os.environ["GITHUB_SHA"]}, "files": {name: hashlib.sha256((public / name).read_bytes()).hexdigest() for name in evidence.ARTIFACTS}}
         public_json(public / "receipt.json", receipt, private)
-        evidence.verify_bundle(public, expected_commit=commit, expected_tree=tree, expected_architecture=architecture)
+        evidence.verify_bundle(public, expected_commit=commit, expected_tree=tree, expected_architecture=architecture, expected_frontend_lock=frontend_lock)
         require(all(scan["status"] == "PASS" for scan in scans.values()), "vulnerability_gate_blocked")
         print("container-evidence: native_runtime_and_unsigned_content_gate_pass_not_release")
         return 0
