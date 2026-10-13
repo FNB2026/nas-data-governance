@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test container-evidence-test
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -26,6 +26,9 @@ fnos-check:
 
 fnos-test: fnos-check
 	python3 scripts/packaging/test-fnos-package.py
+
+container-evidence-test:
+	python3 scripts/packaging/test-container-evidence.py
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
