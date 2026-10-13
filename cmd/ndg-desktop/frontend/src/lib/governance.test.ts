@@ -4,8 +4,8 @@ import { DECISIONS, decisionLabel, reasonLabel, validBatchResult, type BatchResu
 function receipt(): BatchResult {
   return { batch_id: "synthetic-batch", project_scope: "synthetic-project", status: "COMPLETE", requested_count: 2,
     counts: { total: 2, saved: 1, unchanged: 0, conflict: 1, blocked: 0, failed: 0 }, items: [
-      { group_id: "g1", status: "SAVED", reason_code: "", decision_revision: "r1" },
-      { group_id: "g2", status: "CONFLICT", reason_code: "SUBJECT_CHANGED", decision_revision: "r2" },
+      { group_id: "g1", status: "SAVED", reason_code: "", decision_revision: 1 },
+      { group_id: "g2", status: "CONFLICT", reason_code: "SUBJECT_CHANGED", decision_revision: 2 },
     ] };
 }
 

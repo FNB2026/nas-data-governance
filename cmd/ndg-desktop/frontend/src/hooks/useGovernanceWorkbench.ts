@@ -66,7 +66,7 @@ export function useGovernanceWorkbench() {
         const list = await api.duplicates.listGroups({ storage_id: nextQuery.storage_id, page_size: 20, cursor, min_reclaimable_bytes: 0 } as wails.ListGroupsRequest);
         if (ticket !== generation.current || boundProject.current !== projectKey) return;
         if (list.next_cursor) legacyCursors.current.set(nextQuery.page + 1, list.next_cursor);
-        setPage({ items: (list.groups ?? []).map((g) => ({ ...g, decision_type: g.decision_type ?? "", subject_version: "", decision_revision: "", risk: "UNKNOWN", role: "unknown", safety_flags: [] })),
+        setPage({ items: (list.groups ?? []).map((g) => ({ ...g, decision_type: g.decision_type ?? "", subject_version: "", decision_revision: 0, risk: "UNKNOWN", role: "unknown", safety_flags: [] })),
           page: nextQuery.page, page_size: 20, total_count: list.total_count, unavailable_filters: ["search", "decision", "size", "sort", "risk", "role", "protected", "time"] });
         setCaps(CLOSED_CAPS);
       }

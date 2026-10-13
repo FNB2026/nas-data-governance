@@ -17,11 +17,11 @@ import { maskPath } from "../state/settings";
 
 const groups: ReviewGroup[] = [1, 2, 3].map((n) => ({ group_id: "g" + n, storage_id: "synthetic-source", sha256: "synthetic-hash-" + n,
   sample_path: "/synthetic-fixture/marker_" + n + ".txt", size: n * 1024, path_count: 2,
-  decision_type: "", subject_version: "subject-v" + n, decision_revision: "0", risk: "UNKNOWN", role: "unknown", safety_flags: [] }));
+  decision_type: "", subject_version: "subject-v" + n, decision_revision: 0, risk: "UNKNOWN", role: "unknown", safety_flags: [] }));
 function result(ids: string[], conflict = ""): BatchResult {
   return { batch_id: "synthetic-batch", project_scope: "project-a", status: "COMPLETE", requested_count: ids.length,
     counts: { total: ids.length, saved: ids.length - (conflict ? 1 : 0), unchanged: 0, conflict: conflict ? 1 : 0, blocked: 0, failed: 0 },
-    items: ids.map((id) => ({ group_id: id, status: id === conflict ? "CONFLICT" : "SAVED", reason_code: id === conflict ? "SUBJECT_CHANGED" : "", decision_revision: "1" })) };
+    items: ids.map((id) => ({ group_id: id, status: id === conflict ? "CONFLICT" : "SAVED", reason_code: id === conflict ? "SUBJECT_CHANGED" : "", decision_revision: 1 })) };
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((yes) => { resolve = yes; }); return { promise, resolve }; }
 

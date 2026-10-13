@@ -1,0 +1,4 @@
+
+# Confirmed disposable privacy probe, not a credential. New probes are random.
+# Exact historical commit/file/rule/line only; no future-pattern/path bypass.
+772da5f39bc99ea5dc8dcff3e0ae2dabd834745e:scripts/packaging/test-container-evidence.py:generic-api-key:185

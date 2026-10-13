@@ -16,6 +16,16 @@ export function decisionLabel(kind: string): string {
 }
 
 export const REASON_LABELS: Record<string, string> = {
+  PROJECT_CLOSED: "请先打开项目。",
+  SCHEMA_UPGRADE_REQUIRED: "此数据库需要先完成受支持的结构升级；当前仅可查看。",
+  READ_ONLY_CHANNEL: "当前渠道或项目仅可只读查看与预览。",
+  RECORDING_UNAVAILABLE: "当前不能记录决定；请核对平台、扫描与恢复锁状态。",
+  SAFETY_STATE_CHANGED: "安全状态已变化，未记录此项；请核对恢复锁和扫描状态。",
+  GROUP_UNAVAILABLE: "此组当前不可核对，请重新载入。",
+  NOT_COMMITTED: "此项尚未持久化；批次未结束时只能核对原请求。",
+  ALREADY_RECORDED: "决定和备注未变化。",
+  RECORD_ONLY: "仅记录治理意图。",
+  RECORDED_ONLY: "已记录意图；未批准、未执行。",
   READ_ONLY: "当前项目只读，不能保存决定。",
   SANDBOX_READ_ONLY: "商店预验证仅允许只读查看。",
   CHANNEL_READ_ONLY: "此平台暂不支持记录决定。",
@@ -51,7 +61,7 @@ export interface ReviewGroup {
   size: number;
   path_count: number;
   decision_type: string;
-  decision_revision: string;
+  decision_revision: number;
   subject_version: string;
   risk: string;
   role: string;
@@ -105,7 +115,7 @@ export interface BatchResult {
   status: "COMPLETE" | "IN_PROGRESS" | "CANCELLED";
   requested_count: number;
   counts: { total: number; saved: number; unchanged: number; conflict: number; blocked: number; failed: number };
-  items: { group_id: string; status: Outcome; reason_code: string; decision_revision: string }[];
+  items: { group_id: string; status: Outcome; reason_code: string; decision_revision: number }[];
 }
 
 export function subject(group: ReviewGroup): ReviewSubject {
@@ -120,7 +130,7 @@ export function validBatchResult(result: BatchResult, expectedIds: string[]): bo
   const received = new Set(result.items.map((item) => item.group_id));
   if (expected.size !== expectedIds.length || received.size !== result.items.length ||
       result.requested_count !== expected.size || result.items.length !== expected.size ||
-      result.counts.total !== expected.size || result.items.some((item) => !expected.has(item.group_id))) return false;
+      result.counts.total !== expected.size || result.items.some((item) => !expected.has(item.group_id) || !Number.isSafeInteger(item.decision_revision) || item.decision_revision < 0)) return false;
   const counts = { saved: 0, unchanged: 0, conflict: 0, blocked: 0, failed: 0 };
   for (const item of result.items) {
     const key = item.status.toLowerCase() as keyof typeof counts;

@@ -72,3 +72,21 @@ P1 batch approval/execution, implicit full-query selection, unsupported filters,
 MAS/Web/fnOS decision writes remain disabled/deferred. This is an initial UX1
 slice, not full P0 acceptance, a release permission, or a change to MAS NO-GO,
 Phase1A/1B INCONCLUSIVE or historical CarbonCore FAIL.
+
+## Integration corrections after the first independent review
+
+Backend wire inspection found revision fields are Go int64 JSON numbers. The
+frontend types and fixtures now agree, and receipt proof rejects negative or
+unsafe numeric revisions. Backend reason-code vocabulary is mapped to fixed
+safe explanations. These additional changes require exact-HEAD delta review.
+
+A pre-existing audit component test could assert its always-present summary
+before asynchronous records loaded (one failed / 288 passed). Its existing count
+assertion now waits for data; assertions are preserved. Later full suite: 289
+PASS. The original failure remains in private evidence rather than being erased.
+
+One remote full-history Security failure belongs to a synthetic container privacy
+probe in a different branch, not an actual frontend credential. The same single
+historical fingerprint exception as the container evidence PR is included;
+future fixtures are random and no path/pattern bypass exists. Full strict scan
+must pass at the actual PR HEAD. No history is rewritten.
