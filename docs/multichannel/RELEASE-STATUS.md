@@ -23,7 +23,7 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 ## 连续执行与 writer 边界
 
 - 主控只调度具备依赖和安全隔离条件的工作；G2 环境/外部审批阻断不停止 G4 源码工作。
-- 文档分支 `codex/multichannel-ledger` 从上述 main 建立，仅写本目录。原子独占 lease 存在该工作树私有 Git 元数据中，不提交机器路径或进程信息。八小时有效期；续约/交接先核查所有权，不抢占其他 writer。
+- 文档分支 `codex/multichannel-ux-status` 从上述 main 建立，仅写本目录。原子独占 lease 存在该工作树私有 Git 元数据中，不提交机器路径或进程信息。八小时有效期；续约/交接先核查所有权，不抢占其他 writer。
 - 每份后续回执包含 exact SHA、范围、独立 reviewer、测试返回码、CI URL 与证据层。未取得实际容器、正式 App、设备或平台结果时保持 NOT RUN/INCONCLUSIVE/BLOCKED。
 - 日常分支、push、合规 PR 合并已授权；不使用管理员 bypass。独立 AI 报告不是作者自批 GitHub Review；以实时 ruleset 决定是否须外部账号。
 - 私有现场、生产 NAS、既有工作树、历史 DB、QEMU、其他会话与 beta.11 资产保护。MAS Quarantine/Restore/Purge 禁写；Docker/fnOS 首发默认只读。
@@ -58,3 +58,50 @@ P0 仅记录治理意图：默认最多 100 个显式组，不执行、不批准
 
 此前三端工作继续执行；UX 变更只作用于未来构建，beta.11 不变。MAS 1A/1B
 INCONCLUSIVE、历史 CarbonCore FAIL、MAS NO-GO 不因新 UI 改写。
+
+## 2026-10-13 最新开发与审查回执（main 未合并）
+
+main 仍为 `15328e0054c1c3e476dd756436ce52d6f3c50c1a`。上节初始
+`214cabfd` 为历史采样，下面是最新开发提交；代码合并和完整 P0 验收均未完成。
+
+| 工作 | 最新 exact HEAD | 实际已取得证据 | 当前阻断 / 下一步 |
+|---|---|---|---|
+| [UX1 PR #96](https://github.com/FNB2026/nas-data-governance/pull/96) | `8e6d1d1e69ed3b57a5edcd94fc0066221e103dc3` | 本地 Go/race、前端 32 文件/296 测试和构建通过；前一 HEAD 的 GitHub Codex 一项 P1、两项 P2 已分别修正并补回归 | Draft；最新改动需独立复审、CI；依赖 #98。原浏览器 mock 是早期快照，不是最新正式 App |
+| [UX2 PR #98](https://github.com/FNB2026/nas-data-governance/pull/98) | `e4dfaaadccb94ebf33e9d1be2fc48ba3e060f5e8` | 代码 `0a60a727` 本地 Go/race、真实 Go adapter/SQLite/合成文件闭环、Wails dev build/SDK 检查和全历史 Gitleaks 通过；后续提交仅文档及 MAS 测试夹具 | Draft；需不同 reviewer 核对 root 增量。不是原生 GUI/签名验收 |
+| [G6 PR #97](https://github.com/FNB2026/nas-data-governance/pull/97) | `bbe9d35e3fa034824cf87889262982771c7beb75` | 本地 Go/race、15 offline OCI 测试及全历史 Gitleaks 通过 | Draft；新实验 workflow 未实际 dispatch，四份真实 SBOM/漏洞扫描/可复现性 NOT RUN |
+
+PR #96 的修正包括：按管理项目不可变 ID 保持待确认批次；同路径替换项目
+不继承旧 key；页面重挂后终态清除 busy；当前页选择不覆写旧快照；全局能力
+与后端渠道政策相交，未知/读取失败拒绝记录和旧审批。PR #98 的 RED 证明了
+未知 schema 过晚拒绝及百分号 SQLite URI 与 literal owner 路径不一致；最新代码
+已提前只读 schema 检查、拒绝 URI 元字符，并完成 Wails 2.13.0 SDK 再生成。
+
+初始 #98 Gitleaks / Desktop Build FAIL、#96 全历史 synthetic marker FAIL 均保留。
+十个历史异常已逐个确认是人工测试 key/标记，只用 exact commit/file/rule/line
+指纹排除；未来值改为 runtime random。没有整文件/路径或未来模式放行。
+
+独立本地 agents 已返回 usage limit；GitHub Codex 对 #97 也只返回额度不足。
+这不是审查 PASS。#96 旧 HEAD 的实际审查不扩展为最新 root 修正的批准。
+不购买额度、不自批、不管理员 bypass；暂不合并，不借 CI 解除审查门禁。
+
+完整 P0 仍缺：进程重启后的 GUI 批次发现、未重新索引的物理源变更 stale 契约、
+实际隔离开发 GUI 集成、5–8 非开发者理解测试及未来签名候选。已知 key
+持久回执查询仅解决后端查找；索引快照 CAS 仅证明库内证据变化，不证明未索引
+源文件没变。可继续准备本地前后端集成树，正式 GUI/签名层状态保持 NOT RUN。
+
+台账本身最初 full race 在 `TestListGroupDecisionsOrderingByUpdatedAt` 出现
+一次排序断言 FAIL；随后该用例 20 次 PASS。未确定根因，不删失败记录、不用
+重复绿色替代根因证明；新门禁回执须单独记录。beta.11、MAS 和 fnOS 状态不变。
+
+### 当前门禁补录
+
+PR #96 `8e6d1d1` 与 #97 `bbe9d35` 的八项 exact-HEAD 远端检查已全部
+SUCCESS。仍保持 Draft：独立审查未覆盖最新增量，#96 还依赖后端。
+PR #98 `b1cdae9c` 的 App/SDK 已构建成功，但 MAS 测试因访问容器外夹具
+被授权防线正确拒绝；新 `e4dfaaa` 通过真实 sandbox 授权/管理项目创建
+布置负例，本地 MAS/race/vet 和全量默认 Go/race 通过，正在等新 CI。
+
+本台账新增快照的 make test/vet/build/public-check 和 fresh full race
+均返回 0；这是独立新回执，不撤回之前排序用例的间歇 FAIL/未知根因。
+十项 exact 历史 synthetic fingerprint 元数据同步只为严格历史扫描，
+不是隐私产品放宽；Gitleaks v8.28.0 扫描 308 commits 无新发现。

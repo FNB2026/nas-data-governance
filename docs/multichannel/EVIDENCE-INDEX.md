@@ -85,3 +85,37 @@ UX v2 附件 679 行 SHA-256 见实时台账。前端 frozen author commit
 `214cabfd4d84297eca8f1d04957b27ad8d5635ad`，tree
 `07c989fb2dd45955c4fc564efb37f6dde840172b`；独立复审中，所有真实数据库/正式 GUI/
 理解测试状态分层保留。G6 OCI 证据实现尚未冻结，绝不预记 workflow PASS。
+
+## 2026-10-13 新开发身份与证据限制
+
+- UX1 [#96](https://github.com/FNB2026/nas-data-governance/pull/96) exact HEAD
+  `8e6d1d1e69ed3b57a5edcd94fc0066221e103dc3`。本地 296 frontend tests /
+  Go fresh race 和构建通过。独立 `/root/phase1c_review` 原始复审止于 `7fbfdcf`；
+  [GitHub Codex review 请求](https://github.com/FNB2026/nas-data-governance/pull/96#issuecomment-6138979646)
+  在 `3f679388` 产生实际三项发现。最新 delta 修正并补测试，尚未取得新的独立结论。
+- UX2 [#98](https://github.com/FNB2026/nas-data-governance/pull/98) exact HEAD
+  `e4dfaaadccb94ebf33e9d1be2fc48ba3e060f5e8`，实际产品代码 `0a60a727`，最新增量为 MAS 测试夹具及文档。
+  原作者 `/root/linux_web_implementation` 停止后由 root 接手，原 lease 保留。
+  真实 Go adapter/scanner/store/SQLite 七个临时源文件：自然完成、三组、六个 full
+  hash、普通单例无 full hash、record-only 提交/重启/只读回执、源 SHA 不变。
+  这不是原生 Wails GUI 的 PASS。fresh Go/race、Wails 2.13.0 dev build 及 SDK
+  同步通过；早期 CI `70227525` 的 Gitleaks 和 Desktop Build FAIL 永久保留。
+- G6 [#97](https://github.com/FNB2026/nas-data-governance/pull/97) exact HEAD
+  `bbe9d35e3fa034824cf87889262982771c7beb75`。15 offline OCI tests 与 Go/race
+  通过，全历史 Gitleaks v8.28.0 扫描 307 commits 无新发现。
+  [独立 review 请求](https://github.com/FNB2026/nas-data-governance/pull/97#issuecomment-6138979994)
+  仅得到 usage-limit 回复，不能算独立审查。新 dispatch collector 仍 NOT RUN；
+  旧 Linux native 合成容器绿色不能替代新 collector/SBOM/漏洞结果。
+- 台账先前全量 race 有一次 `TestListGroupDecisionsOrderingByUpdatedAt` 排序断言
+  FAIL；20 次针对性复跑 PASS 只证明当前未复现，根因未定。原始日志私有保存，
+  不把绿色复跑覆盖失败。所有 latest PR CI 必须按 exact HEAD 另外读取。
+
+原始日志/截图只在私有归档；不在文档写入真实源路径、标记、凭据或数据库。
+完整 UX3 batch discovery、物理未索引 stale、真正 GUI/签名层与理解测试尚未闭合。
+
+- 后续本地台账 full required gate/fresh race 返回 0；历史排序断言 FAIL
+  仍保留，不声称根因已修复。strict Gitleaks v8.28.0 / 308 commits 无新发现。
+- #96 `8e6d1d1` 与 #97 `bbe9d35` 当前全部八项 CI/Security/Linux 检查 SUCCESS；
+  并未取得最新独立审查。#98 `b1cdae9c` 的 distinct MAS fixture RED
+  已以 `e4dfaaa` 补正确 sandbox 创建路径，真实授权/审批拒绝/持久 DRAFT
+  定向测试以及默认完整 Go/race 通过；最新 CI 单独采集，不继承旧结果。
