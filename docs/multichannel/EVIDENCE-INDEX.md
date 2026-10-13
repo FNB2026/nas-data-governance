@@ -119,3 +119,31 @@ UX v2 附件 679 行 SHA-256 见实时台账。前端 frozen author commit
   并未取得最新独立审查。#98 `b1cdae9c` 的 distinct MAS fixture RED
   已以 `e4dfaaa` 补正确 sandbox 创建路径，真实授权/审批拒绝/持久 DRAFT
   定向测试以及默认完整 Go/race 通过；最新 CI 单独采集，不继承旧结果。
+
+
+## 2026-10-13 后续实证
+
+- #96独立reviewer fnos_official_audit，head a91610236f5ef958a2c91949629617edafeabe49、
+  tree68ca56373b6b1c96ee671bd1b5ea6c72b6b9ff93、basebacc160；binary diff
+  cdc928266f49c62dac1f06a9284640c23402040ccbe72f665dc52ac7ddab5a39。
+  merge c95c55d588c7b9ede71e8931e54c492506080f08，8postmergechecks/local gates/race PASS。
+- #98 head25f75ae451ca8f01f13e4844e819df8b6bf74084：独立phase1c_review完整布局/
+  marker/WAL及真实hot-journal拒绝PASS；兼容页delta
+  f4c2346dc3a04e5ba75fec8292c285c0d292ca167aec6699cfd14d77b07ceb69，297frontend/fullrace/8CI PASS。
+  但已知候选audit时间排序需等待#102，不提前合并/记全P0 PASS。
+- #100 headfbe32a0d1c8d3a27c3296bedb10e9b8629ebbd52，tree99819c47701e56929746788261820d1d0ccc5d31；
+  independentlinux_web_implementation，fixdelta d0a1e96e0adb306acd384f1b6c2da31e752f735150b37613529d4f315d5ca66e。
+  两P2真实RED→GREEN，309frontend/fullrace PASS。manual CI/security/Linux runs
+  38391964183/38391969257/38391973843按SHA另核，不是已retargetmain。
+- #97 mergebacc160，实际run38387062893：bounded runtime/scanPASS，source dev库存缺。
+  #101 head063d0ee980ae8115cc92c0c9df0c5c43e540f14b/treef56e54626b060bb05b0c66b21e473f754a63e201；
+  independentfnos_official_audit source/code及actualrun38391959321双架构逐ZIP/11files/
+  content/runtime/207lock/202dev/205tuple/两SBOM PASS。source-map-js1.2.2存在；npm全级0、go192events0findings、Grype0。
+  amd64OCI6d59909f00e540d93d5fc60a36754f08692f4dcecd251aaa5843b6d1e9999336，
+  arm64OCI354cafa559305e47362e5f03a29fcf232842203b37c2cd9c9c4ede96aeb4b3cf。
+  merge443beeb0e19fa6a737cd8fef5c20e0197bfe4392，postmerge另核；unsigned/repro/全G6未闭。
+- fnOS只读设备inventory2026-10-13T11:54:10Z：user授权设备，Linuxx86/Docker28.5.2、
+  12running、overlay2；无source读写/既有容器动作，test-area尚未建立。原输出和凭据
+  只在本机私有归档，不在公共文档保存地址、账号、路径、环境变量或密码。
+
+以上日期绑定证据不把旧FAIL覆写成PASS。MAS/正式native/真实SMB/FPK/其他NAS依赖仍保持。

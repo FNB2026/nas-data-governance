@@ -26,3 +26,16 @@ UX 开发限定证据：#96 前端组件及早期合成浏览器、#98 真实 Go
 文件后端测试已取得各自证据；尚未合并、尚无最新独立复审与正式原生 GUI。
 G6 #97 为离线 OCI 验证实现，正式 native collector 尚未执行。旧 beta.11
 不参与新项目 owner lease，不得宣称跨旧二进制的全版本互斥。
+
+
+### 2026-10-13 最新证据增量（历史段落保留）
+
+- UX1 #96 已合并，仅前端切片。UX2 #98 / UX3 #100 当前独立审查的数据库
+  布局/WAL/hot-journal/回执成员/安全标签与旧页导航已补；完整P0仍未认证。
+- G6 #97 / #101 已正常合并。实际run38391959321两架构native、内容身份、
+  207frontend锁项双格式完整库存及对应真实漏洞扫描限定PASS；unsigned、repro、
+  所有构建层、长期/所有stdout隐私仍未认证。旧383870库存缺失永久保留。
+- 用户已提供现有fnOS测试设备，SSH及只读sudo确认x86_64/Docker28.5.2/overlay2、
+  12个现有容器。仅独立新disposable区域/资源验证已授权；现有数据/容器不变。
+  NAS Docker host smoke、FPK、内置SMB/其他NAS平台都尚未运行，不能扩大支持。
+- fnOS可用不解决独立macOS/Bookmark/CarbonCore环境，MAS状态不变。

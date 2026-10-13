@@ -45,3 +45,22 @@
   #96/#97/#98 保持 Draft，不购买额度、不用作者 Review/CI 替代。
 - R26：台账 full race 曾发生决定排序断言失败；20 次复跑未复现不是根因
   解决证明。保留初始红色，独立记录新门禁，必要时单开最小修复。
+
+
+## 2026-10-13 后续风险处置
+
+- R25审查容量阻断已解除：#96、#97、#101有新的exact独立报告；并非把旧
+  head的批准延伸。#98/#100原P2经实际RED补修复；最新时间排序边界仍在独立修复。
+- R26：真实SQLite确定性边界复现变长RFC3339Nano文本错序，#102窄修复。
+  独立复审又发现UTC超四位年和非法offset接受，保持Draft；不追认旧偶发的唯一根因。
+  初始SQL函数名Gitleaks误报、作者自己的Draft branch历史更新和私有旧提交/RED
+  归档必须逐SHA复核；未来不改写历史，不用diff-only扫描替代all-history门禁。
+- R27：历史回执按数量宣告完成可能遗漏真正成员。#100同readTx核对preview/
+  request/outcome身份集合及终态，unknown/prototype reason固定安全标签；新报告
+  允许代码收口但不批准实验整合分支直合main，native/human仍缺。
+- R28：source SBOM非空却遗漏202个dev标记。原run383870保留；新383919按
+  207项/205tuple两格式比对并实际PASS。完整供应链/签名/repro另行认证。
+- R29：fnOS测试设备有12个现有容器，不能把账号授权当作生产写入许可。
+  只读检查普通账号Docker拒绝，初始空stdout不能解释为0容器；sudo只读核验
+  才取得真实12。后续独立临时区、内容绑定image、nonce资源ID、限资源/回环、
+  精确owned cleanup和前后既有容器核对；不删除/停止未知服务或碰真实NAS源。
