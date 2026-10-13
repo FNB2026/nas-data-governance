@@ -80,6 +80,8 @@ func NewHashFailure(file domain.FileInstance, stage string, attempts int, status
 
 // ScanInput defines parameters for a scan run.
 type ScanInput struct {
+	// ReadDirectory installs a backend-owned filesystem boundary without copying traversal.
+	ReadDirectory func(string) ([]os.DirEntry, error)
 	// AccessCheck is backend-only capability revalidation, never a frontend input.
 	AccessCheck func(context.Context) error
 	// AccessContext cancels sandbox jobs without cancelling persistence contexts.
@@ -365,6 +367,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		return nil
 	}
 	scanOpts := scanner.Options{
+		ReadDirectory: in.ReadDirectory,
 		Root:          in.Root,
 		StorageID:     in.StorageID,
 		ExcludedNames: scanner.DefaultExclusions(),
@@ -521,6 +524,7 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 			observed := map[string]bool{}
 			selectedStats, selectedErr := scanner.Scan(ctx, scanner.Options{
 				Root: in.Root, StorageID: in.StorageID, NetworkSource: in.NetworkSource,
+				ReadDirectory: in.ReadDirectory,
 				ExcludedNames: scanner.DefaultExclusions(), SelectedPaths: selected,
 			}, func(file domain.FileInstance) error {
 				observed[file.Path] = true
