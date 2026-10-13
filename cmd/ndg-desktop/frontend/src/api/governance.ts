@@ -1,5 +1,5 @@
 import { callOnce, callRead } from "./transport";
-import type { BatchResult, GovernanceCapabilities, GovernanceQuery, PreviewRequest, ReviewPage, ReviewPreview } from "../lib/governance";
+import type { BatchHistoryPage, BatchResult, GovernanceCapabilities, GovernanceQuery, PreviewRequest, ReviewPage, ReviewPreview } from "../lib/governance";
 
 type Bridge = Record<string, unknown>;
 function bridge(): Bridge {
@@ -21,4 +21,6 @@ export const governanceApi = {
   preview: (request: PreviewRequest): Promise<ReviewPreview> => callOnce(() => invoke("PreviewBatchDecisions", request)),
   commit: (previewToken: string, idempotencyKey: string): Promise<BatchResult> => callOnce(() => invoke("CommitBatchDecisions", { preview_token: previewToken, idempotency_key: idempotencyKey })),
   result: (id: string): Promise<BatchResult> => callRead(() => invoke("GetBatchDecisionResult", id)),
+  historyAvailable: (): boolean => typeof bridge().ListGovernanceBatches === "function",
+  history: (page: number): Promise<BatchHistoryPage> => callRead(() => invoke("ListGovernanceBatches", { page, page_size: 10 })),
 };

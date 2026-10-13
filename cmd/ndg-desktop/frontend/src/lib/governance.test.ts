@@ -28,3 +28,9 @@ describe("review vocabulary and outcome proof", () => {
     expect(validBatchResult(foreign, ["g1", "g2"])).toBe(false);
   });
 });
+
+it("unknown reason codes cannot resolve inherited object properties", () => {
+  for (const code of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    expect(reasonLabel(code)).toBe("未完成安全校验，请重新载入并人工核对。");
+  }
+});

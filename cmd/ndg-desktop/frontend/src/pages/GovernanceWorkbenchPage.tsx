@@ -9,6 +9,7 @@ import EmptyState from "../components/EmptyState";
 import LoadingState from "../components/LoadingState";
 import GovernanceEvidence from "../components/GovernanceEvidence";
 import GovernancePreview from "../components/GovernancePreview";
+import GovernanceBatchHistory from "../components/GovernanceBatchHistory";
 import "../governance.css";
 
 export default function GovernanceWorkbenchPage({ onNavigate }: { onNavigate?: (route: AppRoute) => void }) {
@@ -96,5 +97,6 @@ export default function GovernanceWorkbenchPage({ onNavigate }: { onNavigate?: (
     {result && <section className="card gov-outcomes" aria-label="批次回执" aria-live="polite"><h3>逐组回执：{result.status === "COMPLETE" ? "已核对终态" : result.status === "CANCELLED" ? "已取消（已记录项不会撤销）" : "尚未确认结束"}</h3><p>已记录 {result.counts.saved} · 未变化 {result.counts.unchanged} · 冲突 {result.counts.conflict} · 阻断 {result.counts.blocked} · 失败 {result.counts.failed}；合计 {result.counts.total} 组。未批准、未执行。</p><ol>{result.items.map((item, index) => <li key={item.group_id}>组 {index + 1}：{OUTCOME_LABELS[item.status] || "未知状态，需要核对"}{item.reason_code ? "；" + reasonLabel(item.reason_code) : ""}</li>)}</ol><p>{result.status === "IN_PROGRESS" ? "批次未结束，全部选择和原请求仍保留。请查询回执，不要创建新批次。" : "成功项已从选择中移除；未成功项保留。请重新载入、重新选择变化项后再预览，不自动重放整批。"}</p><button type="button" className="secondary" onClick={exportSummary}>导出脱敏摘要</button></section>}
     <section className="card gov-followup"><h3>需要具体文件操作时</h3><p>记录“制定处理方案”仅保存意图。创建草案、人工复核、审批、Dry Run 和执行仍分别处理；当前没有批量批准或批量执行快捷入口。</p><div className="gov-actions"><button type="button" className="secondary" disabled={!onNavigate} onClick={() => onNavigate?.("governance-review")}>查看单计划复核（兼容入口）</button><button type="button" className="secondary" disabled={!onNavigate} onClick={() => onNavigate?.("audit-recovery")}>审计与恢复</button><button type="button" className="secondary" disabled={!onNavigate || !context.capabilities.can_execute_quarantine} onClick={() => onNavigate?.("execution-center")}>任务中心（仍需单独确认）</button></div><p className="muted">当前版本不支持永久清理；切换页面不提供审批或解除恢复锁的授权。</p></section>
     {preview && <GovernancePreview note={context.pathPrivacyMode ? null : flow.previewIntent?.note ?? ""} preview={preview} selection={selection} kind={flow.previewIntent?.kind ?? kind} canRecord={flow.canCommit} busy={flow.operation === "commit" || flow.operation === "receipt"} canQueryReceipt={flow.canQueryReceipt} onQueryReceipt={() => void flow.queryReceipt()} ambiguous={flow.hasAmbiguousSubmission} onClose={flow.closePreview} onCommit={() => void flow.commit()} />}
+    <GovernanceBatchHistory expectedScope={caps.project_scope} refreshSignal={result ? result.batch_id + ":" + result.status + ":" + result.counts.saved : ""} />
   </div>;
 }

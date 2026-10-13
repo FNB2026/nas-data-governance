@@ -84,3 +84,20 @@ func (a *API) GetBatchDecisionResult(id string) (domain.GovernanceBatchResult, e
 	}
 	return v, nil
 }
+
+// ListGovernanceBatches discovers durable receipts without retained client
+// keys. This read-only use case grants no retry, approval, or file operations.
+func (a *API) ListGovernanceBatches(q domain.GovernanceBatchQuery) (domain.GovernanceBatchPage, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.store == nil {
+		return domain.GovernanceBatchPage{}, ErrNoProjectOpen
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	v, e := a.governanceServiceLocked().History(ctx, q)
+	if e != nil {
+		return domain.GovernanceBatchPage{}, errGovernanceUnavailable
+	}
+	return v, nil
+}
