@@ -88,3 +88,24 @@ type GovernanceBatchResult struct {
 	Counts         GovernanceCounts    `json:"counts"`
 	Items          []GovernanceOutcome `json:"items"`
 }
+
+// History exposes durable identifiers and accounting only, never retry keys,
+// preview tokens, notes, source paths, or write permission.
+type GovernanceBatchQuery struct {
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+}
+type GovernanceBatchSummary struct {
+	BatchID        string `json:"batch_id"`
+	Status         string `json:"status"`
+	RequestedCount int    `json:"requested_count"`
+	RecordedCount  int    `json:"recorded_count"`
+	CreatedAt      string `json:"created_at"`
+}
+type GovernanceBatchPage struct {
+	ProjectScope string                   `json:"project_scope"`
+	Items        []GovernanceBatchSummary `json:"items"`
+	TotalCount   int                      `json:"total_count"`
+	Page         int                      `json:"page"`
+	PageSize     int                      `json:"page_size"`
+}

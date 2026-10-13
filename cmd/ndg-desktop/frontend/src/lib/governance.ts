@@ -123,6 +123,23 @@ export function subject(group: ReviewGroup): ReviewSubject {
     subject_version: group.subject_version, decision_revision: group.decision_revision };
 }
 
+export interface BatchSummary { batch_id: string; status: BatchResult["status"]; requested_count: number; recorded_count: number; created_at: string }
+export interface BatchHistoryPage { project_scope: string; items: BatchSummary[]; total_count: number; page: number; page_size: number }
+
+export function validBatchHistory(value: BatchHistoryPage, expectedPage: number): boolean {
+  if (!value || typeof value.project_scope !== "string" || !value.project_scope || !Array.isArray(value.items) ||
+      !Number.isSafeInteger(value.total_count) || value.total_count < 0 || value.page !== expectedPage || value.page_size !== 10 ||
+      value.items.length > value.page_size || value.items.length !== Math.max(0, Math.min(value.page_size, value.total_count - (value.page - 1) * value.page_size))) return false;
+  if (value.items.some((item) => !item || typeof item !== "object")) return false;
+  return new Set(value.items.map((item) => item.batch_id)).size === value.items.length && value.items.every((item) =>
+    typeof item.batch_id === "string" && /^[a-zA-Z0-9_-]{16,128}$/.test(item.batch_id) &&
+    ["COMPLETE", "IN_PROGRESS", "CANCELLED"].includes(item.status) && Number.isSafeInteger(item.requested_count) &&
+    item.requested_count > 0 && item.requested_count <= 100 && Number.isSafeInteger(item.recorded_count) &&
+    item.recorded_count >= 0 && item.recorded_count <= item.requested_count &&
+    (item.status !== "COMPLETE" || item.recorded_count === item.requested_count) &&
+    typeof item.created_at === "string" && Number.isFinite(Date.parse(item.created_at)));
+}
+
 // Validate accounting before reporting success; transport success is insufficient.
 export function validBatchResult(result: BatchResult, expectedIds: string[]): boolean {
   if (!result || !["COMPLETE", "IN_PROGRESS", "CANCELLED"].includes(result.status) || !Array.isArray(result.items) || !result.counts) return false;

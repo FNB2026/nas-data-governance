@@ -17,6 +17,7 @@ type GovernanceDecisionStore interface {
 	PreviewBatchDecisions(context.Context, domain.PreviewBatchRequest, bool) (domain.GovernancePreview, error)
 	CommitBatchDecisions(context.Context, domain.CommitBatchRequest) (domain.GovernanceBatchResult, error)
 	GetBatchDecisionResult(context.Context, string) (domain.GovernanceBatchResult, error)
+	ListGovernanceBatches(context.Context, domain.GovernanceBatchQuery) (domain.GovernanceBatchPage, error)
 }
 type GovernanceDecisionService struct {
 	store         GovernanceDecisionStore
@@ -48,4 +49,8 @@ func (s *GovernanceDecisionService) Commit(ctx context.Context, q domain.CommitB
 }
 func (s *GovernanceDecisionService) Result(ctx context.Context, id string) (domain.GovernanceBatchResult, error) {
 	return s.store.GetBatchDecisionResult(ctx, id)
+}
+
+func (s *GovernanceDecisionService) History(ctx context.Context, q domain.GovernanceBatchQuery) (domain.GovernanceBatchPage, error) {
+	return s.store.ListGovernanceBatches(ctx, q)
 }

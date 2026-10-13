@@ -126,6 +126,18 @@ func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) 
 	if _, e = a.OpenProject(projectPath); e != nil {
 		t.Fatal(e)
 	}
+	history, e := a.ListGovernanceBatches(domain.GovernanceBatchQuery{Page: 1, PageSize: 10})
+	if e != nil || history.TotalCount != 1 || len(history.Items) != 1 || history.Items[0].BatchID != result.BatchID || history.Items[0].RecordedCount != 3 {
+		t.Fatal("actual adapter did not discover a durable batch after readonly restart")
+	}
+	historyWire, e := json.Marshal(history)
+	if e != nil {
+		t.Fatal("history wire contract")
+	}
+	var historyDecoded domain.GovernanceBatchPage
+	if json.Unmarshal(historyWire, &historyDecoded) != nil || !reflect.DeepEqual(history, historyDecoded) {
+		t.Fatal("history JSON roundtrip")
+	}
 	replay, e = a.GetBatchDecisionResult(result.BatchID)
 	if e != nil || !reflect.DeepEqual(result, replay) {
 		t.Fatal("restart durable receipt", e)
@@ -143,4 +155,60 @@ func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) 
 			t.Fatal("source byte conservation failed")
 		}
 	}
+}
+
+func TestGovernanceHistoryReadsUnderRecoveryLockWithoutClearingIt(t *testing.T) {
+	a, before := governanceAPIWithSource(t)
+	ctx := context.Background()
+	page, e := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+	if e != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic subjects")
+	}
+	preview, e := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
+	if e != nil {
+		t.Fatal("fixture preview")
+	}
+	r, e := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: historyTestKey(t)})
+	if e != nil || r.Status != "COMPLETE" {
+		t.Fatal("fixture commit")
+	}
+	task := domain.OperationTask{ID: "synthetic-history-locked-task", RootPath: t.TempDir(), State: "executing", CreatedAt: time.Now()}
+	if a.store.CreateTask(ctx, task) != nil || a.store.SavePlans(ctx, task.ID, []domain.OperationPlan{{ID: "synthetic-history-locked-plan", TaskID: task.ID, State: domain.PlanExecuting}}) != nil {
+		t.Fatal("recovery lock fixture")
+	}
+	lockBefore, e := a.CheckRecoveryLock()
+	if e != nil || !lockBefore.LockActive {
+		t.Fatal("actual recovery lock not established")
+	}
+	a.sandbox = true // Adapter policy only, not native Sandbox runtime evidence.
+	history, e := a.ListGovernanceBatches(domain.GovernanceBatchQuery{PageSize: 10})
+	if e != nil || len(history.Items) != 1 || history.Items[0].BatchID != r.BatchID {
+		t.Fatal("locked/channel readonly history unavailable")
+	}
+	if _, e = a.GetBatchDecisionResult(history.Items[0].BatchID); e != nil {
+		t.Fatal("locked receipt query")
+	}
+	lockAfter, e := a.CheckRecoveryLock()
+	if e != nil || !reflect.DeepEqual(lockBefore, lockAfter) {
+		t.Fatal("history changed recovery lock")
+	}
+	plans, e := a.store.ListAllPlans(ctx)
+	if e != nil || len(plans) != 1 || plans[0].State != domain.PlanExecuting {
+		t.Fatal("history changed plan or approval")
+	}
+	for path, want := range before {
+		bytes, e := os.ReadFile(path)
+		if e != nil || sha256.Sum256(bytes) != want {
+			t.Fatal("history changed source")
+		}
+	}
+}
+
+func historyTestKey(t *testing.T) string {
+	t.Helper()
+	var bytes [16]byte
+	if _, e := rand.Read(bytes[:]); e != nil {
+		t.Fatal("synthetic key")
+	}
+	return hex.EncodeToString(bytes[:])
 }

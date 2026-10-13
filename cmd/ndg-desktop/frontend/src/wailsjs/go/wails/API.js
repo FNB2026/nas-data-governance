@@ -122,6 +122,10 @@ export function ListDuplicateGroups(arg1) {
   return window['go']['wails']['API']['ListDuplicateGroups'](arg1);
 }
 
+export function ListGovernanceBatches(arg1) {
+  return window['go']['wails']['API']['ListGovernanceBatches'](arg1);
+}
+
 export function ListGovernanceGroups(arg1) {
   return window['go']['wails']['API']['ListGovernanceGroups'](arg1);
 }
