@@ -1,0 +1,15 @@
+
+# Confirmed disposable privacy probe, not a credential. New probes are random.
+# Exact historical commit/file/rule/line only; no future-pattern/path bypass.
+772da5f39bc99ea5dc8dcff3e0ae2dabd834745e:scripts/packaging/test-container-evidence.py:generic-api-key:185
+
+# Additional exact historical disposable idempotency fixtures, never credentials.
+70227525c7f24c55550b1d798741b3e88614323a:internal/adapters/wails/governance_integration_test.go:generic-api-key:90
+70227525c7f24c55550b1d798741b3e88614323a:internal/adapters/wails/governance_integration_test.go:generic-api-key:94
+70227525c7f24c55550b1d798741b3e88614323a:internal/adapters/wails/governance_integration_test.go:generic-api-key:130
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:95
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:251
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:254
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:270
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:340
+b4c43d6ca18094b28fcdf61efd7a81eeb7c6e2ef:internal/store/governance_test.go:generic-api-key:385
