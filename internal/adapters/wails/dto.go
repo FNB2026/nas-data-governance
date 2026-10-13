@@ -426,6 +426,7 @@ type PlanDTO struct {
 
 // GroupDecisionDTO is the DTO for a persisted review decision.
 type GroupDecisionDTO struct {
+	Revision       int64  `json:"revision"`
 	ID             string `json:"id"`
 	GroupID        string `json:"group_id"`
 	DecisionType   string `json:"decision_type"`
@@ -438,9 +439,11 @@ type GroupDecisionDTO struct {
 
 // SaveDecisionRequest is the input DTO for SaveGroupDecision.
 type SaveDecisionRequest struct {
-	GroupID      string `json:"group_id"`
-	DecisionType string `json:"decision_type"`
-	Reason       string `json:"reason,omitempty"`
+	SubjectVersion   string `json:"subject_version"`
+	DecisionRevision int64  `json:"decision_revision"`
+	GroupID          string `json:"group_id"`
+	DecisionType     string `json:"decision_type"`
+	Reason           string `json:"reason,omitempty"`
 }
 
 // ApprovePlansRequest is the input DTO for ApprovePlans.
@@ -486,6 +489,7 @@ func mapPlan(p domain.OperationPlan) PlanDTO {
 
 func mapDecision(d domain.GroupDecision) GroupDecisionDTO {
 	return GroupDecisionDTO{
+		Revision:       d.Revision,
 		ID:             d.ID,
 		GroupID:        d.GroupID,
 		DecisionType:   string(d.DecisionType),

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -19,9 +20,13 @@ import (
 
 // SQLiteStore implements Store on top of a SQLite database file.
 type SQLiteStore struct {
-	db            *sql.DB
-	path          string
-	secureOnClose bool
+	db                 *sql.DB
+	path               string
+	secureOnClose      bool
+	ownerRelease       func()
+	governanceReadOnly bool
+	governanceMu       sync.Mutex
+	scopeBinding       string
 }
 
 // Open creates (or opens) a SQLite database at path and applies migrations.
@@ -31,7 +36,7 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve path: %w", err)
 	}
-	if strings.ContainsAny(absPath, "?#") {
+	if strings.ContainsAny(absPath, "?#%") {
 		return nil, fmt.Errorf("store: path contains unsupported URI delimiter")
 	}
 	dbDir := filepath.Dir(absPath)
@@ -41,20 +46,37 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 		err = privatefs.EnsureDirectory(dbDir)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: secure directory: %w", err)
-	}
-	if _, err := os.Lstat(absPath); err == nil {
-		if err := privatefs.SecureFile(absPath); err != nil {
-			return nil, fmt.Errorf("store: secure database: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("store: inspect database: %w", err)
+		return nil, ErrWriterUnavailable
 	}
 	canonicalDir, err := filepath.EvalSymlinks(dbDir)
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve database directory")
 	}
 	absPath = filepath.Join(canonicalDir, filepath.Base(absPath))
+	ownerRelease, err := acquireOwner(absPath)
+	if err != nil {
+		return nil, ErrWriterUnavailable
+	}
+	keepOwner := false
+	defer func() {
+		if !keepOwner {
+			ownerRelease()
+		}
+	}()
+	if _, err = os.Lstat(absPath); os.IsNotExist(err) {
+		f, createErr := os.OpenFile(absPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if createErr != nil {
+			return nil, ErrWriterUnavailable
+		}
+		if f.Close() != nil {
+			return nil, ErrWriterUnavailable
+		}
+	} else if err != nil {
+		return nil, ErrWriterUnavailable
+	}
+	if preflightGovernanceSchema(ctx, absPath) != nil {
+		return nil, ErrGovernanceRejected
+	}
 	// _txlock=immediate makes write transactions acquire the write lock up
 	// front, avoiding "database is locked" mid-transaction. foreign_keys &
 	// busy_timeout make the behavior safer under concurrent readers.
@@ -64,7 +86,7 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
 	db.SetMaxOpenConns(1) // SQLite serializes writes; one conn avoids lock storms.
-	s := &SQLiteStore{db: db, path: absPath, secureOnClose: true}
+	s := &SQLiteStore{db: db, path: absPath, secureOnClose: true, ownerRelease: ownerRelease, scopeBinding: databaseScopeBinding(absPath)}
 	if err := s.Init(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -73,6 +95,7 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: secure sqlite files: %w", err)
 	}
+	keepOwner = true
 	return s, nil
 }
 
@@ -86,7 +109,7 @@ func OpenReadOnly(ctx context.Context, path string) (*SQLiteStore, error) {
 	}
 	// modernc/sqlite passes file: DSNs to SQLite's URI parser. Reject URI
 	// delimiters instead of risking mode=ro being parsed as part of a filename.
-	if strings.ContainsAny(absPath, "?#") {
+	if strings.ContainsAny(absPath, "?#%") {
 		return nil, fmt.Errorf("store: read-only path contains unsupported URI delimiter")
 	}
 	info, err := os.Lstat(absPath)
@@ -106,10 +129,13 @@ func OpenReadOnly(ctx context.Context, path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open read-only: %w", err)
 	}
-	return &SQLiteStore{db: db, path: absPath}, nil
+	return &SQLiteStore{db: db, path: absPath, scopeBinding: databaseScopeBinding(absPath)}, nil
 }
 
 func (s *SQLiteStore) Close() error {
+	if s.ownerRelease != nil {
+		defer s.ownerRelease()
+	}
 	if err := s.db.Close(); err != nil {
 		return err
 	}

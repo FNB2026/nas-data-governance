@@ -415,26 +415,23 @@ type ReviewDecisionType string
 const (
 	// DecisionUnreviewed is the zero value; no decision has been recorded.
 	DecisionUnreviewed ReviewDecisionType = ""
-	// DecisionKeepAll means the user reviewed and decided to keep all
-	// copies. The group is closed for further automated suggestions.
+	// DecisionKeepAll records the intent to retain all copies. It does not
+	// itself alter the independent planner, approvals or files.
 	DecisionKeepAll ReviewDecisionType = "KEEP_ALL"
-	// DecisionDraftAction means the user wants a governance plan drafted
-	// (e.g., quarantine redundant copies). The plan still goes through the
-	// normal DRAFT → APPROVED → EXECUTING lifecycle.
+	// DecisionDraftAction records a request for a future governance proposal.
+	// Saving it does not generate, approve or execute a plan.
 	DecisionDraftAction ReviewDecisionType = "DRAFT_ACTION"
 	// DecisionDeferred means the user is not ready to decide yet. The
 	// group remains in the review queue.
 	DecisionDeferred ReviewDecisionType = "DEFERRED"
-	// DecisionRejectedSuggestion means the user disagrees with the system's
-	// duplicate assessment. The group is excluded from future automated
-	// suggestions unless re-opened.
+	// DecisionRejectedSuggestion records rejection of the current suggestion.
+	// No automatic suppression of the independent planner is implied.
 	DecisionRejectedSuggestion ReviewDecisionType = "REJECTED_SUGGESTION"
-	// DecisionCrossArchive marks the group as cross-archive duplicates.
-	// These are "related copies" only, not candidates for automated
-	// dedup (per V1 item 5: governance domain boundary).
+	// DecisionCrossArchive records a cross-archive relationship marker;
+	// no move or automatic exclusion from planning happens on save.
 	DecisionCrossArchive ReviewDecisionType = "CROSS_ARCHIVE"
-	// DecisionBackupRelation marks the group as a backup relationship.
-	// Backup copies are retained; the group is excluded from dedup.
+	// DecisionBackupRelation records a backup relationship marker. It neither
+	// certifies backup completeness nor changes the independent planner.
 	DecisionBackupRelation ReviewDecisionType = "BACKUP_RELATION"
 	// DecisionPrimaryRetention records which specific file copy the user
 	// chose as the primary retention. RetainedFileID points to the
@@ -445,6 +442,7 @@ const (
 // GroupDecision is the persisted review decision for one duplicate group.
 // It maps to the group_decisions table (migration 008).
 type GroupDecision struct {
+	Revision       int64              `json:"revision"`
 	ID             string             `json:"id"`
 	GroupID        string             `json:"group_id"`
 	DecisionType   ReviewDecisionType `json:"decision_type"`

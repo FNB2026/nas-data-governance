@@ -133,6 +133,9 @@ func NewAPI() *API {
 // initReadWriteServicesLocked is composition-root wiring, not project
 // lifecycle logic. The caller must hold a.mu.
 func (a *API) initReadWriteServicesLocked(st *store.SQLiteStore) {
+	if a.sandbox {
+		st.SetGovernanceReadOnly()
+	}
 	mgr := jobs.New(st)
 	_, _ = mgr.Recover(context.Background())
 	a.store = st
@@ -1000,39 +1003,35 @@ func (a *API) GetGroupDecision(groupID string) (GroupDecisionDTO, error) {
 // The decision is upserted by group_id, so there can be only one decision
 // per group. Requires read-write mode.
 func (a *API) SaveGroupDecision(req SaveDecisionRequest) (GroupDecisionDTO, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	if a.reviewSvc == nil {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.store == nil {
 		return GroupDecisionDTO{}, ErrNoProjectOpen
 	}
-	if a.scanRunner == nil {
-		return GroupDecisionDTO{}, ErrProjectNotReadWrite
+	if a.scanRunner == nil || a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	if strings.TrimSpace(req.GroupID) == "" {
-		return GroupDecisionDTO{}, errors.New("wails: group_id is required")
+	ref, e := a.store.FindGovernanceSubject(context.Background(), req.GroupID)
+	if e != nil {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	if strings.TrimSpace(req.DecisionType) == "" {
-		return GroupDecisionDTO{}, errors.New("wails: decision_type is required")
+	if req.SubjectVersion != "" {
+		ref.SubjectVersion = req.SubjectVersion
+		ref.DecisionRevision = req.DecisionRevision
+	} else if ref.DecisionRevision != 0 {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-
-	now := time.Now().UTC()
-	d := domain.GroupDecision{
-		ID:           req.GroupID,
-		GroupID:      req.GroupID,
-		DecisionType: domain.ReviewDecisionType(req.DecisionType),
-		Reason:       req.Reason,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+	p, e := a.governanceServiceLocked().Preview(context.Background(), domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.ReviewDecisionType(req.DecisionType), Reason: req.Reason})
+	if e != nil || p.PreviewToken == "" {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-
-	// Preserve created_at if a decision already exists.
-	if existing, err := a.reviewSvc.GetDecision(context.Background(), req.GroupID); err == nil {
-		d.CreatedAt = existing.CreatedAt
+	v, e := a.governanceServiceLocked().Commit(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: p.PreviewToken})
+	if e != nil || len(v.Items) != 1 || (v.Items[0].Status != "SAVED" && v.Items[0].Status != "UNCHANGED") {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-
-	if err := a.reviewSvc.SaveDecision(context.Background(), d); err != nil {
-		return GroupDecisionDTO{}, fmt.Errorf("wails: save group decision: %w", err)
+	d, e := a.reviewSvc.GetDecision(context.Background(), req.GroupID)
+	if e != nil {
+		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
 	return mapDecision(d), nil
 }
@@ -1071,6 +1070,9 @@ func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error
 	}
 	if a.scanRunner == nil {
 		return ApprovePlansResponse{}, ErrProjectNotReadWrite
+	}
+	if a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+		return ApprovePlansResponse{}, errGovernanceUnavailable
 	}
 	if len(req.PlanIDs) == 0 {
 		return ApprovePlansResponse{}, errors.New("wails: at least one plan_id is required")
@@ -1584,14 +1586,17 @@ func (a *API) ListJournalEntries(planID string) ([]JournalEntryDTO, error) {
 //
 // If storageID is empty, all storages are included.
 func (a *API) SaveDraftPlans(storageID string) ([]PlanDTO, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.store == nil {
 		return nil, ErrNoProjectOpen
 	}
 	if a.scanRunner == nil {
 		return nil, ErrProjectNotReadWrite
+	}
+	if a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+		return nil, errGovernanceUnavailable
 	}
 	if a.planSvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1778,6 +1783,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	}
 
 	disabled := map[string]string{"purge": "当前发行版本禁止永久清理；历史与异常恢复仍可查看"}
+	canGovernanceWrite := isRW && !a.sandbox && !a.closing && a.store.CheckDecisionWrite(context.Background()) == nil
 	if a.sandbox {
 		disabled["execution-center"] = "商店只读预验证禁止文件写入及恢复操作"
 	}
@@ -1795,8 +1801,8 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
 		CanScan:               isRW && !recoveryLock,
 		CanViewResults:        true,
-		CanEditReviews:        isRW && !recoveryLock,
-		CanApprovePlans:       isRW && !recoveryLock,
+		CanEditReviews:        canGovernanceWrite,
+		CanApprovePlans:       canGovernanceWrite,
 		CanExecuteQuarantine:  isRW && !recoveryLock && !a.sandbox,
 		CanExecutePurge:       isRW && !recoveryLock && !a.sandbox && app.PurgeReleaseAllowed(),
 		RecoveryLockActive:    recoveryLock,

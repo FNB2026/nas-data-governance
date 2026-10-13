@@ -35,7 +35,7 @@ func TestInitIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestOpenTightensDatabasePermissions(t *testing.T) {
+func TestOpenRejectsUnsecuredDatabaseBeforeWriting(t *testing.T) {
 	if os.PathSeparator == '\\' {
 		t.Skip("POSIX mode assertion")
 	}
@@ -48,6 +48,18 @@ func TestOpenTightensDatabasePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := Open(context.Background(), dbPath)
+	if err == nil {
+		st.Close()
+		t.Fatal("unsafe database permissions accepted")
+	}
+	before, _ := os.Stat(dbPath)
+	if before.Mode().Perm() != 0644 || before.Size() != 0 {
+		t.Fatal("rejected database modified")
+	}
+	if err = os.Chmod(dbPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,6 +572,7 @@ func TestLinkCountMigrationAndRoundTrip(t *testing.T) {
 	// Create a minimal old-schema file_instances table — no link_count,
 	// no file_status, no physical_reliable.
 	oldSchema := `
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS storages (id TEXT PRIMARY KEY, root_path TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS file_instances (
   id INTEGER PRIMARY KEY, storage_id TEXT NOT NULL REFERENCES storages(id), path TEXT NOT NULL,
@@ -595,12 +608,21 @@ CREATE TABLE IF NOT EXISTS file_instances (
 		t.Fatalf("close raw db: %v", err)
 	}
 
-	// --- Phase 2: open with Open(), which runs Init() and applies migrations ---
-	s, err := Open(ctx, dbPath)
+	// --- Phase 2: explicitly exercise the legacy column migration unit ---
+	// This intentionally partial synthetic schema is not a supported released
+	// project layout and is refused by Open's complete-layout preflight.
+	if err := os.Chmod(dbPath, 0600); err != nil {
+		t.Fatal(err)
+	} // synthetic owner-controlled backup fixture
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		t.Fatalf("open with migration: %v", err)
+		t.Fatal("synthetic migration connection")
 	}
+	s := &SQLiteStore{db: db, path: dbPath}
 	t.Cleanup(func() { _ = s.Close() })
+	if err = s.Init(ctx); err != nil {
+		t.Fatalf("legacy migration unit: %v", err)
+	}
 
 	// The migration must have added link_count with DEFAULT 0.
 	if err := s.db.QueryRowContext(ctx,

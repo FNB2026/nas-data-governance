@@ -15,6 +15,8 @@ import (
 // wins without accumulating historical rows (the decision history is
 // tracked via updated_at, not via multiple rows per group).
 func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecision) error {
+	s.governanceMu.Lock()
+	defer s.governanceMu.Unlock()
 	if d.GroupID == "" {
 		return fmt.Errorf("store: SaveGroupDecision: group_id is required")
 	}
@@ -66,6 +68,23 @@ func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecis
 		return fmt.Errorf("store: SaveGroupDecision begin: %w", err)
 	}
 	defer tx.Rollback()
+	if guardedGovernanceWrite(ctx, s, tx) != nil {
+		return ErrGovernanceRejected
+	}
+	var old string
+	var revision int64
+	err = tx.QueryRowContext(ctx, `SELECT decision_type,revision FROM group_decisions WHERE group_id=? ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC,id DESC LIMIT 1`, d.GroupID).Scan(&old, &revision)
+	if err != nil && err != sql.ErrNoRows {
+		return ErrGovernanceRejected
+	}
+	if d.Revision != revision {
+		return ErrGovernanceRejected
+	}
+	oldSnapshot, _, snapshotErr := decisionAuditSnapshot(ctx, tx, d.GroupID)
+	if snapshotErr != nil {
+		return snapshotErr
+	}
+	revision++
 
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM group_decisions WHERE group_id = ?`, d.GroupID); err != nil {
@@ -73,14 +92,18 @@ func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecis
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO group_decisions(id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO group_decisions(id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at,revision)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.GroupID, string(d.DecisionType), retainedID,
 		d.Reason, d.RuleID,
 		d.CreatedAt.Format(time.RFC3339Nano),
 		d.UpdatedAt.Format(time.RFC3339Nano),
+		revision,
 	); err != nil {
 		return fmt.Errorf("store: SaveGroupDecision insert: %w", err)
+	}
+	if governanceAudit(ctx, tx, "", d.GroupID, oldSnapshot, string(d.DecisionType), "", revision, d.Reason, "legacy_store", "SAVED", "RECORDED_ONLY", now.Format(time.RFC3339Nano)) != nil {
+		return ErrGovernanceRejected
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -95,15 +118,20 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 	var (
 		id, scannedGroupID, decisionType, reason, ruleID, createdAt, updatedAt string
 		retainedFileID                                                         sql.NullInt64
+		revision                                                               int64
 	)
+	expr, exprErr := decisionRevisionExpression(ctx, s.db)
+	if exprErr != nil {
+		return domain.GroupDecision{}, exprErr
+	}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
+		`SELECT id, group_id, decision_type, retained_file_id, COALESCE(reason,''), COALESCE(rule_id,''), created_at, updated_at,`+expr+`
 		 FROM group_decisions
 		 WHERE group_id = ?
-		 ORDER BY updated_at DESC
+		 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC
 		 LIMIT 1`, groupID).Scan(
 		&id, &scannedGroupID, &decisionType, &retainedFileID, &reason, &ruleID,
-		&createdAt, &updatedAt)
+		&createdAt, &updatedAt, &revision)
 	if err == sql.ErrNoRows {
 		return domain.GroupDecision{}, ErrNotFound
 	}
@@ -112,6 +140,7 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 	}
 
 	d := domain.GroupDecision{
+		Revision:     revision,
 		ID:           id,
 		GroupID:      scannedGroupID,
 		DecisionType: domain.ReviewDecisionType(decisionType),
@@ -122,29 +151,40 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 		v := retainedFileID.Int64
 		d.RetainedFileID = &v
 	}
-	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision created_at: %w", err)
+	}
+	d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision updated_at: %w", err)
+	}
 	return d, nil
 }
 
 // ListGroupDecisions returns review decisions, optionally filtered by type.
-// Results are ordered by updated_at DESC (most recent first).
+// Results are ordered by parsed chronological updated_at DESC (most recent
+// first), with ID as a stable tie-breaker for equal instants.
 func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domain.ReviewDecisionType) ([]domain.GroupDecision, error) {
+	expr, exprErr := decisionRevisionExpression(ctx, s.db)
+	if exprErr != nil {
+		return nil, exprErr
+	}
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if decisionType != "" {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
+			`SELECT id, group_id, decision_type, retained_file_id, COALESCE(reason,''), COALESCE(rule_id,''), created_at, updated_at,`+expr+`
 			 FROM group_decisions
 			 WHERE decision_type = ?
-			 ORDER BY updated_at DESC`, string(decisionType))
+			 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC`, string(decisionType))
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
+			`SELECT id, group_id, decision_type, retained_file_id, COALESCE(reason,''), COALESCE(rule_id,''), created_at, updated_at,`+expr+`
 			 FROM group_decisions
-			 ORDER BY updated_at DESC`)
+			 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: ListGroupDecisions: %w", err)
@@ -156,12 +196,14 @@ func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domai
 		var (
 			id, groupID, dt, reason, ruleID, createdAt, updatedAt string
 			retainedFileID                                        sql.NullInt64
+			revision                                              int64
 		)
 		if err := rows.Scan(&id, &groupID, &dt, &retainedFileID, &reason, &ruleID,
-			&createdAt, &updatedAt); err != nil {
+			&createdAt, &updatedAt, &revision); err != nil {
 			return nil, fmt.Errorf("store: ListGroupDecisions scan: %w", err)
 		}
 		d := domain.GroupDecision{
+			Revision:     revision,
 			ID:           id,
 			GroupID:      groupID,
 			DecisionType: domain.ReviewDecisionType(dt),
@@ -172,8 +214,14 @@ func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domai
 			v := retainedFileID.Int64
 			d.RetainedFileID = &v
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions created_at: %w", err)
+		}
+		d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions updated_at: %w", err)
+		}
 		result = append(result, d)
 	}
 	return result, rows.Err()
