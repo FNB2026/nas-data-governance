@@ -132,3 +132,40 @@ BLOCKED scans; inspect scan receipts and actual workflow result separately.
 Only actual runner evidence may update native/runtime/security states. This work
 does not relax MAS NO-GO, historical privacy FAIL, fnOS's hard build refusal or any
 unresolved backup, Journal, network or release authorization gate.
+
+
+## First native experiment and inventory follow-up (2026-10-13)
+
+Run [38387062893](https://github.com/FNB2026/nas-data-governance/actions/runs/38387062893),
+attempt 1, exact main `bacc160111eeebf57388a67301ac0f30135698a8`, tree
+`f57bf14987213ca541914917c7b42d255b2dd491`: both native amd64/arm64 jobs SUCCESS.
+Independent read-only reviewer `/root/linux_web_implementation` checked GitHub run
+identity, all artifact hashes, OCI/config/loaded image identity, four actual SBOMs
+and actual vulnerability outputs. npm all severities 0, Govulncheck 192 events/0
+findings, Grype 0 matches with valid vulnerability DB. This supports bounded native
+runtime/content/vulnerability PASS, not a release or full G6 closure.
+
+The original source SBOMs contain only six npm entries while the source lock has
+207 dependency entries (202 marked dev); source-map-js is missing. Nonempty SBOMs
+and npm audit success do not prove complete inventory. Both original architectures
+are now rejected by the new complete-inventory checker; their original reports
+and hashes remain preserved. Runtime image hashes:
+
+- amd64: `bcbf2c6525a6f21f8ec38607057d34d43c7411b15a0f98154bfe54e353d8f670`.
+- arm64: `8bafe6d82e1ed65c0357cbdafeb11ca6357194eae2fdfb13baa05038a2b1893a`.
+
+The follow-up explicitly enables `SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=true`,
+per [Syft official configuration](https://oss.anchore.com/docs/reference/syft/configuration/).
+Before accepting the collected bundle, it compares every source lock name/version
+(including dev, optional and nested entries) against npm PURLs in **both** source
+CycloneDX and SPDX. Missing packages or wrong versions refuse, even when the SBOM
+is nonempty and receipt says PASS. Counts and exact lock SHA are in the unsigned
+receipt. External verification must supply `--frontend-lock` from the independently
+verified checkout; omitting it verifies bounded content, not complete inventory.
+This inventory does not certify every toolchain/base-image build layer, publisher
+signatures or reproducibility. New real collector execution is still required to
+close this specific gap; offline tests do not substitute for Syft runtime output.
+
+Seven-day CI artifacts expire on 2026-10-20; raw artifacts have also been retained
+in a private local archive. No registry image, signed attestation, public tag,
+Release or fnOS-installable package was published. Historical limits stay intact.

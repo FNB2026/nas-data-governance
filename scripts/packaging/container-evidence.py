@@ -12,6 +12,7 @@ import re
 import stat
 import sys
 import tarfile
+from urllib.parse import unquote
 
 sys.dont_write_bytecode = True
 boundary = importlib.import_module("check-fnos-package")
@@ -137,7 +138,46 @@ def image_identity(archive, source, architecture):
     return {"archive_sha256": hasher.hexdigest(), "index_sha256": digest(index_bytes), "manifest_digest": manifest_desc["digest"], "config_digest": manifest["config"]["digest"], "layers": layers}
 
 
-def verify_bundle(root, *, expected_commit=None, expected_tree=None, expected_architecture=None):
+def verify_frontend_sbom_inventory(root, frontend_lock):
+    """Bind both source formats to every lock entry, including dev/optional deps.
+
+    This verifies known source inventory; an unsigned receipt is not provenance.
+    Caller supplies the lock from the independently verified source checkout.
+    """
+    raw = regular_input(Path(frontend_lock), MAX_BLOB).read_bytes()
+    lock = json_value(raw)
+    require(lock.get("lockfileVersion") == 3 and isinstance(lock.get("packages"), dict), "unsupported_frontend_lock")
+    expected = set()
+    entries, dev_entries = 0, 0
+    for path, item in lock["packages"].items():
+        if path == "":
+            continue
+        require(isinstance(path, str) and path.startswith("node_modules/") and isinstance(item, dict), "invalid_frontend_lock_entry")
+        name = item.get("name") or path.rsplit("node_modules/", 1)[1]
+        version = item.get("version")
+        require(isinstance(name, str) and re.fullmatch(r"(?:@[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+", name) and isinstance(version, str) and len(version) <= 128 and bool(version), "invalid_frontend_lock_identity")
+        expected.add((name, version))
+        entries += 1
+        dev_entries += item.get("dev") is True
+    require(bool(expected), "empty_frontend_lock_inventory")
+    for name, field in [("source.cyclonedx.json", "components"), ("source.spdx.json", "packages")]:
+        data = json_value(regular_input(Path(root) / name, MAX_BLOB).read_bytes())
+        require(isinstance(data.get(field), list), "invalid_source_sbom")
+        observed = set()
+        for item in data[field]:
+            require(isinstance(item, dict), "invalid_source_sbom")
+            purls = [item.get("purl")] if field == "components" else [ref.get("referenceLocator") for ref in item.get("externalRefs", []) if isinstance(ref, dict) and ref.get("referenceType") == "purl"]
+            for purl in purls:
+                if not isinstance(purl, str) or not purl.startswith("pkg:npm/"):
+                    continue
+                package, separator, version = purl[8:].split("?", 1)[0].split("#", 1)[0].rpartition("@")
+                require(bool(separator) and bool(package) and bool(version), "invalid_npm_purl")
+                observed.add((unquote(package), unquote(version)))
+        require(expected <= observed, "incomplete_frontend_sbom_inventory")
+    return {"scope": "frontend_lock_all_entries_including_dev_and_optional", "lock_sha256": digest(raw), "lock_entries": entries, "dev_entries": dev_entries, "unique_packages": len(expected), "status": "PASS"}
+
+
+def verify_bundle(root, *, expected_commit=None, expected_tree=None, expected_architecture=None, expected_frontend_lock=None):
     root = Path(os.path.abspath(root))
     boundary.trusted_ancestry(root)
     names = {entry.name for entry in root.iterdir()}
@@ -179,6 +219,9 @@ def verify_bundle(root, *, expected_commit=None, expected_tree=None, expected_ar
         require(receipt["scans"]["govulncheck"]["exit_code"] == 0 and not any("finding" in item for item in govuln), "false_go_scan_pass")
     if receipt["scans"]["grype"]["status"] == "PASS":
         require(receipt["scans"]["grype"]["exit_code"] == 0 and not any(str(item.get("vulnerability", {}).get("severity", "")).lower() in {"high", "critical"} for item in grype["matches"]), "false_image_scan_pass")
+    if expected_frontend_lock is not None:
+        inventory = verify_frontend_sbom_inventory(root, expected_frontend_lock)
+        require(receipt.get("source_sbom_inventory") == inventory, "source_sbom_inventory_receipt_mismatch")
     return receipt
 
 
@@ -188,9 +231,10 @@ def main():
     parser.add_argument("--expected-commit")
     parser.add_argument("--expected-tree")
     parser.add_argument("--expected-architecture", choices=["amd64", "arm64"])
+    parser.add_argument("--frontend-lock", type=Path, help="lock from independently verified source checkout; required to certify complete frontend inventory")
     args = parser.parse_args()
     try:
-        verify_bundle(args.bundle, expected_commit=args.expected_commit, expected_tree=args.expected_tree, expected_architecture=args.expected_architecture)
+        verify_bundle(args.bundle, expected_commit=args.expected_commit, expected_tree=args.expected_tree, expected_architecture=args.expected_architecture, expected_frontend_lock=args.frontend_lock)
     except Exception as error:
         print("container-evidence: " + (str(error) if isinstance(error, Rejected) else "invalid_or_unreadable_evidence"), file=sys.stderr)
         return 1

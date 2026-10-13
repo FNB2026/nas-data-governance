@@ -116,6 +116,51 @@ class EvidenceChecks(unittest.TestCase):
         self.receipt["files"] = {name: evidence.digest((self.root / name).read_bytes()) for name in evidence.ARTIFACTS}
         (self.root / "receipt.json").write_bytes(encoded(self.receipt))
 
+    def inventory_fixture(self):
+        self.bundle()
+        temp = tempfile.TemporaryDirectory(prefix="ndg-source-lock-")
+        self.addCleanup(temp.cleanup)
+        lock = Path(temp.name).resolve() / "package-lock.json"
+        lock.write_bytes(encoded({"lockfileVersion": 3, "packages": {"": {"name": "synthetic-frontend"}, "node_modules/prod": {"version": "1.0.0"}, "node_modules/@synthetic/dev": {"version": "2.0.0", "dev": True}, "node_modules/optional": {"version": "3.0.0", "dev": True, "optional": True}}}))
+        purls = ["pkg:npm/prod@1.0.0", "pkg:npm/%40synthetic/dev@2.0.0", "pkg:npm/optional@3.0.0"]
+        (self.root / "source.cyclonedx.json").write_bytes(encoded({"components": [{"purl": value} for value in purls]}))
+        (self.root / "source.spdx.json").write_bytes(encoded({"packages": [{"externalRefs": [{"referenceType": "purl", "referenceLocator": value}]} for value in purls]}))
+        self.receipt["source_sbom_inventory"] = evidence.verify_frontend_sbom_inventory(self.root, lock)
+        self.seal()
+        return lock
+
+    def test_full_frontend_inventory_matches_both_standards(self):
+        lock = self.inventory_fixture()
+        result = evidence.verify_bundle(self.root, expected_frontend_lock=lock)
+        self.assertEqual(result["source_sbom_inventory"]["lock_entries"], 3)
+        self.assertEqual(result["source_sbom_inventory"]["dev_entries"], 2)
+
+    def test_nonempty_production_only_or_wrong_version_inventory_refused(self):
+        lock = self.inventory_fixture()
+        for filename, field in [("source.cyclonedx.json", "components"), ("source.spdx.json", "packages")]:
+            original = (self.root / filename).read_bytes()
+            for defect in ["missing-dev", "missing-optional", "wrong-version"]:
+                value = json.loads(original)
+                if defect == "missing-dev":
+                    value[field].pop(1)
+                elif defect == "missing-optional":
+                    value[field].pop(2)
+                else:
+                    value = json.loads(original.replace(b"2.0.0", b"2.0.1"))
+                (self.root / filename).write_bytes(encoded(value))
+                self.seal()
+                with self.assertRaisesRegex(evidence.Rejected, "^incomplete_frontend_sbom_inventory$"):
+                    evidence.verify_bundle(self.root, expected_frontend_lock=lock)
+            (self.root / filename).write_bytes(original)
+            self.seal()
+
+    def test_source_inventory_receipt_cannot_substitute_for_contents(self):
+        lock = self.inventory_fixture()
+        self.receipt["source_sbom_inventory"]["lock_sha256"] = "0" * 64
+        self.seal()
+        with self.assertRaisesRegex(evidence.Rejected, "^source_sbom_inventory_receipt_mismatch$"):
+            evidence.verify_bundle(self.root, expected_frontend_lock=lock)
+
     def test_bundle_hashes_and_loaded_image_match(self):
         self.bundle()
         evidence.verify_bundle(self.root)
