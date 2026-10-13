@@ -2,7 +2,9 @@ package wails
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -52,6 +54,11 @@ func governanceAPIWithSource(t *testing.T) (*API, map[string][32]byte) {
 	return a, before
 }
 func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) {
+	var nonce [16]byte
+	if _, e := rand.Read(nonce[:]); e != nil {
+		t.Fatal("disposable nonce creation")
+	}
+	runtimeKey := hex.EncodeToString(nonce[:])
 	a, before := governanceAPIWithSource(t)
 	page, e := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
 	if e != nil || len(page.Items) != 3 || page.TotalCount != 3 {
@@ -87,11 +94,11 @@ func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) 
 	if e != nil || preview.PreviewToken == "" {
 		t.Fatal("real preview", e)
 	}
-	result, e := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: "synthetic-wails-roundtrip-0001"})
+	result, e := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: runtimeKey})
 	if e != nil || result.Status != "COMPLETE" || result.Counts.Saved != 3 || result.Counts.Total != 3 {
 		t.Fatal("real commit receipt", e)
 	}
-	replay, e := a.GetBatchDecisionResult("key:synthetic-wails-roundtrip-0001")
+	replay, e := a.GetBatchDecisionResult("key:" + runtimeKey)
 	if e != nil || !reflect.DeepEqual(result, replay) {
 		t.Fatal("read-only key reconciliation", e)
 	}
@@ -127,7 +134,7 @@ func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) 
 	if e != nil || readonlyPreview.PreviewToken != "" {
 		t.Fatal("readonly preview returned a commit token", e)
 	}
-	if _, e = a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: "synthetic-wails-roundtrip-0001"}); e == nil {
+	if _, e = a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: runtimeKey}); e == nil {
 		t.Fatal("readonly direct API mutation accepted")
 	}
 	for path, sum := range before {

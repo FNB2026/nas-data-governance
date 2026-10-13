@@ -90,9 +90,10 @@ func auditCount(t *testing.T, s *SQLiteStore) int {
 }
 
 func TestBatchHundredItemsReplayRestartAndSourceConservation(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
 	s, refs, before := governanceFixture(t, 100)
 	p := previewFor(t, s, refs, domain.DecisionDraftAction)
-	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "synthetic-idempotency-0001"}
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0}
 	v, e := s.CommitBatchDecisions(context.Background(), req)
 	if e != nil || v.Status != "COMPLETE" || v.Counts.Saved != 100 || v.Counts.Total != 100 || v.RequestedCount != 100 {
 		t.Fatal("batch coverage", v.Counts, e)
@@ -145,12 +146,14 @@ func TestBatchHundredItemsReplayRestartAndSourceConservation(t *testing.T) {
 }
 
 func TestBatchVersionsPartialConflictAndUnchanged(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
+	runtimeKey1 := governanceTestKey(t)
 	s, refs, before := governanceFixture(t, 3)
 	p := previewFor(t, s, refs, domain.DecisionKeepAll)
 	if _, e := s.db.Exec(`UPDATE file_instances SET size=size+1 WHERE storage_id=? AND content_sha256=?`, refs[0].StorageID, refs[0].SHA256); e != nil {
 		t.Fatal(e)
 	}
-	v, e := s.CommitBatchDecisions(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "partial-batch-key-0001"})
+	v, e := s.CommitBatchDecisions(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0})
 	if e != nil || v.Counts.Conflict != 1 || v.Counts.Saved != 2 || v.Counts.Total != 3 {
 		t.Fatal(v.Counts, e)
 	}
@@ -163,7 +166,7 @@ func TestBatchVersionsPartialConflictAndUnchanged(t *testing.T) {
 		fresh = append(fresh, g.GovernanceSubject)
 	}
 	p = previewFor(t, s, fresh, domain.DecisionKeepAll)
-	v, e = s.CommitBatchDecisions(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "unchanged-batch-key-0001"})
+	v, e = s.CommitBatchDecisions(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey1})
 	if e != nil || v.Counts.Unchanged != 2 {
 		t.Fatal(v.Counts, e)
 	}
@@ -171,12 +174,13 @@ func TestBatchVersionsPartialConflictAndUnchanged(t *testing.T) {
 }
 
 func TestBatchDurableFailureResumeAndAtomicAudit(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
 	s, refs, _ := governanceFixture(t, 3)
 	p := previewFor(t, s, refs, domain.DecisionDeferred)
 	if _, e := s.db.Exec(`CREATE TRIGGER synthetic_audit_failure BEFORE INSERT ON governance_decision_audit WHEN NEW.group_id='` + refs[1].GroupID + `' BEGIN SELECT RAISE(ABORT,'private_failure_anchor'); END`); e != nil {
 		t.Fatal(e)
 	}
-	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "audit-recovery-key-0001"}
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0}
 	v, e := s.CommitBatchDecisions(context.Background(), req)
 	if e != nil || v.Status != "IN_PROGRESS" || v.Counts.Saved != 1 || v.Counts.Failed != 2 {
 		t.Fatal("failure classification", v.Counts, e)
@@ -208,10 +212,12 @@ func TestBatchDurableFailureResumeAndAtomicAudit(t *testing.T) {
 }
 
 func TestBatchPolicyExpiryScopeAndBodyGuards(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
+	runtimeKey1 := governanceTestKey(t)
 	s, refs, _ := governanceFixture(t, 2)
 	ctx := context.Background()
 	p := previewFor(t, s, refs, domain.DecisionKeepAll)
-	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "request-body-key-0001"}
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0}
 	if _, e := s.CommitBatchDecisions(ctx, req); e != nil {
 		t.Fatal(e)
 	}
@@ -220,7 +226,7 @@ func TestBatchPolicyExpiryScopeAndBodyGuards(t *testing.T) {
 		t.Fatal("same key different body accepted")
 	}
 	s.db.Exec(`UPDATE governance_previews SET expires_at=? WHERE token=?`, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), other.PreviewToken)
-	if _, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: other.PreviewToken, IdempotencyKey: "expired-preview-key-0001"}); e == nil {
+	if _, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: other.PreviewToken, IdempotencyKey: runtimeKey1}); e == nil {
 		t.Fatal("expired token accepted")
 	}
 	otherDB := newTestStore(t)
@@ -244,14 +250,18 @@ func TestBatchPolicyExpiryScopeAndBodyGuards(t *testing.T) {
 }
 
 func TestBatchDecisionCASRulesProtectionAndGuardChanges(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
+	runtimeKey1 := governanceTestKey(t)
+	runtimeKey2 := governanceTestKey(t)
+	runtimeKey3 := governanceTestKey(t)
 	s, refs, before := governanceFixture(t, 2)
 	ctx := context.Background()
 	p1 := previewFor(t, s, refs, domain.DecisionKeepAll)
 	p2 := previewFor(t, s, refs, domain.DecisionDeferred)
-	if _, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p1.PreviewToken, IdempotencyKey: "decision-cas-key-0001"}); e != nil {
+	if _, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p1.PreviewToken, IdempotencyKey: runtimeKey0}); e != nil {
 		t.Fatal(e)
 	}
-	v, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p2.PreviewToken, IdempotencyKey: "decision-cas-key-0002"})
+	v, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p2.PreviewToken, IdempotencyKey: runtimeKey1})
 	if e != nil || v.Counts.Conflict != 2 {
 		t.Fatal("decision CAS", v.Counts, e)
 	}
@@ -267,7 +277,7 @@ func TestBatchDecisionCASRulesProtectionAndGuardChanges(t *testing.T) {
 	if _, e = s.db.Exec(`INSERT INTO protected_paths(storage_id,path_prefix,reason) VALUES('synthetic','/synthetic/protected','synthetic HOLD')`); e != nil {
 		t.Fatal(e)
 	}
-	v, e = s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p3.PreviewToken, IdempotencyKey: "protection-cas-key-0001"})
+	v, e = s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p3.PreviewToken, IdempotencyKey: runtimeKey2})
 	if e != nil || v.Counts.Conflict != 2 {
 		t.Fatal("protection snapshot changed", v.Counts, e)
 	}
@@ -280,17 +290,19 @@ func TestBatchDecisionCASRulesProtectionAndGuardChanges(t *testing.T) {
 	if _, e = s.db.Exec(`INSERT INTO job_runs(id,project_id,job_type,state,stage,progress_json,created_at) VALUES('synthetic-job','synthetic','scan','RUNNING','DISCOVERING','{}',?)`, time.Now().UTC().Format(time.RFC3339Nano)); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p4.PreviewToken, IdempotencyKey: "scan-guard-key-0001"}); e == nil {
+	if _, e = s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p4.PreviewToken, IdempotencyKey: runtimeKey3}); e == nil {
 		t.Fatal("active scan recording accepted")
 	}
 	checkSourceBytes(t, before)
 }
 
 func TestCopiedDatabasePreservesHistoryButRejectsOriginalPreview(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
+	runtimeKey1 := governanceTestKey(t)
 	s, refs, _ := governanceFixture(t, 2)
 	ctx := context.Background()
 	p := previewFor(t, s, refs, domain.DecisionKeepAll)
-	first, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "original-history-key-0001"})
+	first, e := s.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -325,7 +337,7 @@ func TestCopiedDatabasePreservesHistoryButRejectsOriginalPreview(t *testing.T) {
 	if e != nil || copyScope.ProjectScope == scope.ProjectScope {
 		t.Fatal("clone identity not isolated")
 	}
-	if _, e = copyStore.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: pending.PreviewToken, IdempotencyKey: "foreign-copy-key-0001"}); e == nil {
+	if _, e = copyStore.CommitBatchDecisions(ctx, domain.CommitBatchRequest{PreviewToken: pending.PreviewToken, IdempotencyKey: runtimeKey1}); e == nil {
 		t.Fatal("original preview replayed in copied database")
 	}
 	history, e := copyStore.GetBatchDecisionResult(ctx, first.BatchID)
@@ -335,9 +347,10 @@ func TestCopiedDatabasePreservesHistoryButRejectsOriginalPreview(t *testing.T) {
 }
 
 func TestOutcomePersistenceFailureAndCancelledCallNeverReportSaved(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
 	s, refs, before := governanceFixture(t, 2)
 	p := previewFor(t, s, refs, domain.DecisionKeepAll)
-	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "outcome-failure-key-0001"}
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, e := s.CommitBatchDecisions(ctx, req); e == nil {
@@ -366,6 +379,7 @@ func TestOutcomePersistenceFailureAndCancelledCallNeverReportSaved(t *testing.T)
 }
 
 func TestCriticalProtectedIntentNeverApprovesOrClearsRecoveryLock(t *testing.T) {
+	runtimeKey0 := governanceTestKey(t)
 	s, refs, before := governanceFixture(t, 2)
 	ctx := context.Background()
 	task := domain.OperationTask{ID: "protected-task", RootPath: "/synthetic", State: "planning", CreatedAt: time.Now()}
@@ -382,7 +396,7 @@ func TestCriticalProtectedIntentNeverApprovesOrClearsRecoveryLock(t *testing.T) 
 		fresh = append(fresh, g.GovernanceSubject)
 	}
 	p := previewFor(t, s, fresh, domain.DecisionKeepAll)
-	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: "protected-intent-key-0001"}
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: runtimeKey0}
 	v, e := s.CommitBatchDecisions(ctx, req)
 	if e != nil || v.Counts.Saved != 2 {
 		t.Fatal(v.Counts, e)
@@ -462,4 +476,13 @@ func TestLegacyStoreRejectsStaleRevision(t *testing.T) {
 	if e := s.SaveGroupDecision(ctx, domain.GroupDecision{GroupID: "synthetic", DecisionType: domain.DecisionDeferred, Revision: 99}); e == nil {
 		t.Fatal("stale decision revision accepted")
 	}
+}
+
+func governanceTestKey(t *testing.T) string {
+	t.Helper()
+	key, e := opaqueID()
+	if e != nil {
+		t.Fatal("runtime disposable key creation failed")
+	}
+	return key
 }

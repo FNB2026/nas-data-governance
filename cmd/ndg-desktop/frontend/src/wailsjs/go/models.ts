@@ -1,21 +1,35 @@
 export namespace domain {
-	
+
 	export class ChainNode {
 	    path: string;
 	    name: string;
 	    role: string;
 	    authority: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ChainNode(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
 	        this.name = source["name"];
 	        this.role = source["role"];
 	        this.authority = source["authority"];
+	    }
+	}
+	export class CommitBatchRequest {
+	    preview_token: string;
+	    idempotency_key: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CommitBatchRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.preview_token = source["preview_token"];
+	        this.idempotency_key = source["idempotency_key"];
 	    }
 	}
 	export class DirectoryContext {
@@ -27,11 +41,11 @@ export namespace domain {
 	    parent_chain?: ChainNode[];
 	    branch_point?: string;
 	    business_anchor?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DirectoryContext(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
@@ -43,7 +57,7 @@ export namespace domain {
 	        this.branch_point = source["branch_point"];
 	        this.business_anchor = source["business_anchor"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -75,11 +89,11 @@ export namespace domain {
 	    role?: string;
 	    protected?: boolean;
 	    regenerable?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FormatInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.format = source["format"];
@@ -101,11 +115,11 @@ export namespace domain {
 	    inode: number;
 	    link_count?: number;
 	    reliable: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PhysicalIdentity(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.device = source["device"];
@@ -131,11 +145,11 @@ export namespace domain {
 	    discovered_at: any;
 	    physical?: PhysicalIdentity;
 	    format?: FormatInfo;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileInstance(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -153,7 +167,7 @@ export namespace domain {
 	        this.physical = this.convertValues(source["physical"], PhysicalIdentity);
 	        this.format = this.convertValues(source["format"], FormatInfo);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -178,11 +192,11 @@ export namespace domain {
 	    b: string;
 	    score?: number;
 	    evidence?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileRelation(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.type = source["type"];
@@ -192,7 +206,295 @@ export namespace domain {
 	        this.evidence = source["evidence"];
 	    }
 	}
-	
+
+	export class GovernanceOutcome {
+	    group_id: string;
+	    status: string;
+	    reason_code: string;
+	    decision_revision: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceOutcome(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.status = source["status"];
+	        this.reason_code = source["reason_code"];
+	        this.decision_revision = source["decision_revision"];
+	    }
+	}
+	export class GovernanceCounts {
+	    total: number;
+	    saved: number;
+	    unchanged: number;
+	    conflict: number;
+	    blocked: number;
+	    failed: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceCounts(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.saved = source["saved"];
+	        this.unchanged = source["unchanged"];
+	        this.conflict = source["conflict"];
+	        this.blocked = source["blocked"];
+	        this.failed = source["failed"];
+	    }
+	}
+	export class GovernanceBatchResult {
+	    batch_id: string;
+	    project_scope: string;
+	    status: string;
+	    requested_count: number;
+	    counts: GovernanceCounts;
+	    items: GovernanceOutcome[];
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceBatchResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.batch_id = source["batch_id"];
+	        this.project_scope = source["project_scope"];
+	        this.status = source["status"];
+	        this.requested_count = source["requested_count"];
+	        this.counts = this.convertValues(source["counts"], GovernanceCounts);
+	        this.items = this.convertValues(source["items"], GovernanceOutcome);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GovernanceCapabilities {
+	    can_record_decisions: boolean;
+	    can_preview: boolean;
+	    recovery_lock_active: boolean;
+	    scan_active: boolean;
+	    max_batch_size: number;
+	    reason_codes: string[];
+	    project_scope: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceCapabilities(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.can_record_decisions = source["can_record_decisions"];
+	        this.can_preview = source["can_preview"];
+	        this.recovery_lock_active = source["recovery_lock_active"];
+	        this.scan_active = source["scan_active"];
+	        this.max_batch_size = source["max_batch_size"];
+	        this.reason_codes = source["reason_codes"];
+	        this.project_scope = source["project_scope"];
+	    }
+	}
+
+	export class GovernanceGroup {
+	    group_id: string;
+	    storage_id: string;
+	    sha256: string;
+	    subject_version: string;
+	    decision_revision: number;
+	    sample_path: string;
+	    size: number;
+	    path_count: number;
+	    decision_type: string;
+	    risk: string;
+	    role: string;
+	    safety_flags: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceGroup(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.storage_id = source["storage_id"];
+	        this.sha256 = source["sha256"];
+	        this.subject_version = source["subject_version"];
+	        this.decision_revision = source["decision_revision"];
+	        this.sample_path = source["sample_path"];
+	        this.size = source["size"];
+	        this.path_count = source["path_count"];
+	        this.decision_type = source["decision_type"];
+	        this.risk = source["risk"];
+	        this.role = source["role"];
+	        this.safety_flags = source["safety_flags"];
+	    }
+	}
+
+	export class GovernancePage {
+	    items: GovernanceGroup[];
+	    total_count: number;
+	    page: number;
+	    page_size: number;
+	    unavailable_filters: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new GovernancePage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], GovernanceGroup);
+	        this.total_count = source["total_count"];
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	        this.unavailable_filters = source["unavailable_filters"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PreviewItem {
+	    group_id: string;
+	    storage_id: string;
+	    sha256: string;
+	    subject_version: string;
+	    decision_revision: number;
+	    eligibility: string;
+	    reason_code: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PreviewItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.storage_id = source["storage_id"];
+	        this.sha256 = source["sha256"];
+	        this.subject_version = source["subject_version"];
+	        this.decision_revision = source["decision_revision"];
+	        this.eligibility = source["eligibility"];
+	        this.reason_code = source["reason_code"];
+	    }
+	}
+	export class GovernancePreview {
+	    preview_token: string;
+	    expires_at: string;
+	    project_scope: string;
+	    items: PreviewItem[];
+	    records_only: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernancePreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.preview_token = source["preview_token"];
+	        this.expires_at = source["expires_at"];
+	        this.project_scope = source["project_scope"];
+	        this.items = this.convertValues(source["items"], PreviewItem);
+	        this.records_only = source["records_only"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GovernanceQuery {
+	    storage_id: string;
+	    search: string;
+	    decision_type: string;
+	    min_size: number;
+	    max_size: number;
+	    sort: string;
+	    descending: boolean;
+	    page: number;
+	    page_size: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.storage_id = source["storage_id"];
+	        this.search = source["search"];
+	        this.decision_type = source["decision_type"];
+	        this.min_size = source["min_size"];
+	        this.max_size = source["max_size"];
+	        this.sort = source["sort"];
+	        this.descending = source["descending"];
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	    }
+	}
+	export class GovernanceSubject {
+	    group_id: string;
+	    storage_id: string;
+	    sha256: string;
+	    subject_version: string;
+	    decision_revision: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceSubject(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.group_id = source["group_id"];
+	        this.storage_id = source["storage_id"];
+	        this.sha256 = source["sha256"];
+	        this.subject_version = source["subject_version"];
+	        this.decision_revision = source["decision_revision"];
+	    }
+	}
 	export class PlannedAction {
 	    path: string;
 	    action: string;
@@ -200,11 +502,11 @@ export namespace domain {
 	    target_path?: string;
 	    context: DirectoryContext;
 	    file?: FileInstance;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlannedAction(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -214,7 +516,7 @@ export namespace domain {
 	        this.context = this.convertValues(source["context"], DirectoryContext);
 	        this.file = this.convertValues(source["file"], FileInstance);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -240,11 +542,11 @@ export namespace domain {
 	    path_depth: number;
 	    role_bonus: number;
 	    reasons: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RetentionScore(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.total = source["total"];
@@ -267,11 +569,11 @@ export namespace domain {
 	    retain_score?: RetentionScore;
 	    actions: PlannedAction[];
 	    evidence: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OperationPlan(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -286,7 +588,7 @@ export namespace domain {
 	        this.actions = this.convertValues(source["actions"], PlannedAction);
 	        this.evidence = source["evidence"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -305,13 +607,48 @@ export namespace domain {
 		    return a;
 		}
 	}
-	
-	
+
+
+	export class PreviewBatchRequest {
+	    items: GovernanceSubject[];
+	    decision_type: string;
+	    reason: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PreviewBatchRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], GovernanceSubject);
+	        this.decision_type = source["decision_type"];
+	        this.reason = source["reason"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 
 }
 
 export namespace formatdiag {
-	
+
 	export class ExtensionMismatch {
 	    storage_id: string;
 	    path: string;
@@ -320,11 +657,11 @@ export namespace formatdiag {
 	    expected: string[];
 	    detected: string;
 	    reason: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExtensionMismatch(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -342,11 +679,11 @@ export namespace formatdiag {
 	    missing_duration: number;
 	    missing_dimensions: number;
 	    bytes: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MetadataGap(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.format = source["format"];
@@ -365,11 +702,11 @@ export namespace formatdiag {
 	    quick_hash?: string;
 	    content_sha256?: string;
 	    reason: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ReviewItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -380,7 +717,7 @@ export namespace formatdiag {
 	        this.content_sha256 = source["content_sha256"];
 	        this.reason = source["reason"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -406,11 +743,11 @@ export namespace formatdiag {
 	    large_unknown: number;
 	    extension_mismatches: number;
 	    formats_with_metadata_gap: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Summary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.files = source["files"];
@@ -430,11 +767,11 @@ export namespace formatdiag {
 	    extension_mismatches: ExtensionMismatch[];
 	    metadata_gaps: MetadataGap[];
 	    safety_notes: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Report(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.generated_at = this.convertValues(source["generated_at"], null);
@@ -445,7 +782,7 @@ export namespace formatdiag {
 	        this.metadata_gaps = this.convertValues(source["metadata_gaps"], MetadataGap);
 	        this.safety_notes = source["safety_notes"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -464,23 +801,23 @@ export namespace formatdiag {
 		    return a;
 		}
 	}
-	
+
 
 }
 
 export namespace governancediag {
-	
+
 	export class DuplicateReview {
 	    sha256: string;
 	    size: number;
 	    copies: number;
 	    redundant_bytes: number;
 	    draft_plan: domain.OperationPlan;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DuplicateReview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sha256 = source["sha256"];
@@ -489,7 +826,7 @@ export namespace governancediag {
 	        this.redundant_bytes = source["redundant_bytes"];
 	        this.draft_plan = this.convertValues(source["draft_plan"], domain.OperationPlan);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -517,11 +854,11 @@ export namespace governancediag {
 	    relation_count: number;
 	    recommendation: string;
 	    evidence: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LargeMediaReview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -533,7 +870,7 @@ export namespace governancediag {
 	        this.recommendation = source["recommendation"];
 	        this.evidence = source["evidence"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -560,11 +897,11 @@ export namespace governancediag {
 	    large_files: number;
 	    missing_duration: number;
 	    missing_dimensions: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MediaAggregate(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.format = source["format"];
@@ -583,11 +920,11 @@ export namespace governancediag {
 	    context: domain.DirectoryContext;
 	    evidence: string[];
 	    recommendation: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ZeroByteReview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -597,7 +934,7 @@ export namespace governancediag {
 	        this.evidence = source["evidence"];
 	        this.recommendation = source["recommendation"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -638,11 +975,11 @@ export namespace governancediag {
 	    large_media_missing_codec: number;
 	    large_media_missing_duration: number;
 	    media_relations: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Summary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.files = source["files"];
@@ -680,11 +1017,11 @@ export namespace governancediag {
 	    large_media_reviews: LargeMediaReview[];
 	    media_relations: domain.FileRelation[];
 	    safety_notes: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Report(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.generated_at = this.convertValues(source["generated_at"], null);
@@ -698,7 +1035,7 @@ export namespace governancediag {
 	        this.media_relations = this.convertValues(source["media_relations"], domain.FileRelation);
 	        this.safety_notes = source["safety_notes"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -717,23 +1054,23 @@ export namespace governancediag {
 		    return a;
 		}
 	}
-	
+
 
 }
 
 export namespace merge {
-	
+
 	export class PairReview {
 	    directory_a: string;
 	    directory_b: string;
 	    filename_jaccard: number;
 	    gate: string;
 	    evidence: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PairReview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.directory_a = source["directory_a"];
@@ -754,11 +1091,11 @@ export namespace merge {
 	    overlap_at_least_0_25: number;
 	    overlap_at_least_0_50: number;
 	    suggestions: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnosticSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.files = source["files"];
@@ -781,11 +1118,11 @@ export namespace merge {
 	    summary: DiagnosticSummary;
 	    name_similar_reviews: PairReview[];
 	    safety_notes: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnosticReport(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.generated_at = this.convertValues(source["generated_at"], null);
@@ -795,7 +1132,7 @@ export namespace merge {
 	        this.name_similar_reviews = this.convertValues(source["name_similar_reviews"], PairReview);
 	        this.safety_notes = source["safety_notes"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -814,12 +1151,12 @@ export namespace merge {
 		    return a;
 		}
 	}
-	
+
 
 }
 
 export namespace wails {
-	
+
 	export class AppCapabilitiesDTO {
 	    project_open: boolean;
 	    project_mode: string;
@@ -832,11 +1169,11 @@ export namespace wails {
 	    can_execute_purge: boolean;
 	    recovery_lock_active: boolean;
 	    disabled_reasons: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppCapabilitiesDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project_open = source["project_open"];
@@ -854,11 +1191,11 @@ export namespace wails {
 	}
 	export class ApprovePlansRequest {
 	    plan_ids: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ApprovePlansRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_ids = source["plan_ids"];
@@ -870,11 +1207,11 @@ export namespace wails {
 	    reason: string;
 	    target_path?: string;
 	    context_role?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlanActionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -895,11 +1232,11 @@ export namespace wails {
 	    retain_path?: string;
 	    actions: PlanActionDTO[];
 	    evidence: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlanDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -913,7 +1250,7 @@ export namespace wails {
 	        this.actions = this.convertValues(source["actions"], PlanActionDTO);
 	        this.evidence = source["evidence"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -934,16 +1271,16 @@ export namespace wails {
 	}
 	export class ApprovePlansResponse {
 	    approved: PlanDTO[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ApprovePlansResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.approved = this.convertValues(source["approved"], PlanDTO);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -965,11 +1302,11 @@ export namespace wails {
 	export class CreateProjectInput {
 	    name: string;
 	    source_path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CreateProjectInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -979,11 +1316,11 @@ export namespace wails {
 	export class DiagnoseFormatsRequest {
 	    storage_id?: string;
 	    large_unknown_minimum?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnoseFormatsRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -993,11 +1330,11 @@ export namespace wails {
 	export class DiagnoseGovernanceRequest {
 	    storage_id?: string;
 	    large_media_minimum?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnoseGovernanceRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -1006,11 +1343,11 @@ export namespace wails {
 	}
 	export class DiagnoseMergesRequest {
 	    storage_id?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnoseMergesRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -1020,11 +1357,11 @@ export namespace wails {
 	    name: string;
 	    status: string;
 	    detail?: Record<string, any>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutionStepDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1037,11 +1374,11 @@ export namespace wails {
 	    final_state: string;
 	    steps: ExecutionStepDTO[];
 	    error_type?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutePlanResultDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1049,7 +1386,7 @@ export namespace wails {
 	        this.steps = this.convertValues(source["steps"], ExecutionStepDTO);
 	        this.error_type = source["error_type"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1074,11 +1411,11 @@ export namespace wails {
 	    source_roots: string[];
 	    dry_run: boolean;
 	    retention_hours: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutePlansRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_ids = source["plan_ids"];
@@ -1093,11 +1430,11 @@ export namespace wails {
 	    executed: number;
 	    skipped: number;
 	    failed: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutePlansResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.results = this.convertValues(source["results"], ExecutePlanResultDTO);
@@ -1105,7 +1442,7 @@ export namespace wails {
 	        this.skipped = source["skipped"];
 	        this.failed = source["failed"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1130,11 +1467,11 @@ export namespace wails {
 	    quarantine_root: string;
 	    dry_run: boolean;
 	    confirmation?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutePurgeRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1150,11 +1487,11 @@ export namespace wails {
 	    status: string;
 	    error_type?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecutePurgeResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1170,11 +1507,11 @@ export namespace wails {
 	    quarantine_root: string;
 	    source_roots: string[];
 	    dry_run: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecuteRestoreRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1190,11 +1527,11 @@ export namespace wails {
 	    status: string;
 	    error_type?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExecuteRestoreResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1204,7 +1541,7 @@ export namespace wails {
 	        this.error = source["error"];
 	    }
 	}
-	
+
 	export class FileItem {
 	    storage_id: string;
 	    path: string;
@@ -1224,11 +1561,11 @@ export namespace wails {
 	    retain_score?: domain.RetentionScore;
 	    retain_reason?: string;
 	    is_retain_selected: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -1250,7 +1587,7 @@ export namespace wails {
 	        this.retain_reason = source["retain_reason"];
 	        this.is_retain_selected = source["is_retain_selected"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1270,6 +1607,7 @@ export namespace wails {
 		}
 	}
 	export class GroupDecisionDTO {
+	    revision: number;
 	    id: string;
 	    group_id: string;
 	    decision_type: string;
@@ -1278,13 +1616,14 @@ export namespace wails {
 	    rule_id?: string;
 	    created_at: string;
 	    updated_at: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GroupDecisionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.revision = source["revision"];
 	        this.id = source["id"];
 	        this.group_id = source["group_id"];
 	        this.decision_type = source["decision_type"];
@@ -1307,11 +1646,11 @@ export namespace wails {
 	    sample_path: string;
 	    decision_type?: string;
 	    files: FileItem[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GroupDetailResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.group_id = source["group_id"];
@@ -1326,7 +1665,7 @@ export namespace wails {
 	        this.decision_type = source["decision_type"];
 	        this.files = this.convertValues(source["files"], FileItem);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1356,11 +1695,11 @@ export namespace wails {
 	    physical_reclaimable_bytes: number;
 	    sample_path: string;
 	    decision_type?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GroupSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.group_id = source["group_id"];
@@ -1382,11 +1721,11 @@ export namespace wails {
 	    state: string;
 	    payload?: Record<string, any>;
 	    created_at: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new JobEvent(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sequence = source["sequence"];
@@ -1410,11 +1749,11 @@ export namespace wails {
 	    started_at?: string;
 	    completed_at?: string;
 	    events: JobEvent[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new JobDetailResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.job_id = source["job_id"];
@@ -1430,7 +1769,7 @@ export namespace wails {
 	        this.completed_at = source["completed_at"];
 	        this.events = this.convertValues(source["events"], JobEvent);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1449,7 +1788,7 @@ export namespace wails {
 		    return a;
 		}
 	}
-	
+
 	export class JobSummary {
 	    job_id: string;
 	    job_type: string;
@@ -1461,11 +1800,11 @@ export namespace wails {
 	    error_code?: string;
 	    created_at: string;
 	    completed_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new JobSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.job_id = source["job_id"];
@@ -1493,11 +1832,11 @@ export namespace wails {
 	    rollback_status?: string;
 	    started_at?: string;
 	    completed_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new JournalEntryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1519,11 +1858,11 @@ export namespace wails {
 	    page_size?: number;
 	    cursor?: string;
 	    min_reclaimable_bytes?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ListGroupsRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.storage_id = source["storage_id"];
@@ -1536,18 +1875,18 @@ export namespace wails {
 	    groups: GroupSummary[];
 	    next_cursor?: string;
 	    total_count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ListGroupsResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.groups = this.convertValues(source["groups"], GroupSummary);
 	        this.next_cursor = source["next_cursor"];
 	        this.total_count = source["total_count"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1572,11 +1911,11 @@ export namespace wails {
 	    event_type: string;
 	    detail?: Record<string, any>;
 	    created_at: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OperationLogDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1586,19 +1925,19 @@ export namespace wails {
 	        this.created_at = source["created_at"];
 	    }
 	}
-	
-	
+
+
 	export class ProjectInfo {
 	    project_id: string;
 	    name: string;
 	    path: string;
 	    is_open: boolean;
 	    storage_count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProjectInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project_id = source["project_id"];
@@ -1614,11 +1953,11 @@ export namespace wails {
 	    passed: boolean;
 	    reason?: string;
 	    hint?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ReadinessCheckDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -1634,11 +1973,11 @@ export namespace wails {
 	    storage_count: number;
 	    file_count: number;
 	    plan_count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProjectReadinessDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ready = source["ready"];
@@ -1647,7 +1986,7 @@ export namespace wails {
 	        this.file_count = source["file_count"];
 	        this.plan_count = source["plan_count"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1680,11 +2019,11 @@ export namespace wails {
 	    approved_at?: string;
 	    dry_run_verified_at?: string;
 	    purged_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurgePlanDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1708,11 +2047,11 @@ export namespace wails {
 	    status: string;
 	    error_type?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurgeRecoveryResultDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1736,11 +2075,11 @@ export namespace wails {
 	    hold_reason?: string;
 	    restored_at?: string;
 	    purged_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QuarantineItemDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1758,24 +2097,24 @@ export namespace wails {
 	        this.purged_at = source["purged_at"];
 	    }
 	}
-	
+
 	export class RecentProjectEntry {
 	    name: string;
 	    path: string;
 	    // Go type: time
 	    opened_at: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RecentProjectEntry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.path = source["path"];
 	        this.opened_at = this.convertValues(source["opened_at"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1797,11 +2136,11 @@ export namespace wails {
 	export class RecoverRestoresRequest {
 	    quarantine_root: string;
 	    source_roots: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RecoverRestoresRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.quarantine_root = source["quarantine_root"];
@@ -1813,11 +2152,11 @@ export namespace wails {
 	    action: string;
 	    rolled_back: number;
 	    errors?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RecoveryResultDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1832,11 +2171,11 @@ export namespace wails {
 	    source_executing_count: number;
 	    restore_pending_count: number;
 	    purge_recoverable_count: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RecoveryStatusDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.lock_active = source["lock_active"];
@@ -1858,11 +2197,11 @@ export namespace wails {
 	    created_at: string;
 	    approved_at?: string;
 	    restored_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RestorePlanDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1884,11 +2223,11 @@ export namespace wails {
 	    status: string;
 	    error_type?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RestoreRecoveryResultDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.plan_id = source["plan_id"];
@@ -1899,16 +2238,20 @@ export namespace wails {
 	    }
 	}
 	export class SaveDecisionRequest {
+	    subject_version: string;
+	    decision_revision: number;
 	    group_id: string;
 	    decision_type: string;
 	    reason?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SaveDecisionRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subject_version = source["subject_version"];
+	        this.decision_revision = source["decision_revision"];
 	        this.group_id = source["group_id"];
 	        this.decision_type = source["decision_type"];
 	        this.reason = source["reason"];
@@ -1920,11 +2263,11 @@ export namespace wails {
 	    scanned_count: number;
 	    status: string;
 	    started_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ScanCheckpointDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.available = source["available"];
@@ -1946,11 +2289,11 @@ export namespace wails {
 	    created_at: string;
 	    started_at?: string;
 	    completed_at?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ScanJobProgress(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.job_id = source["job_id"];
@@ -1973,11 +2316,11 @@ export namespace wails {
 	    physical_identity_reliable: boolean;
 	    latency_ms: number;
 	    recommended_workers: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SourcePreflightDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
@@ -1994,11 +2337,11 @@ export namespace wails {
 	    full_scan?: boolean;
 	    resume?: boolean;
 	    workers?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StartScanRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.root = source["root"];
@@ -2010,11 +2353,11 @@ export namespace wails {
 	}
 	export class StartScanResponse {
 	    job_id: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StartScanResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.job_id = source["job_id"];
@@ -2025,11 +2368,11 @@ export namespace wails {
 	    root_path: string;
 	    kind: string;
 	    created_at: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StorageInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -2043,11 +2386,11 @@ export namespace wails {
 	    commit: string;
 	    build_time: string;
 	    channel: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];

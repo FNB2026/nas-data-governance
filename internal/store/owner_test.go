@@ -106,3 +106,32 @@ func TestOwnerRejectsLinkAndUnsafeModesWithoutMutation(t *testing.T) {
 		t.Fatal("external sidecar changed")
 	}
 }
+
+func TestStoreOwnerDoesNotInterpretPercentEscapesAsAnotherFilename(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "synthetic%39.db")
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		entries, readErr := os.ReadDir(root)
+		if readErr != nil || len(entries) != 0 {
+			t.Fatal("URI refusal changed the directory")
+		}
+		return
+	} // Explicit fail-closed refusal is acceptable.
+	if err = st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) < 16 || string(data[:16]) != "SQLite format 3\x00" {
+		t.Fatal("SQLite filename does not match the acquired owner lease")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "synthetic%39.db" && entry.Name() != "synthetic%39.db.owner.lock" {
+			t.Fatal("escaped filename opened a different database")
+		}
+	}
+}

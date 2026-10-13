@@ -36,7 +36,7 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve path: %w", err)
 	}
-	if strings.ContainsAny(absPath, "?#") {
+	if strings.ContainsAny(absPath, "?#%") {
 		return nil, fmt.Errorf("store: path contains unsupported URI delimiter")
 	}
 	dbDir := filepath.Dir(absPath)
@@ -109,7 +109,7 @@ func OpenReadOnly(ctx context.Context, path string) (*SQLiteStore, error) {
 	}
 	// modernc/sqlite passes file: DSNs to SQLite's URI parser. Reject URI
 	// delimiters instead of risking mode=ro being parsed as part of a filename.
-	if strings.ContainsAny(absPath, "?#") {
+	if strings.ContainsAny(absPath, "?#%") {
 		return nil, fmt.Errorf("store: read-only path contains unsupported URI delimiter")
 	}
 	info, err := os.Lstat(absPath)

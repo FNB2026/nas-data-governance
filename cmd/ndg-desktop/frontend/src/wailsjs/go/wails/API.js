@@ -30,6 +30,10 @@ export function CloseProject() {
   return window['go']['wails']['API']['CloseProject']();
 }
 
+export function CommitBatchDecisions(arg1) {
+  return window['go']['wails']['API']['CommitBatchDecisions'](arg1);
+}
+
 export function CreateProjectFromSource(arg1) {
   return window['go']['wails']['API']['CreateProjectFromSource'](arg1);
 }
@@ -70,6 +74,14 @@ export function GetAppCapabilities() {
   return window['go']['wails']['API']['GetAppCapabilities']();
 }
 
+export function GetBatchDecisionResult(arg1) {
+  return window['go']['wails']['API']['GetBatchDecisionResult'](arg1);
+}
+
+export function GetGovernanceCapabilities() {
+  return window['go']['wails']['API']['GetGovernanceCapabilities']();
+}
+
 export function GetGroupDecision(arg1) {
   return window['go']['wails']['API']['GetGroupDecision'](arg1);
 }
@@ -108,6 +120,10 @@ export function ListAllPlans() {
 
 export function ListDuplicateGroups(arg1) {
   return window['go']['wails']['API']['ListDuplicateGroups'](arg1);
+}
+
+export function ListGovernanceGroups(arg1) {
+  return window['go']['wails']['API']['ListGovernanceGroups'](arg1);
 }
 
 export function ListGroupDecisions(arg1) {
@@ -164,6 +180,10 @@ export function PickDirectory(arg1) {
 
 export function PreflightSource(arg1) {
   return window['go']['wails']['API']['PreflightSource'](arg1);
+}
+
+export function PreviewBatchDecisions(arg1) {
+  return window['go']['wails']['API']['PreviewBatchDecisions'](arg1);
 }
 
 export function RecoverPurges(arg1) {
