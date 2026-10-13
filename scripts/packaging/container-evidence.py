@@ -52,6 +52,9 @@ def json_value(data):
 def regular_input(path, maximum):
     # Callers must retain stable owner/ACL/lease for the entire read. This checks
     # current ownership/modes/links and mount table, not hostile remount races.
+    # Lexical normalization aligns relative caller inputs with absolute mount
+    # table entries. Do not resolve: symlink inputs must remain visible/refused.
+    path = Path(os.path.abspath(path))
     root, _ = boundary.trusted_ancestry(path.parent)
     info = path.lstat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022, "unsafe_evidence_file")

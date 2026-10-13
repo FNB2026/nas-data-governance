@@ -129,6 +129,14 @@ class EvidenceChecks(unittest.TestCase):
         self.seal()
         return lock
 
+    def test_relative_lock_mount_boundary_matches_absolute_refusal(self):
+        lock = self.inventory_fixture()
+        relative = Path(os.path.relpath(lock))
+        with mock.patch.object(evidence.boundary, "mountpoints", return_value={lock}):
+            for path in [lock, relative]:
+                with self.assertRaisesRegex(evidence.Rejected, "^evidence_mount_boundary$"):
+                    evidence.verify_frontend_sbom_inventory(self.root, path)
+
     def test_full_frontend_inventory_matches_both_standards(self):
         lock = self.inventory_fixture()
         result = evidence.verify_bundle(self.root, expected_frontend_lock=lock)

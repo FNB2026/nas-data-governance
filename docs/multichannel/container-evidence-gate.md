@@ -169,3 +169,11 @@ close this specific gap; offline tests do not substitute for Syft runtime output
 Seven-day CI artifacts expire on 2026-10-20; raw artifacts have also been retained
 in a private local archive. No registry image, signed attestation, public tag,
 Release or fnOS-installable package was published. Historical limits stay intact.
+
+
+Independent follow-up found a relative --frontend-lock mount-boundary mismatch:
+mount tables use absolute paths, but the new input had not been normalized. A
+same-device bind-mount deterministic mock rejected the absolute input but accepted
+the equivalent relative input (RED). Lexical abspath now aligns comparisons
+without resolving/following symlinks; the regression requires equal refusal.
+This is mock boundary evidence, not an actual host bind mount or remount test.
