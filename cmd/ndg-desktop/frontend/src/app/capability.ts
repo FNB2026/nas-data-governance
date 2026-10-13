@@ -23,6 +23,8 @@ export function deriveCapabilities(opts: {
   projectOpen: boolean;
   isReadWrite: boolean;
   recoveryLockActive?: boolean;
+  /** undefined is pure legacy derivation; null means server permission unconfirmed. */
+  backend?: Partial<Pick<AppCapabilities, "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine">> | null;
 }): AppCapabilities {
   const { projectOpen, isReadWrite } = opts;
   const recoveryLock = opts.recoveryLockActive ?? false;
@@ -37,6 +39,7 @@ export function deriveCapabilities(opts: {
   if (!projectOpen) {
     disabled_reasons["scan-jobs"] = "请先打开项目";
     disabled_reasons["duplicate-results"] = "请先打开项目";
+    disabled_reasons["governance-workbench"] = "请先打开项目";
     disabled_reasons["governance-review"] = "请先打开项目";
     disabled_reasons["execution-center"] = "请先打开项目";
     disabled_reasons["audit-recovery"] = "请先打开项目";
@@ -52,14 +55,15 @@ export function deriveCapabilities(opts: {
     disabled_reasons["execution-center"] = "恢复锁激活中，请先处理未完成执行";
   }
 
+  const permitted = (key: "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine") => opts.backend === undefined || opts.backend?.[key] === true;
   return {
     project_open: projectOpen,
     project_mode: mode,
-    can_scan: isReadWrite && !recoveryLock,
+    can_scan: isReadWrite && !recoveryLock && permitted("can_scan"),
     can_view_results: projectOpen,
-    can_edit_reviews: isReadWrite && !recoveryLock,
-    can_approve_plans: isReadWrite && !recoveryLock,
-    can_execute_quarantine: isReadWrite && !recoveryLock,
+    can_edit_reviews: isReadWrite && !recoveryLock && permitted("can_edit_reviews"),
+    can_approve_plans: isReadWrite && !recoveryLock && permitted("can_approve_plans"),
+    can_execute_quarantine: isReadWrite && !recoveryLock && permitted("can_execute_quarantine"),
     can_execute_purge: false,
     recovery_lock_active: recoveryLock,
     disabled_reasons,
@@ -77,6 +81,7 @@ export function isRouteEnabled(
       return true;
     case "scan-jobs":
     case "duplicate-results":
+    case "governance-workbench":
     case "governance-review":
     case "audit-recovery":
       return caps.project_open;
