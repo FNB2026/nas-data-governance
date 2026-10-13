@@ -122,8 +122,14 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 		v := retainedFileID.Int64
 		d.RetainedFileID = &v
 	}
-	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision created_at: %w", err)
+	}
+	d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision updated_at: %w", err)
+	}
 	return d, nil
 }
 
@@ -173,8 +179,14 @@ func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domai
 			v := retainedFileID.Int64
 			d.RetainedFileID = &v
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions created_at: %w", err)
+		}
+		d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions updated_at: %w", err)
+		}
 		result = append(result, d)
 	}
 	return result, rows.Err()

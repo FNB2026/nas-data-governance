@@ -18,16 +18,16 @@ var errInvalidDecisionTimestamp = errors.New("store: invalid decision timestamp"
 // wire grammar and offset before parsing. UTC normalization can also cross
 // the four-digit year boundary; reject that rather than emit a non-sortable
 // five-digit key.
-func decisionTimestampKey(value string) (string, error) {
+func parseDecisionTimestamp(value string) (time.Time, error) {
 	if len(value) < 20 || len(value) > 35 ||
 		value[4] != '-' || value[7] != '-' ||
 		(value[10] != 'T' && value[10] != 't') ||
 		value[13] != ':' || value[16] != ':' {
-		return "", errInvalidDecisionTimestamp
+		return time.Time{}, errInvalidDecisionTimestamp
 	}
 	for _, position := range [...]int{0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18} {
 		if !isASCIIDigit(value[position]) {
-			return "", errInvalidDecisionTimestamp
+			return time.Time{}, errInvalidDecisionTimestamp
 		}
 	}
 
@@ -40,11 +40,11 @@ func decisionTimestampKey(value string) (string, error) {
 		}
 		fractionDigits := zoneStart - fractionStart
 		if fractionDigits < 1 || fractionDigits > 9 {
-			return "", errInvalidDecisionTimestamp
+			return time.Time{}, errInvalidDecisionTimestamp
 		}
 	}
 	if zoneStart >= len(value) {
-		return "", errInvalidDecisionTimestamp
+		return time.Time{}, errInvalidDecisionTimestamp
 	}
 
 	zone := value[zoneStart:]
@@ -56,10 +56,10 @@ func decisionTimestampKey(value string) (string, error) {
 		hours := int(zone[1]-'0')*10 + int(zone[2]-'0')
 		minutes := int(zone[4]-'0')*10 + int(zone[5]-'0')
 		if hours > 23 || minutes > 59 {
-			return "", errInvalidDecisionTimestamp
+			return time.Time{}, errInvalidDecisionTimestamp
 		}
 	default:
-		return "", errInvalidDecisionTimestamp
+		return time.Time{}, errInvalidDecisionTimestamp
 	}
 
 	parseValue := value
@@ -74,13 +74,21 @@ func decisionTimestampKey(value string) (string, error) {
 	}
 	instant, err := time.Parse(time.RFC3339Nano, parseValue)
 	if err != nil {
+		return time.Time{}, errInvalidDecisionTimestamp
+	}
+	utc := instant.UTC()
+	if year := utc.Year(); year < 0 || year > 9999 {
+		return time.Time{}, errInvalidDecisionTimestamp
+	}
+	return instant, nil
+}
+
+func decisionTimestampKey(value string) (string, error) {
+	instant, err := parseDecisionTimestamp(value)
+	if err != nil {
 		return "", errInvalidDecisionTimestamp
 	}
-	instant = instant.UTC()
-	if year := instant.Year(); year < 0 || year > 9999 {
-		return "", errInvalidDecisionTimestamp
-	}
-	return instant.Format("2006-01-02T15:04:05.000000000Z"), nil
+	return instant.UTC().Format("2006-01-02T15:04:05.000000000Z"), nil
 }
 
 func isASCIIDigit(value byte) bool {

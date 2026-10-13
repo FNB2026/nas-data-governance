@@ -14,10 +14,14 @@ import (
 )
 
 func insertTimestampedDecision(t *testing.T, st *SQLiteStore, id, groupID, updatedAt string) {
+	insertDecisionWithTimestamps(t, st, id, groupID, updatedAt, updatedAt)
+}
+
+func insertDecisionWithTimestamps(t *testing.T, st *SQLiteStore, id, groupID, createdAt, updatedAt string) {
 	t.Helper()
 	_, err := st.db.Exec(`INSERT INTO group_decisions
 		(id, group_id, decision_type, reason, rule_id, created_at, updated_at)
-		VALUES(?, ?, ?, '', '', ?, ?)`, id, groupID, string(domain.DecisionKeepAll), updatedAt, updatedAt)
+		VALUES(?, ?, ?, '', '', ?, ?)`, id, groupID, string(domain.DecisionKeepAll), createdAt, updatedAt)
 	if err != nil {
 		t.Fatalf("insert timestamped decision: %v", err)
 	}
@@ -175,6 +179,61 @@ func TestDecisionTimestampOrderAcceptsTrailingZeroFractionAndOffset(t *testing.T
 	}
 	if got.ID != "after" {
 		t.Fatalf("GetGroupDecision = %q, want after", got.ID)
+	}
+}
+
+func TestDecisionTimestampOrderNormalizesLowercaseInDecisionDTOs(t *testing.T) {
+	want := time.Date(2026, 10, 13, 1, 0, 0, 123450000, time.UTC)
+	for _, operation := range []string{"get", "list"} {
+		t.Run(operation, func(t *testing.T) {
+			st := newTestStore(t)
+			ctx := context.Background()
+			insertDecisionWithTimestamps(t, st, "lowercase", "g-lowercase", "2026-10-13t01:00:00.123450000z", "2026-10-13t01:00:00.123450000z")
+			switch operation {
+			case "get":
+				got, err := st.GetGroupDecision(ctx, "g-lowercase")
+				if err != nil {
+					t.Fatalf("GetGroupDecision: %v", err)
+				}
+				if got.CreatedAt.IsZero() || !got.CreatedAt.Equal(want) || got.UpdatedAt.IsZero() || !got.UpdatedAt.Equal(want) {
+					t.Fatalf("GetGroupDecision timestamps = created %v / updated %v, want %v", got.CreatedAt, got.UpdatedAt, want)
+				}
+			case "list":
+				list, err := st.ListGroupDecisions(ctx, "")
+				if err != nil {
+					t.Fatalf("ListGroupDecisions: %v", err)
+				}
+				if len(list) != 1 || list[0].CreatedAt.IsZero() || !list[0].CreatedAt.Equal(want) || list[0].UpdatedAt.IsZero() || !list[0].UpdatedAt.Equal(want) {
+					t.Fatalf("ListGroupDecisions UpdatedAt = %#v, want one normalized value %v", list, want)
+				}
+			}
+		})
+	}
+}
+
+func TestDecisionTimestampDTOParsingRejectsInvalidCreatedAtWithoutEchoingValue(t *testing.T) {
+	const privateMarker = "private-created-timestamp-marker"
+	for _, operation := range []string{"get", "list"} {
+		t.Run(operation, func(t *testing.T) {
+			st := newTestStore(t)
+			insertDecisionWithTimestamps(t, st, "bad-created", "g-bad-created", privateMarker, "2026-10-13T00:00:00Z")
+
+			var err error
+			if operation == "get" {
+				_, err = st.GetGroupDecision(context.Background(), "g-bad-created")
+			} else {
+				_, err = st.ListGroupDecisions(context.Background(), "")
+			}
+			if err == nil {
+				t.Fatalf("%s accepted malformed created_at", operation)
+			}
+			if strings.Contains(err.Error(), privateMarker) {
+				t.Fatal("timestamp error echoed stored value")
+			}
+			if !strings.Contains(err.Error(), "invalid decision timestamp") {
+				t.Fatalf("error lacks fixed classification: %v", err)
+			}
+		})
 	}
 }
 
