@@ -105,3 +105,14 @@ Each known historical finding has an exact commit/file/rule/line exception only;
 new tests generate runtime random keys while preserving same-key equality/replay
 semantics. Original Security failures remain recorded. No real credential was
 found and no path/pattern exemption or force rewrite was introduced.
+
+The next exact-HEAD CI preserved a distinct MAS guard fixture failure: the dev
+App and regenerated SDK built successfully, then a new test used default MAS
+composition to open an external temporary DB, correctly receiving authorization
+refusal before reaching the intended approval check. The regression now uses the
+existing sandbox test composition, a synthetic native grant and the real managed
+project-creation API inside its private container. Both manual draft and approval
+must return the explicit governance refusal and retain the durable DRAFT state.
+No production authorization rule was weakened, and no user's container was used.
+The original remote failure and local RED remain; targeted MAS/race and vet and
+fresh default full gates are rerun separately before the update.
