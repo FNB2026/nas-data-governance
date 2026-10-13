@@ -45,3 +45,43 @@ G4 独立实现工作包已启动，但无可发布 OCI digest、正式 Web GUI/
 
 - 本机签名环境（总控只读回执）：Developer ID Application identity=1；Apple Distribution / Mac Installer Distribution 未发现。该证据只覆盖当前机器可见 identity，账户资格、Profile 与 App ID 仍未证实。
 - [fnOS 官方测试应用规范](https://developer.fnnas.com/docs/quick-started/test-application/) 2026-10-12 读取成功：手动安装只允许本地测试，不作为公开分发方式；外部分发政策需咨询，不能把生成 FPK 自动解释为可公开发布。
+
+## 2026-10-13 增量（不覆盖历史快照）
+
+main `15328e0054c1c3e476dd756436ce52d6f3c50c1a`。beta.11 Release API 再次核对
+公开 Pre-release、发布时间及四个资产 digest 与上表完全一致；无历史资产改写。
+
+- PR #92 merge `4f9ed9762f5754e4073eba01230f021b05788f79`：
+  [CI post-merge 38272143547](https://github.com/FNB2026/nas-data-governance/actions/runs/38272143547)、
+  [Security 38272175403](https://github.com/FNB2026/nas-data-governance/actions/runs/38272175403) SUCCESS。
+- [PR #94](https://github.com/FNB2026/nas-data-governance/pull/94) 统一台账 merge
+  `2064494786b4b64f851f4a645531f6684510518b`；exact HEAD
+  `6f6283a12a47fc3de612ab9164dc5060cf75a68a` 独立文档复审、CI/Security PASS。
+- [PR #93](https://github.com/FNB2026/nas-data-governance/pull/93) merge
+  `356383115f43c5d75ed2827cf7520d3172ae055f`；exact HEAD
+  `3dcd7a73b0b255cadc23d3dbda366b6c12cecab5`，tree
+  `f87833ff80e0d371e04e5c65212a927a492dd454`；independent reviewer
+  `/root/pr90_review` 多轮代码/补丁身份复审无阻断；PR patch SHA-256
+  `84359d287435c1538829907b911b9218ef04d448286fbc126c134b27ea35fd00`。
+  [原生 Ubuntu amd64/ARM64 38341940563](https://github.com/FNB2026/nas-data-governance/actions/runs/38341940563)
+  合并后 SUCCESS；PR native run 38273652052 SUCCESS。实际 synthetic container
+  7 文件、7 quick/6 full/3 groups/checkpoint completed、源哈希不变、写 API 403、
+  第二 writer 拒绝、停止重启持久化、React 静态资产/CSP 及限定日志窗口通过。
+  初始 CI 38272681883 FAIL 永久保留；它暴露 checkpoint summary 取错可恢复接口，
+  修复不改变原 LastCheckpoint 的 Resume 语义。不是完整 G4 发行认证。
+- [PR #95](https://github.com/FNB2026/nas-data-governance/pull/95) merge
+  `15328e0054c1c3e476dd756436ce52d6f3c50c1a`；exact HEAD
+  `6531d9b25187da0551bcc374f323e90a54f247c2`，tree
+  `3737120b003bd0debe26923d4edc8c508f5ab192`；independent reviewer
+  `/root/phase1c_review` 指出嵌套挂载 P2，修复后逐轮复审无阻断；最终 PR patch
+  SHA-256 `f0bc447696124075e330b6285c5b9f562faf03288f739e42702325416d96bc6e`。
+  [CI 38343732167](https://github.com/FNB2026/nas-data-governance/actions/runs/38343732167)、
+  [Security 38343736081](https://github.com/FNB2026/nas-data-governance/actions/runs/38343736081)、
+  [Linux native 38343738845](https://github.com/FNB2026/nas-data-governance/actions/runs/38343738845)
+  均为此 merge SHA，SUCCESS。24 offline/mock fnOS tests PASS；build wrapper 即使
+  receipt 宣称 PASS 仍拒绝生成包；真实 mount/FPK/device 仍 NOT RUN。
+
+UX v2 附件 679 行 SHA-256 见实时台账。前端 frozen author commit
+`214cabfd4d84297eca8f1d04957b27ad8d5635ad`，tree
+`07c989fb2dd45955c4fc564efb37f6dde840172b`；独立复审中，所有真实数据库/正式 GUI/
+理解测试状态分层保留。G6 OCI 证据实现尚未冻结，绝不预记 workflow PASS。

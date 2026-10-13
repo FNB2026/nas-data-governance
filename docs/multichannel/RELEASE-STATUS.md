@@ -1,6 +1,6 @@
 # NDG 多渠道实时执行台账
 
-更新时间：2026-10-12。证据基线：main `584aafeb4cf1bb68cbda3bde2d26698b05555640`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+更新时间：2026-10-13。证据基线：main `15328e0054c1c3e476dd756436ce52d6f3c50c1a`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
 
 ## 当前事实与历史校准
 
@@ -8,17 +8,17 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 
 | 工作包 | 流程状态 | 验收状态 / 证据层 | 责任方 | 下一触发条件 |
 |---|---|---|---|---|
-| G0 总执行工作台 | ACTIVE | 原五文档独立复审无阻断；后续事实补录、本 PR CI/Security 待完成 | Codex 总控及文档独占 writer | 台账 PR 审查、CI、Security 通过后合并 |
+| G0 总执行工作台 | 已合并 PR #94；持续维护 | 历史主手册保留，独立复审/CI/Security 与 post-merge PASS；本次增量另经门禁 | Codex 总控 | 随真实证据更新，不推断运行状态 |
 | G1 Developer ID beta.11 | 公开发行已完成 | 正式限定功能/隐私门禁 PASS；新 Mac 首装 WAIVED_BY_OWNER；公开状态已验证 | 已有发行负责人 / Codex 只读监护 | 新缺陷走新版本；不得覆盖既有资产 |
 | G2 MAS Phase 0 | CLOSED | 已有原型证据；非商店发行能力 | Codex | 仅保护回归 |
 | G2 Phase 1A | 代码已合并 | 正式完整运行 INCONCLUSIVE | Codex / 独立测试环境负责人 | 可证明隔离的 Mac/SMB 环境 |
 | G2 Phase 1B | PR #90 已合并 | 运行 INCONCLUSIVE；独立环境 BLOCKED；CarbonCore 历史 FAIL | Codex / 环境负责人 | 证明测试服务、挂载、App 与日志进程身份，不接管现有 QEMU |
 | G2 Phase 1C 预检原型 | CLOSED：仅预检原型 | exact HEAD 独立复审及 CI/Security post-merge PASS；正式导入 NOT RUN / BLOCKED | Codex / 独立 reviewer | 后续正式 exporter/importer 先关闭项目锁、来源信任与 staging 边界 |
-| G2 Required Reason API 兼容性 | 已合并研究：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security / CI PASS；合并后门禁另记；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
+| G2 Required Reason API 兼容性 | 已合并研究：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security / CI PASS；合并后 CI/Security PASS；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
 | G3 MAS 分发与商店审核 | BLOCKED / NO-GO | App ID 未确认注册；本机未发现 Apple Distribution/Mac Installer Distribution identity（仅环境证据）；Profile/运行门禁/合规未闭合，未上传 | 账户持有人 + Codex | G2 闭合后集中办理真实账户步骤与最终提交授权 |
-| G4 Linux/Docker 安全只读 MVP | ACTIVE：`codex/linux-web-mvp` | 尚无可发布镜像 digest 或容器运行 PASS；本机 Docker 未发现 | Codex 实现 writer / 独立 reviewer | 源码、认证、路径边界测试后实际两架构容器验收 |
-| G5 fnOS FPK | ACTIVE：`codex/fnos-readonly-package` | 官方 fnpack 1.2.3 私有下载及 help/template PASS；非可安装研究骨架与 fail-closed validator 已提交，独立复审中；OCI digest / FPK 真机仍 BLOCKED | Codex / 隔离设备负责人 | 固定已验收 OCI digest；研究骨架不代表 FPK 安装；核对官方提交政策及独立设备 |
-| G6 多渠道维护机制 | ACTIVE：证据与风险台账 | 单一状态/能力/证据/风险入口已建立；未来流水线 NOT RUN | Codex 总控 | 随各独立渠道门禁增量维护 |
+| G4 Linux/Docker 安全只读 MVP | PR #93 已合并 | 专用 Ubuntu amd64/ARM64 容器合成只读闭环 PASS；固定公开镜像、真实网络源、升级/备份及完整 G4 仍未闭合 | Codex / 独立 reviewer | G6 镜像证据、明确服务身份及独立部署窗口 |
+| G5 fnOS FPK | PR #95 非可安装研究骨架已合并 | 24 合成/离线检查 PASS；嵌套挂载防线已补；无 FPK，实际安装/升级/卸载 NOT RUN，设备/OCI 依赖 BLOCKED | Codex / 隔离设备负责人 | 已验收 OCI digest、独立 fnOS 设备、平台许可；构建 wrapper 持续默认拒绝 |
+| G6 多渠道维护机制 | ACTIVE：独立容器证据门禁实现 | 拟以 dispatch-only CI 生成实验 OCI/SBOM/漏洞回执；尚未实际运行，不是签名 attestation 或公开发行 | Codex / 独立 reviewer | 正常 PR 门禁/合并后，执行真实两架构证据窗口 |
 
 ## 连续执行与 writer 边界
 
@@ -34,10 +34,27 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 
 参考：[主手册](NDG-MULTICHANNEL-MASTER.md)、[能力矩阵](CAPABILITY-MATRIX.md)、[风险表](RISK-REGISTER.md)。
 
-G4 由独立 writer 实现窄完整 HTTP/Web 只读 MVP、会话/CSRF/Host-Origin/服务根别名/单 writer 及 Docker 模板；拟用 PR 专用 Ubuntu runner 验证合成容器运行，不发布。MAS 专项仅独立审计、Foundation disposable 探针与 exporter 设计，身份等价未证实仍 BLOCKED。fnOS 已从官方规范只读审计进入独立非可安装研究骨架实现，不接生产；官方手动安装仅本地测试，不是公众分发许可。
+G4 / G5 的 2026-10-12 ACTIVE 快照已由下列新回执推进：PR #93 和 #95 已正常合并，三套 main CI/Security/原生容器门禁均成功。源码、受限合成容器和正式部署层仍分别裁定。MAS 研究及 fnOS 外部政策阻断保持不变。
 
 ### 本轮环境与政策补录
 
 总控的本机签名 identity 检查：Developer ID Application 数量 1，未发现 Apple Distribution 或 Mac Installer Distribution；这是当前机器/Keychain 可见状态，既不证明 MAS 账户无资格，也不证明可签发商店产物。官方 fnpack 1.2.3 私有下载的 help 与 Docker 模板验证 PASS，只是工具层证据，不是 Developer ID 签名、FPK 安装或平台审核证明。
 
 [fnOS 官方测试应用规范](https://developer.fnnas.com/docs/quick-started/test-application/) 当前明确限定手动安装用于本地测试、不作为公开分发方式；外部 FPK 分发路线需平台确认和对应许可。主手册原快照“自安装 Beta”表述保留历史，但不得据此开展公众分发。
+
+## 追加主线：Governance UX v2
+
+用户 2026-10-13 明确要求在连续三端执行中实施 UX v2。679 行附件完整读取，
+SHA-256 `136aeb9e9092781f55ca57b6499ffba3e7634870e063bfa614ff68a1da9cc3fa`。
+UX0 源码基线、UX1 合并工作台和 UX2 有界批次分别实施，独立工作树与 writer。
+前端 exact commit `214cabfd4d84297eca8f1d04957b27ad8d5635ad` 独立复审中；
+后端尚未冻结。初步合成页面/组件证据不替代 Wails/SQLite/文件完整性。
+
+P0 仅记录治理意图：默认最多 100 个显式组，不执行、不批准、不解除 HOLD 或恢复锁。
+保持旧枚举/历史 PRIMARY_RETENTION 可读；未认证风险、可回收物理空间、全筛选选择
+和各平台写入能力明确不可用。未确认回执必须查询，不得整批换 key 自动重放。
+进程重启后的 GUI 批次发现、独立真实开发 App 集成、5–8 人理解测试以及未来签名
+候选仍未完成；不能把初始前端切片称为完整 UX v2 PASS。
+
+此前三端工作继续执行；UX 变更只作用于未来构建，beta.11 不变。MAS 1A/1B
+INCONCLUSIVE、历史 CarbonCore FAIL、MAS NO-GO 不因新 UI 改写。
