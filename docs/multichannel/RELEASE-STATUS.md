@@ -1,6 +1,6 @@
 # NDG 多渠道实时执行台账
 
-更新时间：2026-10-12。证据基线：main `584aafeb4cf1bb68cbda3bde2d26698b05555640`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+更新时间：2026-10-13。证据基线：main `443beeb0e19fa6a737cd8fef5c20e0197bfe4392`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
 
 ## 当前事实与历史校准
 
@@ -8,22 +8,22 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 
 | 工作包 | 流程状态 | 验收状态 / 证据层 | 责任方 | 下一触发条件 |
 |---|---|---|---|---|
-| G0 总执行工作台 | ACTIVE | 原五文档独立复审无阻断；后续事实补录、本 PR CI/Security 待完成 | Codex 总控及文档独占 writer | 台账 PR 审查、CI、Security 通过后合并 |
+| G0 总执行工作台 | 已合并 PR #94；持续维护 | 历史主手册保留，独立复审/CI/Security 与 post-merge PASS；本次增量另经门禁 | Codex 总控 | 随真实证据更新，不推断运行状态 |
 | G1 Developer ID beta.11 | 公开发行已完成 | 正式限定功能/隐私门禁 PASS；新 Mac 首装 WAIVED_BY_OWNER；公开状态已验证 | 已有发行负责人 / Codex 只读监护 | 新缺陷走新版本；不得覆盖既有资产 |
 | G2 MAS Phase 0 | CLOSED | 已有原型证据；非商店发行能力 | Codex | 仅保护回归 |
 | G2 Phase 1A | 代码已合并 | 正式完整运行 INCONCLUSIVE | Codex / 独立测试环境负责人 | 可证明隔离的 Mac/SMB 环境 |
 | G2 Phase 1B | PR #90 已合并 | 运行 INCONCLUSIVE；独立环境 BLOCKED；CarbonCore 历史 FAIL | Codex / 环境负责人 | 证明测试服务、挂载、App 与日志进程身份，不接管现有 QEMU |
 | G2 Phase 1C 预检原型 | CLOSED：仅预检原型 | exact HEAD 独立复审及 CI/Security post-merge PASS；正式导入 NOT RUN / BLOCKED | Codex / 独立 reviewer | 后续正式 exporter/importer 先关闭项目锁、来源信任与 staging 边界 |
-| G2 Required Reason API 兼容性 | 已合并研究：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security / CI PASS；合并后门禁另记；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
+| G2 Required Reason API 兼容性 | 已合并研究：[PR #92](https://github.com/FNB2026/nas-data-governance/pull/92) | 研究范围独立复审 PASS；Security / CI PASS；合并后 CI/Security PASS；卷身份替代等价仍 BLOCKED | Codex / 独立 reviewer | 官方 API/实际身份矩阵与 DTS 问题完成，保持 fail-closed |
 | G3 MAS 分发与商店审核 | BLOCKED / NO-GO | App ID 未确认注册；本机未发现 Apple Distribution/Mac Installer Distribution identity（仅环境证据）；Profile/运行门禁/合规未闭合，未上传 | 账户持有人 + Codex | G2 闭合后集中办理真实账户步骤与最终提交授权 |
-| G4 Linux/Docker 安全只读 MVP | ACTIVE：`codex/linux-web-mvp` | 尚无可发布镜像 digest 或容器运行 PASS；本机 Docker 未发现 | Codex 实现 writer / 独立 reviewer | 源码、认证、路径边界测试后实际两架构容器验收 |
-| G5 fnOS FPK | ACTIVE：`codex/fnos-readonly-package` | 官方 fnpack 1.2.3 私有下载及 help/template PASS；非可安装研究骨架与 fail-closed validator 已提交，独立复审中；OCI digest / FPK 真机仍 BLOCKED | Codex / 隔离设备负责人 | 固定已验收 OCI digest；研究骨架不代表 FPK 安装；核对官方提交政策及独立设备 |
-| G6 多渠道维护机制 | ACTIVE：证据与风险台账 | 单一状态/能力/证据/风险入口已建立；未来流水线 NOT RUN | Codex 总控 | 随各独立渠道门禁增量维护 |
+| G4 Linux/Docker 安全只读 MVP | PR #93 已合并 | 专用 Ubuntu amd64/ARM64 容器合成只读闭环 PASS；固定公开镜像、真实网络源、升级/备份及完整 G4 仍未闭合 | Codex / 独立 reviewer | G6 镜像证据、明确服务身份及独立部署窗口 |
+| G5 fnOS FPK | PR #95 非可安装研究骨架已合并 | 24 合成/离线检查 PASS；嵌套挂载防线已补；无 FPK，实际安装/升级/卸载 NOT RUN，设备/OCI 依赖 BLOCKED | Codex / 隔离设备负责人 | 已验收 OCI digest、独立 fnOS 设备、平台许可；构建 wrapper 持续默认拒绝 |
+| G6 多渠道维护机制 | PR #97 / #101 已合并 | 双架构实验 OCI/runtime、全 frontend lock 双格式库存和对应实际漏洞扫描限定 PASS；签名/重现性/完整 G6 未闭合 | Codex / 独立 reviewer | 443beeb 合并后八项远端检查及本地 required/race PASS；签名和重现性另验，不公开镜像 |
 
 ## 连续执行与 writer 边界
 
 - 主控只调度具备依赖和安全隔离条件的工作；G2 环境/外部审批阻断不停止 G4 源码工作。
-- 文档分支 `codex/multichannel-ledger` 从上述 main 建立，仅写本目录。原子独占 lease 存在该工作树私有 Git 元数据中，不提交机器路径或进程信息。八小时有效期；续约/交接先核查所有权，不抢占其他 writer。
+- 文档分支 `codex/multichannel-ux-status` 从上述 main 建立，仅写本目录。原子独占 lease 存在该工作树私有 Git 元数据中，不提交机器路径或进程信息。八小时有效期；续约/交接先核查所有权，不抢占其他 writer。
 - 每份后续回执包含 exact SHA、范围、独立 reviewer、测试返回码、CI URL 与证据层。未取得实际容器、正式 App、设备或平台结果时保持 NOT RUN/INCONCLUSIVE/BLOCKED。
 - 日常分支、push、合规 PR 合并已授权；不使用管理员 bypass。独立 AI 报告不是作者自批 GitHub Review；以实时 ruleset 决定是否须外部账号。
 - 私有现场、生产 NAS、既有工作树、历史 DB、QEMU、其他会话与 beta.11 资产保护。MAS Quarantine/Restore/Purge 禁写；Docker/fnOS 首发默认只读。
@@ -34,10 +34,90 @@ beta.11 已公开为 **Pre-release**（`2026-10-11T16:01:08Z`），不是当前 
 
 参考：[主手册](NDG-MULTICHANNEL-MASTER.md)、[能力矩阵](CAPABILITY-MATRIX.md)、[风险表](RISK-REGISTER.md)。
 
-G4 由独立 writer 实现窄完整 HTTP/Web 只读 MVP、会话/CSRF/Host-Origin/服务根别名/单 writer 及 Docker 模板；拟用 PR 专用 Ubuntu runner 验证合成容器运行，不发布。MAS 专项仅独立审计、Foundation disposable 探针与 exporter 设计，身份等价未证实仍 BLOCKED。fnOS 已从官方规范只读审计进入独立非可安装研究骨架实现，不接生产；官方手动安装仅本地测试，不是公众分发许可。
+G4 / G5 的 2026-10-12 ACTIVE 快照已由下列新回执推进：PR #93 和 #95 已正常合并，三套 main CI/Security/原生容器门禁均成功。源码、受限合成容器和正式部署层仍分别裁定。MAS 研究及 fnOS 外部政策阻断保持不变。
 
 ### 本轮环境与政策补录
 
 总控的本机签名 identity 检查：Developer ID Application 数量 1，未发现 Apple Distribution 或 Mac Installer Distribution；这是当前机器/Keychain 可见状态，既不证明 MAS 账户无资格，也不证明可签发商店产物。官方 fnpack 1.2.3 私有下载的 help 与 Docker 模板验证 PASS，只是工具层证据，不是 Developer ID 签名、FPK 安装或平台审核证明。
 
 [fnOS 官方测试应用规范](https://developer.fnnas.com/docs/quick-started/test-application/) 当前明确限定手动安装用于本地测试、不作为公开分发方式；外部 FPK 分发路线需平台确认和对应许可。主手册原快照“自安装 Beta”表述保留历史，但不得据此开展公众分发。
+
+## 追加主线：Governance UX v2
+
+用户 2026-10-13 明确要求在连续三端执行中实施 UX v2。679 行附件完整读取，
+SHA-256 `136aeb9e9092781f55ca57b6499ffba3e7634870e063bfa614ff68a1da9cc3fa`。
+UX0 源码基线、UX1 合并工作台和 UX2 有界批次分别实施，独立工作树与 writer。
+前端 exact commit `214cabfd4d84297eca8f1d04957b27ad8d5635ad` 独立复审中；
+后端尚未冻结。初步合成页面/组件证据不替代 Wails/SQLite/文件完整性。
+
+P0 仅记录治理意图：默认最多 100 个显式组，不执行、不批准、不解除 HOLD 或恢复锁。
+保持旧枚举/历史 PRIMARY_RETENTION 可读；未认证风险、可回收物理空间、全筛选选择
+和各平台写入能力明确不可用。未确认回执必须查询，不得整批换 key 自动重放。
+进程重启后的 GUI 批次发现、独立真实开发 App 集成、5–8 人理解测试以及未来签名
+候选仍未完成；不能把初始前端切片称为完整 UX v2 PASS。
+
+此前三端工作继续执行；UX 变更只作用于未来构建，beta.11 不变。MAS 1A/1B
+INCONCLUSIVE、历史 CarbonCore FAIL、MAS NO-GO 不因新 UI 改写。
+
+## 2026-10-13 较早开发采样（历史保留，以下不是当前 main）
+
+本次较早采样 main 为 `15328e0054c1c3e476dd756436ce52d6f3c50c1a`。上节初始
+`214cabfd` 为历史采样，下面是最新开发提交；代码合并和完整 P0 验收均未完成。
+
+| 工作 | 最新 exact HEAD | 实际已取得证据 | 当前阻断 / 下一步 |
+|---|---|---|---|
+| [UX1 PR #96](https://github.com/FNB2026/nas-data-governance/pull/96) | `8e6d1d1e69ed3b57a5edcd94fc0066221e103dc3` | 本地 Go/race、前端 32 文件/296 测试和构建通过；前一 HEAD 的 GitHub Codex 一项 P1、两项 P2 已分别修正并补回归 | Draft；最新改动需独立复审、CI；依赖 #98。原浏览器 mock 是早期快照，不是最新正式 App |
+| [UX2 PR #98](https://github.com/FNB2026/nas-data-governance/pull/98) | `e4dfaaadccb94ebf33e9d1be2fc48ba3e060f5e8` | 代码 `0a60a727` 本地 Go/race、真实 Go adapter/SQLite/合成文件闭环、Wails dev build/SDK 检查和全历史 Gitleaks 通过；后续提交仅文档及 MAS 测试夹具 | Draft；需不同 reviewer 核对 root 增量。不是原生 GUI/签名验收 |
+| [G6 PR #97](https://github.com/FNB2026/nas-data-governance/pull/97) | `bbe9d35e3fa034824cf87889262982771c7beb75` | 本地 Go/race、15 offline OCI 测试及全历史 Gitleaks 通过 | Draft；新实验 workflow 未实际 dispatch，四份真实 SBOM/漏洞扫描/可复现性 NOT RUN |
+
+PR #96 的修正包括：按管理项目不可变 ID 保持待确认批次；同路径替换项目
+不继承旧 key；页面重挂后终态清除 busy；当前页选择不覆写旧快照；全局能力
+与后端渠道政策相交，未知/读取失败拒绝记录和旧审批。PR #98 的 RED 证明了
+未知 schema 过晚拒绝及百分号 SQLite URI 与 literal owner 路径不一致；最新代码
+已提前只读 schema 检查、拒绝 URI 元字符，并完成 Wails 2.13.0 SDK 再生成。
+
+初始 #98 Gitleaks / Desktop Build FAIL、#96 全历史 synthetic marker FAIL 均保留。
+十个历史异常已逐个确认是人工测试 key/标记，只用 exact commit/file/rule/line
+指纹排除；未来值改为 runtime random。没有整文件/路径或未来模式放行。
+
+独立本地 agents 已返回 usage limit；GitHub Codex 对 #97 也只返回额度不足。
+这不是审查 PASS。#96 旧 HEAD 的实际审查不扩展为最新 root 修正的批准。
+不购买额度、不自批、不管理员 bypass；暂不合并，不借 CI 解除审查门禁。
+
+完整 P0 仍缺：进程重启后的 GUI 批次发现、未重新索引的物理源变更 stale 契约、
+实际隔离开发 GUI 集成、5–8 非开发者理解测试及未来签名候选。已知 key
+持久回执查询仅解决后端查找；索引快照 CAS 仅证明库内证据变化，不证明未索引
+源文件没变。可继续准备本地前后端集成树，正式 GUI/签名层状态保持 NOT RUN。
+
+台账本身最初 full race 在 `TestListGroupDecisionsOrderingByUpdatedAt` 出现
+一次排序断言 FAIL；随后该用例 20 次 PASS。未确定根因，不删失败记录、不用
+重复绿色替代根因证明；新门禁回执须单独记录。beta.11、MAS 和 fnOS 状态不变。
+
+### 当前门禁补录
+
+PR #96 `8e6d1d1` 与 #97 `bbe9d35` 的八项 exact-HEAD 远端检查已全部
+SUCCESS。仍保持 Draft：独立审查未覆盖最新增量，#96 还依赖后端。
+PR #98 `b1cdae9c` 的 App/SDK 已构建成功，但 MAS 测试因访问容器外夹具
+被授权防线正确拒绝；新 `e4dfaaa` 通过真实 sandbox 授权/管理项目创建
+布置负例，本地 MAS/race/vet 和全量默认 Go/race 通过，正在等新 CI。
+
+本台账新增快照的 make test/vet/build/public-check 和 fresh full race
+均返回 0；这是独立新回执，不撤回之前排序用例的间歇 FAIL/未知根因。
+十项 exact 历史 synthetic fingerprint 元数据同步只为严格历史扫描，
+不是隐私产品放宽；Gitleaks v8.28.0 扫描 308 commits 无新发现。
+
+
+## 2026-10-13 最新校准：UX 与 NAS 并行
+
+| 项目 | 当前实际状态 | 下一步骤及限制 |
+|---|---|---|
+| UX1 #96 | MERGED，merge c95c55d588c7b9ede71e8931e54c492506080f08；exact独立AI复审、8CI和post-merge PASS | 仅前端切片，不是native/signed/P0 PASS |
+| UX2 #98 | Draft，25f75ae451ca8f01f13e4844e819df8b6bf74084；完整布局及marker、现存WAL、hot-journal拒绝、旧页明确导航已复审；297前端/fullrace PASS，8CI PASS | 新确定时间排序缺陷涉及候选audit；等待独立#102及候选回归，保持Draft |
+| UX3 #100 | 堆叠Draft，fbe32a0d1c8d3a27c3296bedb10e9b8629ebbd52；成员集合与终态/原型码两P2 RED→GREEN；独立复审及309前端/fullrace PASS | manual CI另绑定SHA；依赖正常merge后再retarget；未知请求自动恢复和physical stale仍open |
+| 时间排序 #102 | 独立Draft，f7369c4e8c8a3ceaec8f0a04e8576594489783fc；初始排序回归 GREEN，8CI及fullrace PASS | 独立复审发现 UTC 年越界与非法 offset 两项 P2，真实SQLite RED，HOLD；作者不自批。原timestamp偶发FAIL保留，不追认唯一根因 |
+| G6 #97 | MERGED，bacc160111eeebf57388a67301ac0f30135698a8 | 初始真实run38387062893 native/security PASS，但source SBOM dev库存缺失，永久保留 |
+| G6 #101 | MERGED443beeb0e19fa6a737cd8fef5c20e0197bfe4392；exact063d0ee代码/实际run38391959321独立复核及8CI PASS，合并后门禁PASS | 207lock/202dev/205tuple，双格式全覆盖，npm/go/Grype0；只关闭此次库存缺口，unsigned/repro/fullG6仍open |
+| fnOS 当前用户设备 | 已授权测试；只读Linux x86_64/Docker28.5.2/overlay2与12现有容器核验；普通账号Docker拒绝后sudo只读成功 | 尚未建立隔离测试区，不读取真实源、不改现有容器。独立disposable host脚本/复审优先；不是FPK安装或SMB PASS |
+| 各类 NAS | 复用Linux amd64/ARM64只读核心与容器协议 | 每类平台需自己的设备/挂载/权限/安装证据，不能从fnOS推定其他NAS兼容PASS |
+
+beta.11、MAS/CarbonCore旧状态及无生产写授权边界保持。设备凭据和真实路径仅私有，绝不入库。独立macOS环境仍BLOCKED，fnOS设备不替代该环境。
