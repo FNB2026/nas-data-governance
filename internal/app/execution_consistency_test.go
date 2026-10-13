@@ -203,10 +203,11 @@ func TestExecutionConsistencyFaultBoundaries(t *testing.T) {
 func TestExecutionConsistencyOwnerExcludesRecoveryAndOtherHandles(t *testing.T) {
 	st, db, in := consistencyFixture(t)
 	other, e := store.Open(context.Background(), db)
-	if e != nil {
-		t.Fatal(e)
+	if e == nil {
+		other.Close()
+		t.Fatal("second writable owner accepted")
 	}
-	defer other.Close()
+	other = st // independent services still contend on the execution/recovery lease
 	unlock, e := st.AcquireExecutionLock()
 	if e != nil {
 		t.Fatal(e)
@@ -229,10 +230,11 @@ func TestExecutionConsistencyOwnerExcludesRecoveryAndOtherHandles(t *testing.T) 
 func TestExecutionConsistencyConcurrentRequests(t *testing.T) {
 	st, db, in := consistencyFixture(t)
 	other, e := store.Open(context.Background(), db)
-	if e != nil {
-		t.Fatal(e)
+	if e == nil {
+		other.Close()
+		t.Fatal("second writable owner accepted")
 	}
-	defer other.Close()
+	other = st
 	start := make(chan struct{})
 	counts := make(chan int, 2)
 	for _, handle := range []*store.SQLiteStore{st, other} {

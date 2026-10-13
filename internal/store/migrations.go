@@ -99,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_files_active_content
 	if err != nil {
 		return fmt.Errorf("store: migration 7 indexes: %w", err)
 	}
-	return nil
+	return applyGovernanceMigration(ctx, conn)
 }
 
 type columnDef struct {

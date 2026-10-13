@@ -366,10 +366,11 @@ func TestRestoreReservationCASAndOwnerLock(t *testing.T) {
 		t.Fatal("duplicate reservation accepted")
 	}
 	second, err := store.Open(ctx, f.db)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		second.Close()
+		t.Fatal("second writable owner accepted")
 	}
-	defer second.Close()
+	second = f.st
 	unlock, err := f.st.AcquireExecutionLock()
 	if err != nil {
 		t.Fatal(err)

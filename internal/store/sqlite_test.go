@@ -35,7 +35,7 @@ func TestInitIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestOpenTightensDatabasePermissions(t *testing.T) {
+func TestOpenRejectsUnsecuredDatabaseBeforeWriting(t *testing.T) {
 	if os.PathSeparator == '\\' {
 		t.Skip("POSIX mode assertion")
 	}
@@ -48,6 +48,18 @@ func TestOpenTightensDatabasePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := Open(context.Background(), dbPath)
+	if err == nil {
+		st.Close()
+		t.Fatal("unsafe database permissions accepted")
+	}
+	before, _ := os.Stat(dbPath)
+	if before.Mode().Perm() != 0644 || before.Size() != 0 {
+		t.Fatal("rejected database modified")
+	}
+	if err = os.Chmod(dbPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,6 +608,9 @@ CREATE TABLE IF NOT EXISTS file_instances (
 	}
 
 	// --- Phase 2: open with Open(), which runs Init() and applies migrations ---
+	if err := os.Chmod(dbPath, 0600); err != nil {
+		t.Fatal(err)
+	} // synthetic owner-controlled backup fixture
 	s, err := Open(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("open with migration: %v", err)

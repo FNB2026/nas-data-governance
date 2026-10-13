@@ -32,6 +32,9 @@ var Schema008 string
 //go:embed 009_physical_identity_reliability.sql
 var Schema009 string
 
+//go:embed 012_governance_batch.sql
+var Schema012 string
+
 // All returns every migration in order. Append here when adding a new file.
 func All() []string {
 	return []string{Schema001, Schema002, Schema003, Schema004, Schema005, Schema006, Schema007, Schema008, Schema009}
