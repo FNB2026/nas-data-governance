@@ -2,6 +2,7 @@
 """Synthetic OCI corruption tests, not Docker or native-runtime acceptance."""
 import gzip
 import hashlib
+import secrets
 import importlib
 import io
 import json
@@ -182,9 +183,10 @@ class EvidenceChecks(unittest.TestCase):
         self.assertNotIn(str(collector.ROOT), text)
         self.assertNotIn("/synthetic/absolute/path", text)
         self.assertEqual(json.loads(text)["vulnerability"]["severity"], "High")
-        with mock.patch.dict(os.environ, {"SYNTHETIC_PASSWORD": "synthetic_secret_marker_12345"}):
+        marker = secrets.token_hex(16)  # Runtime-only disposable privacy probe.
+        with mock.patch.dict(os.environ, {"SYNTHETIC_PASSWORD": marker}):
             with self.assertRaisesRegex(evidence.Rejected, "^secret_in_tool_output$"):
-                collector.public_json(target, {"value": "synthetic_secret_marker_12345"}, self.root / "private")
+                collector.public_json(target, {"value": marker}, self.root / "private")
         with self.assertRaisesRegex(evidence.Rejected, "^redaction_key_collision$"):
             collector.public_json(target, {"/first": 1, "/second": 2}, self.root / "private")
 
