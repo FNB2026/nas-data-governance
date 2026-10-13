@@ -120,7 +120,7 @@ branch was not merged into main as a shortcut.
 
 ## Main compatibility snapshot (2026-10-14)
 
-Current main `ed7287c121ec66a5b4a5e38fbe97bbb50f86d1c2` was merged normally into
+Current main `ed7287c1842aec2dd0608895cd027fc502990864` was merged normally into
 the history branch at `660ed7c121ec66a5b4a5e38fbe97bbb50f86d1c2`. The current
 17-file diff from main contains only UX3 history UI, its read-only Wails/service/
 store contract, generated bindings, tests and this document. Main's SDK/API,
