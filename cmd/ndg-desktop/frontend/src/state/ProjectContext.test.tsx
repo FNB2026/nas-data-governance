@@ -13,6 +13,7 @@ const { apiMock } = vi.hoisted(() => ({
       info: vi.fn(),
       listRecent: vi.fn(),
     },
+    capabilities: { get: vi.fn() },
     storages: { list: vi.fn() },
     scan: {
       start: vi.fn(),
@@ -67,6 +68,8 @@ function ContextHarness() {
       <span data-testid="storages">{ctx.storages.map((storage) => storage.id).join(",")}</span>
       <span data-testid="jobs">{ctx.jobs.map((job) => job.job_id).join(",")}</span>
       <span data-testid="active-job">{ctx.activeJobId ?? "none"}</span>
+      <span data-testid="can-approve">{String(ctx.capabilities.can_approve_plans)}</span>
+      <span data-testid="can-record">{String(ctx.capabilities.can_edit_reviews)}</span>
       <span data-testid="can-execute">{String(ctx.capabilities.can_execute_quarantine)}</span>
       <span data-testid="toasts">{ctx.toasts.map((toast) => toast.title).join(",")}</span>
     </div>
@@ -99,6 +102,7 @@ beforeEach(() => {
   apiMock.project.close.mockReset().mockResolvedValue(undefined);
   apiMock.project.info.mockReset().mockResolvedValue({ path: "/tmp/project.db", is_open: true });
   apiMock.project.listRecent.mockReset().mockResolvedValue([]);
+  apiMock.capabilities.get.mockReset().mockResolvedValue({ can_scan:true,can_edit_reviews:true,can_approve_plans:true,can_execute_quarantine:true });
   apiMock.storages.list.mockReset().mockResolvedValue([]);
   apiMock.scan.listJobs.mockReset().mockResolvedValue([]);
   apiMock.scan.start.mockReset().mockResolvedValue({ job_id: "job-1" });
@@ -232,4 +236,21 @@ it("keeps write capabilities blocked when the opening recovery-lock query fails"
   renderContext();
   await openReadWriteProject();
   await waitFor(() => expect(screen.getByTestId("can-execute")).toHaveTextContent("false"));
+});
+
+it("applies server MAS/readonly decision and approval policy across legacy pages", async () => {
+ apiMock.capabilities.get.mockResolvedValue({can_scan:true,can_edit_reviews:false,can_approve_plans:false,can_execute_quarantine:false});
+ renderContext();await openReadWriteProject();
+ await waitFor(()=>expect(apiMock.capabilities.get).toHaveBeenCalled());
+ expect(screen.getByTestId("can-record")).toHaveTextContent("false");
+ expect(screen.getByTestId("can-approve")).toHaveTextContent("false");
+ expect(screen.getByTestId("can-execute")).toHaveTextContent("false");
+});
+it("keeps writes blocked when authoritative capability lookup fails", async () => {
+ apiMock.capabilities.get.mockRejectedValue(new Error("synthetic unavailable"));
+ renderContext();await openReadWriteProject();
+ await waitFor(()=>expect(apiMock.capabilities.get).toHaveBeenCalled());
+ expect(screen.getByTestId("can-record")).toHaveTextContent("false");
+ expect(screen.getByTestId("can-approve")).toHaveTextContent("false");
+ expect(screen.getByTestId("can-execute")).toHaveTextContent("false");
 });

@@ -15,21 +15,27 @@ const CLOSED_CAPS: GovernanceCapabilities = {
   scan_active: false, max_batch_size: 100, reason_codes: ["UNAVAILABLE"], project_scope: "",
 };
 
-type Submission = { token: string; key: string; ids: string[]; scope: string; batchId?: string };
+type Submission = { token: string; key: string; ids: string[]; scope: string; originPath: string; batchId?: string };
 // Session-only reconciliation survives route unmounts. No paths, notes or
 // selection payloads enter localStorage, URLs or ordinary logs.
 const inFlightMutations = new Set<string>();
-const unresolved = new Map<string, { sent: Submission; preview: ReviewPreview; selection: Map<string, SelectedReview> }>();
+type PreviewIntent = { kind: DecisionKind; note: string };
+const unresolved = new Map<string, { sent: Submission; preview: ReviewPreview; intent: PreviewIntent; selection: Map<string, SelectedReview> }>();
 
 export function useGovernanceWorkbench() {
   const context = useProject();
   const { project, dataRevision } = context;
-  const projectKey = project?.path ?? "";
+  const projectPath = project?.path ?? "";
+  // Managed IDs survive a move. Legacy databases deliberately retain a path
+  // fallback; no claim of authenticated identity across legacy moves.
+  const managedProject = !!project?.project_id && !project.project_id.startsWith("legacy_");
+  const projectKey = managedProject ? "managed:" + project?.project_id : "legacy:" + projectPath;
   const [query, setQuery] = useState<GovernanceQuery>(INITIAL_QUERY);
   const [page, setPage] = useState<ReviewPage>({ items: [], total_count: 0, page: 1, page_size: 20, unavailable_filters: [] });
   const [caps, setCaps] = useState(CLOSED_CAPS);
   const [selection, setSelection] = useState<Map<string, SelectedReview>>(() => new Map());
   const [preview, setPreview] = useState<ReviewPreview | null>(null);
+  const [previewIntent, setPreviewIntent] = useState<PreviewIntent | null>(null);
   const [result, setResult] = useState<BatchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [operation, setOperation] = useState<"preview" | "commit" | "receipt" | null>(null);
@@ -51,7 +57,7 @@ export function useGovernanceWorkbench() {
     const ticket = ++generation.current;
     detailGeneration.current++;
     setPreview(null); setDetail(null); setDetailLoading(false); setError(null); setLoading(true);
-    if (!projectKey) { setLoading(false); setPage({ items: [], total_count: 0, page: 1, page_size: 20, unavailable_filters: [] }); return; }
+    if (!projectPath) { setLoading(false); setPage({ items: [], total_count: 0, page: 1, page_size: 20, unavailable_filters: [] }); return; }
     const ready = governanceApi.available();
     setBackendReady(ready);
     try {
@@ -74,10 +80,11 @@ export function useGovernanceWorkbench() {
       if (ticket === generation.current) { setError("无法读取当前结果，请重新载入；未提交任何新的决定。"); setCaps(CLOSED_CAPS); }
     } finally { if (ticket === generation.current) {
       const pending = unresolved.get(projectKey);
-      if (pending) { submission.current = pending.sent; setPreview(pending.preview); setSelection(new Map(pending.selection)); }
+      if (pending) { submission.current = pending.sent; setPreview(pending.preview); setPreviewIntent(pending.intent); setSelection(new Map(pending.selection)); }
+      else if (submission.current) { submission.current = null; setPreview(null); setPreviewIntent(null); }
       setLoading(false);
     } }
-  }, [projectKey]);
+  }, [projectKey, projectPath]);
 
   useEffect(() => {
     const changed = boundProject.current !== projectKey;
@@ -120,7 +127,8 @@ export function useGovernanceWorkbench() {
     setSelection((previous) => {
       const next = new Map(previous);
       for (const group of page.items) {
-        if (next.size >= Math.min(100, caps.max_batch_size || 100) && !next.has(group.group_id)) break;
+        if (next.has(group.group_id)) continue;
+        if (next.size >= Math.min(100, caps.max_batch_size || 100)) break;
         next.set(group.group_id, { group, filterScope: filterScope(query), dataRevision, page: query.page });
       }
       return next;
@@ -153,6 +161,7 @@ export function useGovernanceWorkbench() {
       const ids = new Set(selection.keys());
       if (!value.records_only || value.project_scope !== caps.project_scope || value.items.length !== ids.size ||
           new Set(value.items.map((item) => item.group_id)).size !== ids.size || value.items.some((item) => !ids.has(item.group_id))) throw new Error("UNAVAILABLE");
+      setPreviewIntent({ kind, note: reason });
       setPreview(value);
     } catch { if (ticket === generation.current) setError("无法完成安全预览，请重新载入；未批准或执行文件操作。"); }
     finally { if (epoch === projectEpoch.current) { activeOperation.current = false; setOperation(null); } }
@@ -161,9 +170,10 @@ export function useGovernanceWorkbench() {
   const canRecord = !inFlightMutations.has(projectKey) && boundProject.current === projectKey && context.isReadWrite && context.capabilities.can_edit_reviews &&
     !context.capabilities.recovery_lock_active && !context.activeJobId && caps.can_record_decisions && !caps.recovery_lock_active && !caps.scan_active;
 
-  const acceptReceipt = async (value: BatchResult, sent: NonNullable<typeof submission.current>, ticket: number, epoch: number) => {
+  const acceptReceipt = async (value: BatchResult, sent: NonNullable<typeof submission.current>, ticket: number, epoch: number, readOnlyLookup = false) => {
     if (epoch !== projectEpoch.current || boundProject.current !== projectKey) return;
-    if (value.project_scope !== sent.scope || !validBatchResult(value, sent.ids) || !value.batch_id ||
+    const movedManagedLookup = readOnlyLookup && managedProject && sent.originPath !== projectPath && value.project_scope === caps.project_scope;
+    if ((value.project_scope !== sent.scope && !movedManagedLookup) || !validBatchResult(value, sent.ids) || !value.batch_id ||
         (sent.batchId && value.batch_id !== sent.batchId)) throw new Error("UNAVAILABLE");
       setResult(value);
       sent.batchId = value.batch_id;
@@ -178,13 +188,14 @@ export function useGovernanceWorkbench() {
       } catch { if (epoch === projectEpoch.current) setError("决定回执已确认，但列表更新失败；请重新载入。不要重放已成功的条目。"); }
   };
 
+  const canCommit = canRecord && preview?.project_scope === caps.project_scope;
   const commit = async () => {
-    if (!canRecord || !preview?.preview_token || activeOperation.current || inFlightMutations.has(projectKey)) return;
+    if (!canCommit || !preview?.preview_token || !previewIntent || activeOperation.current || inFlightMutations.has(projectKey)) return;
     if (!submission.current) {
       const bytes = crypto.getRandomValues(new Uint8Array(16));
       const key = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      submission.current = { token: preview.preview_token, key, ids: preview.items.map((item) => item.group_id), scope: preview.project_scope };
-      unresolved.set(projectKey, { sent: submission.current, preview, selection: new Map(selection) });
+      submission.current = { token: preview.preview_token, key, ids: preview.items.map((item) => item.group_id), scope: preview.project_scope, originPath: projectPath };
+      unresolved.set(projectKey, { sent: submission.current, preview, intent: previewIntent, selection: new Map(selection) });
     }
     const sent = submission.current;
     const ticket = generation.current;
@@ -204,13 +215,13 @@ export function useGovernanceWorkbench() {
     if (!sent || activeOperation.current || boundProject.current !== projectKey) return;
     const ticket = generation.current, epoch = projectEpoch.current;
     activeOperation.current = true; setOperation("receipt"); setError(null);
-    try { await acceptReceipt(await governanceApi.result(sent.batchId || "key:" + sent.key), sent, ticket, epoch); }
+    try { await acceptReceipt(await governanceApi.result(sent.batchId || "key:" + sent.key), sent, ticket, epoch, true); }
     catch { if (epoch === projectEpoch.current) setError("尚未取得可信回执；原请求仍保留，请稍后重新查询。查询不会再次提交决定。"); }
     finally { if (epoch === projectEpoch.current) { activeOperation.current = false; setOperation(null); } }
   };
 
-  return { context, query, page, caps, selection, preview, result, loading, operation, error, detail, detailLoading, backendReady,
-    canRecord, hasAmbiguousSubmission: submission.current !== null, applyQuery, toggle, selectPage, clear, showDetail, makePreview, commit, queryReceipt, canQueryReceipt: submission.current !== null,
+  return { context, query, page, caps, selection, preview, previewIntent, result, loading, operation, error, detail, detailLoading, backendReady,
+    canRecord, canCommit, hasAmbiguousSubmission: submission.current !== null, applyQuery, toggle, selectPage, clear, showDetail, makePreview, commit, queryReceipt, canQueryReceipt: submission.current !== null,
     closeDetail: () => { detailGeneration.current++; setDetail(null); setDetailLoading(false); },
     closePreview: () => { if (!activeOperation.current && !submission.current) setPreview(null); },
     invalidatePreview: () => { if (!activeOperation.current && !submission.current) setPreview(null); },

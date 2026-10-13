@@ -147,6 +147,73 @@ describe("governance workbench selection and records-only flow", () => {
     expect(bridge.commit).toHaveBeenCalledTimes(1);
     expect(bridge.result).toHaveBeenCalledWith("key:" + bridge.commit.mock.calls[0][1]);
   });
+  it("restores the actual pending decision and note after route remount, never the default form", async () => {
+    bridge.commit.mockRejectedValueOnce(new Error("ambiguous"));
+    const first=render(<GovernanceWorkbenchPage />); await chooseFirst();
+    fireEvent.change(screen.getByLabelText("主要决定"),{target:{value:"CROSS_ARCHIVE"}});
+    fireEvent.change(screen.getByLabelText("备注（可选，不写入普通日志）"),{target:{value:"synthetic pending review note"}});
+    await preview();fireEvent.click(screen.getByRole("button",{name:"保存决定（未批准、未执行）"}));
+    await screen.findByRole("button",{name:"查询已提交批次回执"});first.unmount();
+    render(<GovernanceWorkbenchPage />);
+    const dialog=await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("标记不同用途的归档副本");
+    expect(dialog).toHaveTextContent("将记录的备注：synthetic pending review note");
+    expect(dialog).not.toHaveTextContent("保留所有文件");
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+  });
+  it("retains a managed moved project's request for readonly reconciliation without replay", async () => {
+    context.project={path:"/synthetic-ui/managed-old.db",project_id:"managed-stable",name:"合成项目"};
+    bridge.commit.mockRejectedValueOnce(new Error("ambiguous"));
+    const view=render(<GovernanceWorkbenchPage />);await chooseFirst();await preview();
+    fireEvent.click(screen.getByRole("button",{name:"保存决定（未批准、未执行）"}));
+    await screen.findByRole("button",{name:"查询已提交批次回执"});
+    context.project={path:"/synthetic-ui/managed-moved.db",project_id:"managed-stable",name:"合成项目"};
+    bridge.capabilities.mockResolvedValue({can_record_decisions:true,can_preview:true,recovery_lock_active:false,scan_active:false,max_batch_size:100,reason_codes:[],project_scope:"project-a-moved"});
+    bridge.result.mockResolvedValue({...result(["g1"]),project_scope:"project-a-moved"});
+    view.rerender(<GovernanceWorkbenchPage />);
+    await waitFor(()=>expect(screen.getByRole("button",{name:"重试相同请求"})).toBeDisabled());
+    fireEvent.click(screen.getByRole("button",{name:"查询已提交批次回执"}));
+    await screen.findByText("逐组回执：已核对终态");
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+    expect(bridge.result).toHaveBeenCalledWith("key:"+bridge.commit.mock.calls[0][1]);
+  });
+  it("does not attach an old pending request to a replacement project at the same path", async () => {
+    context.project={path:"/synthetic-ui/replaced.db",project_id:"managed-original",name:"合成项目"};
+    bridge.commit.mockRejectedValueOnce(new Error("ambiguous"));
+    const view=render(<GovernanceWorkbenchPage />);await chooseFirst();await preview();
+    fireEvent.click(screen.getByRole("button",{name:"保存决定（未批准、未执行）"}));
+    await screen.findByRole("button",{name:"查询已提交批次回执"});
+    context.project={path:"/synthetic-ui/replaced.db",project_id:"managed-replacement",name:"独立新项目"};
+    view.rerender(<GovernanceWorkbenchPage />);
+    await waitFor(()=>expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(/已选 0 组/)).toBeVisible();
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+  });
+  it("clears a remount's dangling request when the original commit settles before its load", async () => {
+    const mutation=deferred<BatchResult>();bridge.commit.mockReturnValue(mutation.promise);
+    const first=render(<GovernanceWorkbenchPage />);await chooseFirst();await preview();
+    fireEvent.click(screen.getByRole("button",{name:"保存决定（未批准、未执行）"}));first.unmount();
+    const list=deferred<{items:ReviewGroup[];total_count:number;page:number;page_size:number;unavailable_filters:string[]}>();
+    bridge.list.mockReturnValueOnce(list.promise);render(<GovernanceWorkbenchPage />);
+    mutation.resolve(result(["g1"]));
+    await waitFor(()=>expect(bridge.list.mock.calls.length).toBeGreaterThan(2));
+    list.resolve({items:groups.slice(0,2),total_count:3,page:1,page_size:2,unavailable_filters:[]});
+    await ready();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("checkbox",{name:"选择本页第 1 组"})).toBeEnabled();
+    fireEvent.click(screen.getByRole("checkbox",{name:"选择本页第 1 组"}));await preview();
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+  });
+  it("page selection never silently refreshes already-selected stale subjects", async () => {
+    const view=render(<GovernanceWorkbenchPage />);await chooseFirst();
+    context.dataRevision=1;
+    bridge.list.mockResolvedValue({items:[{...groups[0],subject_version:"changed-subject",decision_revision:2},groups[1]],total_count:2,page:1,page_size:20,unavailable_filters:[]});
+    view.rerender(<GovernanceWorkbenchPage />);await ready();
+    fireEvent.click(screen.getByRole("button",{name:"选择本页 2 组"}));
+    expect(screen.getByRole("alert")).toHaveTextContent("1 个选择来自旧扫描结果");await preview();
+    expect(bridge.preview.mock.calls[0][0].items[0].subject_version).toBe("subject-v1");
+    expect(bridge.preview.mock.calls[0][0].items[0].decision_revision).toBe(0);
+  });
   it("does not duplicate an in-flight mutation after route remount", async () => {
     const pending = deferred<BatchResult>(); bridge.commit.mockReturnValue(pending.promise);
     const first = render(<GovernanceWorkbenchPage />); await chooseFirst(); await preview();

@@ -23,6 +23,8 @@ export function deriveCapabilities(opts: {
   projectOpen: boolean;
   isReadWrite: boolean;
   recoveryLockActive?: boolean;
+  /** undefined is pure legacy derivation; null means server permission unconfirmed. */
+  backend?: Partial<Pick<AppCapabilities, "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine">> | null;
 }): AppCapabilities {
   const { projectOpen, isReadWrite } = opts;
   const recoveryLock = opts.recoveryLockActive ?? false;
@@ -53,14 +55,15 @@ export function deriveCapabilities(opts: {
     disabled_reasons["execution-center"] = "恢复锁激活中，请先处理未完成执行";
   }
 
+  const permitted = (key: "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine") => opts.backend === undefined || opts.backend?.[key] === true;
   return {
     project_open: projectOpen,
     project_mode: mode,
-    can_scan: isReadWrite && !recoveryLock,
+    can_scan: isReadWrite && !recoveryLock && permitted("can_scan"),
     can_view_results: projectOpen,
-    can_edit_reviews: isReadWrite && !recoveryLock,
-    can_approve_plans: isReadWrite && !recoveryLock,
-    can_execute_quarantine: isReadWrite && !recoveryLock,
+    can_edit_reviews: isReadWrite && !recoveryLock && permitted("can_edit_reviews"),
+    can_approve_plans: isReadWrite && !recoveryLock && permitted("can_approve_plans"),
+    can_execute_quarantine: isReadWrite && !recoveryLock && permitted("can_execute_quarantine"),
     can_execute_purge: false,
     recovery_lock_active: recoveryLock,
     disabled_reasons,

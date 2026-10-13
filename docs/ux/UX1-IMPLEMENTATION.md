@@ -90,3 +90,25 @@ probe in a different branch, not an actual frontend credential. The same single
 historical fingerprint exception as the container evidence PR is included;
 future fixtures are random and no path/pattern bypass exists. Full strict scan
 must pass at the actual PR HEAD. No history is rewritten.
+
+## Independent GitHub findings and supervised fixes
+
+Codex GitHub review of `3f67938807f9eaa8544ad663a86089566adfa5ab` identified
+P1 path-keyed reconciliation plus P2 dangling remount and page-select snapshot
+replacement. Managed project IDs now key session state; legacy path fallback is
+explicitly not authenticated move support. Changed physical scope cannot replay
+an old preview; a known managed move can only reconcile its receipt read-only
+against the current backend scope. A replacement managed ID does not inherit
+old pending state. Settled remount state is cleared, and page selection skips
+existing snapshots. Four new regression scenarios pass. Pending intent/note are
+also restored exactly rather than showing a default form value.
+
+Global page capability now intersects backend booleans with local mode/lock;
+unknown/failed/late capability replies do not enable legacy decisions, approval
+or source actions. MAS/channel denial applies to compatibility pages too.
+This does not replace backend authorization. These latest deltas require a new
+independent exact-HEAD review; previous reports cannot be reused as final PASS.
+
+Additional whole-history synthetic idempotency fixtures are handled by exact
+historical fingerprints only; future probes/keys are runtime-generated. No
+future-commit or file-pattern exclusion is introduced. No raw evidence is public.
