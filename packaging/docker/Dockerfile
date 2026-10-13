@@ -16,10 +16,16 @@ COPY --from=web /src/internal/apihttp/webdist ./internal/apihttp/webdist
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG SOURCE_SHA=unknown
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/FNB2026/nas-data-governance/internal/version.Commit=$SOURCE_SHA -X github.com/FNB2026/nas-data-governance/internal/version.Channel=web-experimental" -o /out/ndg-server ./cmd/ndg-server
+ARG SOURCE_TREE=unknown
+ARG CORE_VERSION=dev
+ARG SOURCE_BUILD_TIME=unknown
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/FNB2026/nas-data-governance/internal/version.Commit=$SOURCE_SHA -X github.com/FNB2026/nas-data-governance/internal/version.Version=$CORE_VERSION -X github.com/FNB2026/nas-data-governance/internal/version.BuildTime=$SOURCE_BUILD_TIME -X github.com/FNB2026/nas-data-governance/internal/version.Channel=web-experimental" -o /out/ndg-server ./cmd/ndg-server
 FROM scratch
 ARG SOURCE_SHA=unknown
-LABEL org.opencontainers.image.source="https://github.com/FNB2026/nas-data-governance" org.opencontainers.image.revision=$SOURCE_SHA org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.title="NDG read-only Web experiment"
+ARG SOURCE_TREE=unknown
+ARG CORE_VERSION=dev
+ARG SOURCE_BUILD_TIME=unknown
+LABEL org.opencontainers.image.source="https://github.com/FNB2026/nas-data-governance" org.opencontainers.image.revision=$SOURCE_SHA org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.title="NDG read-only Web experiment" org.opencontainers.image.version=$CORE_VERSION com.ndg.source-tree=$SOURCE_TREE com.ndg.build-time=$SOURCE_BUILD_TIME com.ndg.channel="web-experimental"
 COPY --from=build /out/ndg-server /ndg-server
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /licenses/
 USER 10001:10001
