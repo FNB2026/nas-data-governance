@@ -182,3 +182,9 @@ is disabled; navigation neither approves a plan nor records anything. Historical
 decisions remain visible, and a plan without a separately recorded decision still
 cannot be approved. This deliberate capability boundary is regression-tested and
 is not a signed/native GUI certification.
+
+## Chronological decision identity integration (2026-10-14)
+
+Main includes independently reviewed PR #102 (`02164ad63ddc0c818e4b764ee1e69ed998c4b00f`). This candidate uses its strict RFC3339Nano SQLite ordering function consistently for workbench filtering, subject revision, single-record CAS, batch unchanged detection and the durable old-decision audit snapshot. Invalid created/updated times fail closed with a fixed governance rejection; historical values are never repaired during reads.
+
+Deterministic real SQLite regressions first failed on the previous candidate: variable-width fractional timestamps selected an older audit row; malformed offsets/UTC years/created times were accepted; the workbench filter, unchanged batch and single-record expected revision disagreed with chronological identity. The fixed candidate passes these cases under race, including a committed unchanged batch's durable old-decision JSON and unchanged synthetic source SHA-256. Full Go/race, frontend, required build/public/version/release gates pass. These results do not certify physical source stale detection, signed/native GUI or all P0 acceptance.

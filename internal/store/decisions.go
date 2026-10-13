@@ -73,7 +73,7 @@ func (s *SQLiteStore) SaveGroupDecision(ctx context.Context, d domain.GroupDecis
 	}
 	var old string
 	var revision int64
-	err = tx.QueryRowContext(ctx, `SELECT decision_type,revision FROM group_decisions WHERE group_id=? ORDER BY updated_at DESC,id DESC LIMIT 1`, d.GroupID).Scan(&old, &revision)
+	err = tx.QueryRowContext(ctx, `SELECT decision_type,revision FROM group_decisions WHERE group_id=? ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC,id DESC LIMIT 1`, d.GroupID).Scan(&old, &revision)
 	if err != nil && err != sql.ErrNoRows {
 		return ErrGovernanceRejected
 	}

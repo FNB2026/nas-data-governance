@@ -181,7 +181,7 @@ func governanceSubject(ctx context.Context, r governanceReader, ref domain.Gover
 	if e != nil {
 		return ref, "", e
 	}
-	e = r.QueryRowContext(ctx, `SELECT decision_type,`+expr+` FROM group_decisions WHERE group_id=? ORDER BY updated_at DESC,id DESC LIMIT 1`, ref.GroupID).Scan(&decision, &ref.DecisionRevision)
+	e = r.QueryRowContext(ctx, `SELECT decision_type,`+expr+` FROM group_decisions WHERE group_id=? ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC,id DESC LIMIT 1`, ref.GroupID).Scan(&decision, &ref.DecisionRevision)
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return ref, "", ErrGovernanceRejected
 	}
@@ -220,7 +220,7 @@ func (s *SQLiteStore) ListGovernanceGroups(ctx context.Context, q domain.Governa
 	if q.Descending {
 		direction = "DESC"
 	}
-	cte := `WITH groups AS (SELECT storage_id,content_sha256,ndg_group_id_v1(storage_id,content_sha256) AS group_id,MIN(size) AS size,COUNT(*) AS path_count,MIN(path) AS sample_path FROM file_instances WHERE file_status='active' AND content_sha256 IS NOT NULL AND content_sha256<>'' GROUP BY storage_id,content_sha256 HAVING COUNT(*)>1), reviewed AS (SELECT groups.*,COALESCE((SELECT decision_type FROM group_decisions d WHERE d.group_id=groups.group_id ORDER BY updated_at DESC,id DESC LIMIT 1),'') AS decision_type FROM groups) `
+	cte := `WITH groups AS (SELECT storage_id,content_sha256,ndg_group_id_v1(storage_id,content_sha256) AS group_id,MIN(size) AS size,COUNT(*) AS path_count,MIN(path) AS sample_path FROM file_instances WHERE file_status='active' AND content_sha256 IS NOT NULL AND content_sha256<>'' GROUP BY storage_id,content_sha256 HAVING COUNT(*)>1), reviewed AS (SELECT groups.*,COALESCE((SELECT decision_type FROM group_decisions d WHERE d.group_id=groups.group_id ORDER BY ` + decisionTimestampOrderFunction + `(updated_at) DESC,id DESC LIMIT 1),'') AS decision_type FROM groups) `
 	where := " WHERE 1=1"
 	args := []any{}
 	if q.StorageID != "" {
@@ -298,11 +298,17 @@ func decisionAuditSnapshot(ctx context.Context, tx *sql.Tx, groupID string) (str
 	var id, kind, reason, rule, created, updated string
 	var retained sql.NullInt64
 	var revision int64
-	e := tx.QueryRowContext(ctx, `SELECT id,decision_type,retained_file_id,COALESCE(reason,''),COALESCE(rule_id,''),created_at,updated_at,revision FROM group_decisions WHERE group_id=? ORDER BY updated_at DESC,id DESC LIMIT 1`, groupID).Scan(&id, &kind, &retained, &reason, &rule, &created, &updated, &revision)
+	e := tx.QueryRowContext(ctx, `SELECT id,decision_type,retained_file_id,COALESCE(reason,''),COALESCE(rule_id,''),created_at,updated_at,revision FROM group_decisions WHERE group_id=? ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC,id DESC LIMIT 1`, groupID).Scan(&id, &kind, &retained, &reason, &rule, &created, &updated, &revision)
 	if errors.Is(e, sql.ErrNoRows) {
 		return "{}", "", nil
 	}
 	if e != nil {
+		return "", "", ErrGovernanceRejected
+	}
+	if _, e = parseDecisionTimestamp(created); e != nil {
+		return "", "", ErrGovernanceRejected
+	}
+	if _, e = parseDecisionTimestamp(updated); e != nil {
 		return "", "", ErrGovernanceRejected
 	}
 	value := map[string]any{"id": id, "decision_type": kind, "reason": reason, "rule_id": rule, "created_at": created, "updated_at": updated, "revision": revision}
