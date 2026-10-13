@@ -4,7 +4,7 @@
 // typing in input fields is detected (except for the combo shortcuts).
 
 import { useEffect } from "react";
-import { NAV_ITEMS, type AppRoute } from "../app/routes";
+import { SHORTCUT_ROUTES, type AppRoute } from "../app/routes";
 
 export interface KeyboardShortcutHandlers {
   onRouteChange: (route: AppRoute) => boolean;
@@ -24,8 +24,8 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers) {
       // Cmd/Ctrl + 1-7: switch navigation pages
       if (e.key >= "1" && e.key <= "7") {
         const idx = parseInt(e.key, 10) - 1;
-        if (idx < NAV_ITEMS.length) {
-          if (onRouteChange(NAV_ITEMS[idx].id)) {
+        if (idx < SHORTCUT_ROUTES.length) {
+          if (onRouteChange(SHORTCUT_ROUTES[idx])) {
             e.preventDefault();
           }
         }
