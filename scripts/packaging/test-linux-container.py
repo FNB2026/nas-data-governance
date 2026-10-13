@@ -57,6 +57,9 @@ with tempfile.TemporaryDirectory(prefix="ndg-disposable-") as temp:
         csrf = request("/api/login", {"password": password})["csrf"]
         identity = request("/api/version")
         assert identity["commit"] == expected_sha and identity["channel"] == "web-experimental"
+        if "NDG_EXPECT_VERSION" in os.environ:
+            assert identity["version"] == os.environ["NDG_EXPECT_VERSION"]
+            assert identity["build_time"] == os.environ["NDG_EXPECT_BUILD_TIME"]
         for endpoint in ["/api/quarantine/execute", "/api/restore/execute", "/api/purge/execute"]:
             try: request(endpoint, {}); raise AssertionError("execution accepted")
             except urllib.error.HTTPError as e: assert e.code == 403

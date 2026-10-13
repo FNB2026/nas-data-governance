@@ -1,0 +1,72 @@
+{
+  "name": "Experimental container evidence",
+  "on": {
+    "workflow_dispatch": {}
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "native-evidence": {
+      "name": "Unsigned native OCI evidence (${{ matrix.architecture }})",
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "runner": "ubuntu-24.04",
+              "architecture": "amd64"
+            },
+            {
+              "runner": "ubuntu-24.04-arm",
+              "architecture": "arm64"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 45,
+      "steps": [
+        {
+          "name": "Checkout exact dispatch SHA",
+          "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Use project Go toolchain",
+          "uses": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+          "with": {
+            "go-version-file": "go.mod",
+            "cache": true
+          }
+        },
+        {
+          "name": "Offline evidence integrity tests",
+          "run": "make container-evidence-test"
+        },
+        {
+          "name": "Native build, synthetic runtime, SBOM and real vulnerability evidence",
+          "env": {
+            "NDG_EVIDENCE_ARCH": "${{ matrix.architecture }}"
+          },
+          "run": "python3 scripts/packaging/collect-container-evidence.py"
+        },
+        {
+          "name": "Retain only sanitized evidence; no registry or release",
+          "if": "${{ always() }}",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+          "with": {
+            "name": "experimental-unsigned-oci-${{ github.sha }}-${{ matrix.architecture }}",
+            "path": "${{ runner.temp }}/ndg-container-evidence/public/",
+            "if-no-files-found": "error",
+            "retention-days": 7,
+            "include-hidden-files": false
+          }
+        }
+      ]
+    }
+  }
+}
