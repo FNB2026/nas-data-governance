@@ -1,0 +1,2 @@
+# Only disposable local data until isolated container acceptance passes.
+NDG_DISPOSABLE_SOURCE=/absolute/disposable/source

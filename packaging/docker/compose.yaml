@@ -1,0 +1,28 @@
+# Experimental local-only template. No quarantine or host-wide source volume.
+services:
+  ndg:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - type: bind
+        source: ./private-config
+        target: /config
+        read_only: true
+      - type: bind
+        source: ./private-state
+        target: /data
+      - type: bind
+        source: ${NDG_DISPOSABLE_SOURCE:?Set an explicit disposable local source}
+        target: /sources/source_a
+        read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    stop_grace_period: 60s
