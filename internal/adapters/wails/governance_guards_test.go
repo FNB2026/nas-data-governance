@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -41,9 +42,13 @@ func TestLegacyDecisionRejectsSandboxAndRecoveryLock(t *testing.T) {
 }
 
 func TestSandboxManualDraftAndApprovalAreRejected(t *testing.T) {
-	a := NewAPI()
-	defer a.CloseProject()
-	if _, e := a.OpenProjectReadWrite(createProjectDBWithDuplicates(t)); e != nil {
+	// Exercise the actual sandbox composition and an authorized, container-owned
+	// disposable project, including when the binary's default build is MAS.
+	a, _, source := sandboxTestAPI(t)
+	if _, e := a.PickDirectory(""); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := a.CreateProjectFromSource(CreateProjectInput{SourcePath: source}); e != nil {
 		t.Fatal(e)
 	}
 	ctx := context.Background()
@@ -54,12 +59,11 @@ func TestSandboxManualDraftAndApprovalAreRejected(t *testing.T) {
 	if e := a.store.SavePlans(ctx, task.ID, []domain.OperationPlan{{ID: "synthetic-plan", TaskID: task.ID, State: domain.PlanDraft, Risk: domain.RiskLow}}); e != nil {
 		t.Fatal(e)
 	}
-	a.sandbox = true
-	if _, e := a.ApprovePlans(ApprovePlansRequest{PlanIDs: []string{"synthetic-plan"}}); e == nil {
-		t.Error("sandbox approval accepted")
+	if _, e := a.ApprovePlans(ApprovePlansRequest{PlanIDs: []string{"synthetic-plan"}}); !errors.Is(e, errGovernanceUnavailable) {
+		t.Error("sandbox approval did not return the governance refusal")
 	}
-	if _, e := a.SaveDraftPlans(""); e == nil {
-		t.Error("sandbox manual plan persistence accepted")
+	if _, e := a.SaveDraftPlans(""); !errors.Is(e, errGovernanceUnavailable) {
+		t.Error("sandbox manual plan persistence did not return the governance refusal")
 	}
 	plans, e := a.store.ListAllPlans(ctx)
 	if e != nil || len(plans) != 1 || plans[0].State != domain.PlanDraft {
