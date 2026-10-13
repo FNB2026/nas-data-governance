@@ -304,7 +304,7 @@ def exercise(resources, root, port, settings, password, marker, source):
     ready()
     try:
         request("/api/scan", {"alias": "source_a"})
-        raise Blocked("unauthenticated_scan_accepted")
+        raise Failed("unauthenticated_scan_accepted")
     except urllib.error.HTTPError as error:
         require(error.code == 401, "unexpected_auth_result")
     csrf = request("/api/login", {"password": password})["csrf"]
@@ -314,7 +314,7 @@ def exercise(resources, root, port, settings, password, marker, source):
     for endpoint in ["/api/" + area + "/" + operation for area in ["quarantine", "restore", "purge"] for operation in ["create", "approve", "dry-run", "execute"]]:
         try:
             request(endpoint, {})
-            raise Blocked("dangerous_api_accepted")
+            raise Failed("dangerous_api_accepted")
         except urllib.error.HTTPError as error:
             require(error.code == 403, "unexpected_execution_refusal")
     request("/api/scan", {"alias": "source_a", "resume": False})

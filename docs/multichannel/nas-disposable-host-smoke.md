@@ -104,3 +104,16 @@ conversion cannot certify Docker or fnOS runtime.
 The original OCI/receipt remain unsigned; repeated-build reproducibility and
 registry provenance are not added. Historical privacy FAIL, MAS NO-GO, fnOS
 package hard block and immutable beta.11 assets remain unchanged.
+
+## Implementation verification (not host acceptance)
+
+Nineteen offline tests exercise real synthetic archive/fixture bytes plus
+mocked Docker/HTTP: default no side effects, explicit preflight refusal, frozen
+source/content mismatch, existing destination preservation, links, tag refusal,
+exact-ID cleanup, ownership/mount/limits/foreign-endpoint refusal, source hashing,
+all twelve dangerous API denials and negative API/privacy/source-change cases.
+The actual frozen amd64 OCI was also converted locally and its unchanged config
+and layer identities checked, without calling Docker. Required local Go tests,
+vet/build, full race, public/version/release checks passed; this is distinct from
+an authorized fnOS host run, which remains NOT RUN until a private actual receipt
+exists and an independent reviewer verifies it.
