@@ -167,3 +167,18 @@ PASS. The new DMG integration fixture now explicitly selects DMG test compositio
 genuine MAS manual-draft/approval tests continue to use authorized disposable
 native-grant/container composition. Targeted MAS guard/race, default full gates,
 and native/signed GUI acceptance remain separate claims.
+
+## Compatibility-page integration follow-up
+
+After integrating frontend #96, independent reviewer found the old single-plan
+page still submitted only group/type/reason. The new backend correctly refuses
+unversioned updates to existing decisions; the old UI therefore could not safely
+update a previously recorded choice. Its explicit navigation regression first
+failed against the old page. The compatibility page now retains plan/history/
+independent approval, but directs decision editing to the governance workbench
+for evidence, preview and versioned recording. No legacy mutation fallback,
+click-time snapshot refresh or seventh API was added. An absent navigation handler
+is disabled; navigation neither approves a plan nor records anything. Historical
+decisions remain visible, and a plan without a separately recorded decision still
+cannot be approved. This deliberate capability boundary is regression-tested and
+is not a signed/native GUI certification.
