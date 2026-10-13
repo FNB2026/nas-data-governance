@@ -37,6 +37,7 @@ export function deriveCapabilities(opts: {
   if (!projectOpen) {
     disabled_reasons["scan-jobs"] = "请先打开项目";
     disabled_reasons["duplicate-results"] = "请先打开项目";
+    disabled_reasons["governance-workbench"] = "请先打开项目";
     disabled_reasons["governance-review"] = "请先打开项目";
     disabled_reasons["execution-center"] = "请先打开项目";
     disabled_reasons["audit-recovery"] = "请先打开项目";
@@ -77,6 +78,7 @@ export function isRouteEnabled(
       return true;
     case "scan-jobs":
     case "duplicate-results":
+    case "governance-workbench":
     case "governance-review":
     case "audit-recovery":
       return caps.project_open;

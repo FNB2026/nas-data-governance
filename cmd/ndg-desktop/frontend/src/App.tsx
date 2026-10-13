@@ -14,7 +14,7 @@ import ToastContainer from "./components/Toast";
 import OnboardingOverlay from "./components/OnboardingOverlay";
 import SourcesPage from "./pages/SourcesPage";
 import ScanJobsPage from "./pages/ScanJobsPage";
-import DuplicateResultsPage from "./pages/DuplicateResultsPage";
+import GovernanceWorkbenchPage from "./pages/GovernanceWorkbenchPage";
 import GovernanceReviewPage from "./pages/GovernanceReviewPage";
 import ExecutionCenterPage from "./pages/ExecutionCenterPage";
 import AuditRecoveryPage from "./pages/AuditRecoveryPage";
@@ -24,7 +24,8 @@ function renderPage(route: AppRoute, onRouteChange: (route: AppRoute) => void) {
   switch (route) {
     case "sources": return <SourcesPage onNavigate={onRouteChange} />;
     case "scan-jobs": return <ScanJobsPage />;
-    case "duplicate-results": return <DuplicateResultsPage />;
+    case "governance-workbench":
+    case "duplicate-results": return <GovernanceWorkbenchPage onNavigate={onRouteChange} />;
     case "governance-review": return <GovernanceReviewPage onNavigate={onRouteChange} />;
     case "execution-center": return <ExecutionCenterPage />;
     case "audit-recovery": return <AuditRecoveryPage />;

@@ -492,7 +492,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
       }
     } catch {
-      setRecoveryLockActive(false);
+      // A missing lock result cannot establish a safe write state.
+      setRecoveryLockActive(true);
     }
 
     const loads: Promise<void>[] = [loadStorages(), loadRecentProjects()];

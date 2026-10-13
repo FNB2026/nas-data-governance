@@ -225,3 +225,11 @@ describe("ProjectContext safety and scan wiring", () => {
     expect(screen.getByTestId("toasts")).not.toHaveTextContent("扫描完成");
   });
 });
+
+// UX v2: inability to read a recovery lock never grants new write capability.
+it("keeps write capabilities blocked when the opening recovery-lock query fails", async () => {
+  apiMock.recovery.checkLock.mockRejectedValue(new Error("synthetic unavailable"));
+  renderContext();
+  await openReadWriteProject();
+  await waitFor(() => expect(screen.getByTestId("can-execute")).toHaveTextContent("false"));
+});
