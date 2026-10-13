@@ -1,0 +1,7 @@
+{
+  "defaults": {
+    "run-as": "package"
+  },
+  "username": "ndg-readonly-test",
+  "groupname": "ndg-readonly-test"
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "observed_date": "2026-10-12",
+  "official_documentation": "https://developer.fnnas.com/docs/cli/fnpack/",
+  "download_url": "https://static2.fnnas.com/fnpack/fnpack-1.2.3-darwin-arm64",
+  "tool_version": "1.2.3",
+  "architecture": "darwin-arm64",
+  "http_status": 200,
+  "size_bytes": 3626402,
+  "observed_sha256": "d40cb00896cb2a5d211357d255750ed0cbe7f2d141df671c2b717afb4e74bf77",
+  "publisher_checksum_available": false,
+  "signature_observation": "Mach-O ad-hoc linker signature; no TeamIdentifier",
+  "verification_limit": "HTTPS official download and local content identity; not Developer ID or publisher-checksum authentication",
+  "commands_observed_exit_0": [
+    "fnpack --help",
+    "fnpack create --help",
+    "fnpack build --help",
+    "fnpack create ndg_disposable_template_audit --template docker"
+  ],
+  "fpk_build_executed": false,
+  "installation_or_daemon_access": false
+}

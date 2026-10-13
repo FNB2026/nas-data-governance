@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "implementation_status": "scaffold_only",
+  "channel": "fnos-research",
+  "accepted_source_sha": "",
+  "accepted_image_digest": "",
+  "fnos_runtime_acceptance": "NOT_RUN"
+}

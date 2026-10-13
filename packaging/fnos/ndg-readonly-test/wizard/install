@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "Research safety boundary",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "Not installable. Requires a frozen accepted OCI digest, an isolated fnOS test namespace and a reviewed runtime integration. Sources remain read-only; no Quarantine, Restore or Purge."
+      }
+    ]
+  }
+]
