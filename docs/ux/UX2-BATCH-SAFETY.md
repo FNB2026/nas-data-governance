@@ -84,3 +84,24 @@ explicit source-stale semantics/integration, UX3 discovery and human walkthrough
 Six enums and old/unknown historical values remain readable; no reinterpretation,
 automatic source migration, backup certification, HOLD release or Purge enabling.
 beta.11 assets, MAS INCONCLUSIVE/NO-GO and historical privacy FAIL remain intact.
+
+## CI follow-up and owner identity refusal
+
+The first PR desktop job built the development App but correctly failed its
+tracked-binding drift check. Wails v2.13.0 SDK classes/stubs are now regenerated
+and committed; a deterministic whitespace-only-line normalization step keeps
+regeneration and whitespace verification consistent. No hand-written DTO output
+or signed artifact is substituted. Final desktop/gates must be re-bound to HEAD.
+
+A percent-encoded database filename reproduced an owner/SQLite mismatch: SQLite
+opened a decoded sibling rather than the literal file owned by the lease.
+Default refusal now covers percent escapes as well as the existing question/hash
+URI delimiters in both read/write and readonly entrypoints. The RED reproduced
+mismatched database identity; the GREEN checks refusal has no directory effect.
+This does not add a URI filename feature or modify a user's existing database.
+
+Strict history scanning found additional artificial idempotency fixture constants.
+Each known historical finding has an exact commit/file/rule/line exception only;
+new tests generate runtime random keys while preserving same-key equality/replay
+semantics. Original Security failures remain recorded. No real credential was
+found and no path/pattern exemption or force rewrite was introduced.
