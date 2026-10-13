@@ -39,6 +39,9 @@ func governanceAPIWithSource(t *testing.T) (*API, map[string][32]byte) {
 	}
 	before[path] = sha256.Sum256(data)
 	a := NewAPI()
+	// Explicit GitHub/DMG test composition, even under a MAS-tagged test run.
+	// Genuine sandbox policy tests use sandboxTestAPI and authorized containers.
+	a.sandbox = false
 	t.Cleanup(func() { _ = a.CloseProject() })
 	if _, e := a.OpenProjectReadWrite(filepath.Join(t.TempDir(), "ui-integration.db")); e != nil {
 		t.Fatal(e)

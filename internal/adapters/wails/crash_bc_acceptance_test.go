@@ -34,7 +34,11 @@ func TestBeta10CrashBCAdapterContract(t *testing.T) {
 			if err != nil {
 				t.Fatal("store open failed")
 			}
-			defer func() { _ = st.Close() }()
+			defer func() {
+				if st != nil {
+					_ = st.Close()
+				}
+			}()
 			task := domain.OperationTask{ID: "task", RootPath: root, State: "executing", CreatedAt: time.Now()}
 			if st.CreateTask(ctx, task) != nil {
 				t.Fatal("task missing")
@@ -67,6 +71,8 @@ func TestBeta10CrashBCAdapterContract(t *testing.T) {
 				}
 			}
 			assertLock(true)
+			var fault *sql.DB
+			const auditFault = `CREATE TRIGGER reject_audit BEFORE INSERT ON operation_logs BEGIN SELECT RAISE(FAIL,'PRIVATE_BC_CANARY'); END`
 			if strings.HasSuffix(mode, "failure") {
 				other := p
 				other.ID = "approved-control"
@@ -76,12 +82,13 @@ func TestBeta10CrashBCAdapterContract(t *testing.T) {
 				if st.CreateTask(ctx, controlTask) != nil || st.SavePlans(ctx, other.TaskID, []domain.OperationPlan{other}) != nil {
 					t.Fatal("approved control unavailable")
 				}
-				fault, e := sql.Open("sqlite", db)
+				var e error
+				fault, e = sql.Open("sqlite", db)
 				if e != nil {
 					t.Fatal("fault connection failed")
 				}
 				defer fault.Close()
-				if _, e = fault.Exec(`CREATE TRIGGER reject_audit BEFORE INSERT ON operation_logs BEGIN SELECT RAISE(FAIL,'PRIVATE_BC_CANARY'); END`); e != nil {
+				if _, e = fault.Exec(auditFault); e != nil {
 					t.Fatal("fault creation failed")
 				}
 			}
@@ -105,12 +112,25 @@ func TestBeta10CrashBCAdapterContract(t *testing.T) {
 			if err != nil || len(logs) != map[bool]int{false: 1, true: 0}[failed] {
 				t.Fatal("adapter audit inconsistent")
 			}
+			// Extra test triggers are intentionally not supported project layouts.
+			// Suspend only the synthetic injector across the real store preflight;
+			// durable failed recovery state/audit/journal remain untouched.
+			if failed {
+				if _, e := fault.Exec(`DROP TRIGGER reject_audit`); e != nil {
+					t.Fatal("suspend fault")
+				}
+			}
 			if err = st.Close(); err != nil {
 				t.Fatal("second close failed")
 			}
 			st, err = store.Open(ctx, db)
 			if err != nil {
 				t.Fatal("second reopen failed")
+			}
+			if failed {
+				if _, e := fault.Exec(auditFault); e != nil {
+					t.Fatal("restore synthetic injector")
+				}
 			}
 			a = NewAPI()
 			a.initReadWriteServicesLocked(st)

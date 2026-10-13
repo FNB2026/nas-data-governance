@@ -191,6 +191,11 @@ func TestBatchDurableFailureResumeAndAtomicAudit(t *testing.T) {
 	if auditCount(t, s) != 1 {
 		t.Fatal("failed audit not atomic")
 	}
+	// Remove only this test's synthetic fault injector before a supported
+	// layout is reopened. Preserve the real partial receipt/audit/decision rows.
+	if _, e = s.db.Exec(`DROP TRIGGER synthetic_audit_failure`); e != nil {
+		t.Fatal(e)
+	}
 	path := s.path
 	s.Close()
 	s, e = Open(context.Background(), path)
@@ -198,9 +203,6 @@ func TestBatchDurableFailureResumeAndAtomicAudit(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Close()
-	if _, e = s.db.Exec(`DROP TRIGGER synthetic_audit_failure`); e != nil {
-		t.Fatal(e)
-	}
 	v, e = s.CommitBatchDecisions(context.Background(), req)
 	if e != nil || v.Status != "COMPLETE" || v.Counts.Saved != 3 || auditCount(t, s) != 3 {
 		t.Fatal("durable resume", v.Counts, e)

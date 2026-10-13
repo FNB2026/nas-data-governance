@@ -45,15 +45,50 @@ concurrent hostile same-UID/privileged replacement/remount is not certified.
 Old beta.11 or arbitrary SQLite clients do not participate; no claim of retroactive
 cross-binary mutual exclusion. No historical project was opened or chmodded.
 
-Schema 12 additive tables/revision/marker commit together or roll back. Unknown
-future versions and unidentified nonempty databases are refused by a read-only
-preflight before the writable WAL DSN/legacy migrations. Existing WAL version
-state is read; immutable=1 is not used to conceal it. The new future-version
-regression first failed because the unsupported database changed before refusal,
-then passed after preflight. The older link-count fixture now includes the schema
-marker from actual Schema001; it does not pretend a foreign markerless DB is NDG.
-Owner-lock sidecar acquisition remains a deliberate preflight coordination effect;
-this is not a promise of zero filesystem sidecar activity during every refusal.
+Schema 12 additive tables/revision/marker commit together or roll back. The
+independent exact-HEAD review found that the earlier common-marker/MAX-version
+preflight also accepted foreign SQLite databases. Four genuine RED cases used
+foreign application tables with empty/1/11/12 markers: each was accepted and
+received NDG schema/writable SQLite changes. These original RED outputs remain
+in the local private archive; this correction does not rewrite them.
+
+The corrected preflight accepts only empty new databases, the full frozen legacy
+layout with zero marker rows, or the full governance layout with exactly marker
+12. It reads one transaction snapshot and fingerprints all stored tables,
+indexes, views and triggers; `sqliteX...` is not hidden by a LIKE wildcard.
+Extra/missing objects and mismatched markers refuse before writable initialization.
+The complete `sqlite_master` hashes are:
+
+- Legacy: `e177d2a1ec16d33cd96eed49a70082c8b25a10c5b6b72ca7e4c7e5138f811af5`.
+- Governance: `2cdb8fa859ae5f680af9cb6ed2455422946e317381ab93a4118077d3e34ccf84`.
+
+An isolated archive of beta.11 RC `791f19119542e69b62ee62dd358fed188000837e`
+ran the actual frozen store.Open initializer on a new disposable database and
+produced the legacy hash and zero markers. All beta.1–beta.11 tags and baseline
+main have byte-identical sorted schema files plus migrations.go (aggregate SHA
+`8a7e73d85562eab89512beffec28df5a13a2d10e472d99fd4f4ef900bf235f6c`)
+and the same modernc SQLite version. Thus earlier release initializer layouts
+are represented without fabricating a minimal legacy schema. This identifies
+supported structure, not provenance, authenticity, content integrity or a
+certified backup. Partial/tampered/unregistered layouts require read-only/manual
+assessment; they are not automatically repaired.
+
+A closed WAL-mode database can create sidecars even with mode=ro. Under the
+existing exclusive-owner/stable-local-ancestry contract, preflight uses immutable
+only when both WAL and SHM are absent. Present regular WAL/SHM are read normally
+in the same snapshot; an incomplete/nonregular pair refuses before opening.
+A real uncheckpointed marker change is tested and cannot be hidden by immutable.
+Unsupported-layout refusals preserve main DB and existing WAL/SHM/journal bytes
+and create no SQLite sidecars. Owner-lock acquisition is a separate deliberate
+coordination side effect. Older binaries/uncoordinated writers and hostile path
+replacement remain outside that cooperative ownership guarantee.
+
+The former minimal link-count fixture now explicitly tests Init's legacy column
+migration as a unit. Public Open compatibility is separately tested against the
+complete release layout. Audit-failure tests suspend only synthetic extra schema
+triggers during preflight, then re-inject failures after reopening; durable plan,
+journal, audit, receipt and byte outcomes are preserved. No production database
+or historical failure scene was altered, and no unknown trigger is whitelisted.
 
 ## Actual evidence and limits
 
@@ -116,3 +151,13 @@ must return the explicit governance refusal and retain the durable DRAFT state.
 No production authorization rule was weakened, and no user's container was used.
 The original remote failure and local RED remain; targeted MAS/race and vet and
 fresh default full gates are rerun separately before the update.
+
+## Independent review boundary and MAS matrix
+
+The independent reviewer reproduced default store/app/Wails and fresh race PASS,
+but a broad MAS-tagged suite failed ordinary DMG fixtures that open external
+project paths without grants. That FAIL is retained, not relabeled as MAS runtime
+PASS. The new DMG integration fixture now explicitly selects DMG test composition;
+genuine MAS manual-draft/approval tests continue to use authorized disposable
+native-grant/container composition. Targeted MAS guard/race, default full gates,
+and native/signed GUI acceptance remain separate claims.
