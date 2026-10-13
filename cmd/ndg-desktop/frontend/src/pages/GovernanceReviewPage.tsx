@@ -40,15 +40,6 @@ const DECISION_LABELS: Record<string, string> = {
   PRIMARY_RETENTION: "指定保留",
 };
 
-const DECISION_OPTIONS = [
-  { value: "KEEP_ALL", label: "全部保留" },
-  { value: "DRAFT_ACTION", label: "起草动作" },
-  { value: "DEFERRED", label: "暂缓" },
-  { value: "REJECTED_SUGGESTION", label: "拒绝建议" },
-  { value: "CROSS_ARCHIVE", label: "交叉归档" },
-  { value: "BACKUP_RELATION", label: "备份关系" },
-];
-
 const ACTION_LABELS: Record<string, string> = {
   KEEP: "保留",
   MOVE: "移动",
@@ -117,11 +108,6 @@ export default function GovernanceReviewPage({ onNavigate }: GovernanceReviewPag
 
   // Selected plan
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-
-  // Decision form
-  const [decisionType, setDecisionType] = useState("KEEP_ALL");
-  const [decisionReason, setDecisionReason] = useState("");
-  const [savingDecision, setSavingDecision] = useState(false);
 
   // Draft plans (in-memory preview)
   const [draftPlans, setDraftPlans] = useState<wails.PlanDTO[] | null>(null);
@@ -205,28 +191,6 @@ export default function GovernanceReviewPage({ onNavigate }: GovernanceReviewPag
     }
   };
 
-  const handleSaveDecision = async () => {
-    if (!selectedPlan) return;
-    setSavingDecision(true);
-    try {
-      const result = await api.governance.saveDecision({
-        group_id: selectedPlan.group_id,
-        decision_type: decisionType,
-        reason: decisionReason.trim(),
-      } as wails.SaveDecisionRequest);
-      setDecisionsMap((prev) => {
-        const next = new Map(prev);
-        next.set(selectedPlan.group_id, result);
-        return next;
-      });
-      pushToast("success", "决策已保存", `${selectedPlan.group_id}: ${decisionLabel(decisionType)}`);
-    } catch (e: unknown) {
-      pushToast("error", "保存决策失败", (e as Error).message);
-    } finally {
-      setSavingDecision(false);
-    }
-  };
-
   const handleApprove = async (planId: string) => {
     setApproving(true);
     try {
@@ -247,20 +211,7 @@ export default function GovernanceReviewPage({ onNavigate }: GovernanceReviewPag
     }
   };
 
-  // Load existing decision when selecting a plan
-  const handleSelectPlan = async (planId: string) => {
-    setSelectedPlanId(planId);
-    // Pre-fill form from existing decision if available
-    const plan = displayPlans.find((item) => item.id === planId);
-    const existing = plan ? decisionsMap.get(plan.group_id) : undefined;
-    if (existing) {
-      setDecisionType(existing.decision_type);
-      setDecisionReason(existing.reason || "");
-    } else {
-      setDecisionType("KEEP_ALL");
-      setDecisionReason("");
-    }
-  };
+  const handleSelectPlan = (planId: string) => setSelectedPlanId(planId);
 
   // ---- Filtered plans ----
 
@@ -543,46 +494,15 @@ export default function GovernanceReviewPage({ onNavigate }: GovernanceReviewPag
                 </div>
               )}
 
-              {/* Decision form (write capability only) */}
-              {canWriteReviews && (
-                <div className="gov-section gov-decision-form">
-                  <h4>用户决定</h4>
-                  <p className="gov-section-hint">保存决定不会批准计划，也不会触发隔离、移动或删除。</p>
-                  <div className="gov-form-row">
-                    <label className="gov-form-label">决策类型</label>
-                    <select
-                      className="gov-form-select"
-                      value={decisionType}
-                      onChange={(e) => setDecisionType(e.target.value)}
-                    >
-                      {DECISION_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="gov-form-row">
-                    <label className="gov-form-label">理由（可选）</label>
-                    <textarea
-                      className="gov-form-textarea"
-                      value={decisionReason}
-                      onChange={(e) => setDecisionReason(e.target.value)}
-                      rows={2}
-                      placeholder="说明决策原因…"
-                    />
-                  </div>
-                  <div className="gov-form-actions">
-                    <button
-                      className="btn-sm secondary"
-                      onClick={() => void handleSaveDecision()}
-                      disabled={savingDecision}
-                    >
-                      {savingDecision ? "保存中…" : "保存用户决定"}
-                    </button>
-                  </div>
-                </div>
-              )}
+              <div className="gov-section gov-decision-form">
+                <h4>用户决定</h4>
+                <p className="gov-section-hint">请在治理工作台重新核对证据、预览并记录决定。此页面保留计划查看与独立审批。</p>
+                <p className="muted">记录决定不会批准计划，也不会触发隔离、移动或删除。</p>
+                <button className="btn-sm secondary" disabled={!onNavigate}
+                  onClick={() => onNavigate?.("governance-workbench")}>
+                  前往治理工作台记录决定
+                </button>
+              </div>
 
               <div className="gov-section gov-approval-section">
                 <h4>批准状态</h4>

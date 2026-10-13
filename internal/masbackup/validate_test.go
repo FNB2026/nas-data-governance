@@ -27,11 +27,18 @@ func makeBackup(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	dbPath := filepath.Join(dir, databaseName)
-	st, err := store.Open(context.Background(), dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
+	if err := createFrozenSchema11(context.Background(), db); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dbPath, 0600); err != nil {
 		t.Fatal(err)
 	}
 	// This fixture was created and closed by this test. Remove only its own
@@ -374,5 +381,34 @@ func TestValidateClosedBackupCleanupFailureRejectsAndClearsResult(t *testing.T) 
 	}
 	if len(entries) != 0 {
 		t.Fatalf("cleanup test left %d staging entries", len(entries))
+	}
+}
+
+func TestGovernanceSchema12NotAutomaticallyAcceptedByBackupPrototype(t *testing.T) {
+	dir := makeBackup(t)
+	source := filepath.Join(t.TempDir(), "new-layout.db")
+	st, err := store.Open(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bytes, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Copy a clean closed snapshot. Never remove the owner's coordination file
+	// from a live database to make an export or acceptance appear successful.
+	if err = os.WriteFile(filepath.Join(dir, databaseName), bytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, dir, SupportedSourceID, SupportedSchemaID)
+	if _, err = validateFixture(t, dir); err == nil {
+		t.Fatal("new governance layout auto-approved by frozen backup prototype")
+	}
+	after, err := os.ReadFile(filepath.Join(dir, databaseName))
+	if err != nil || string(bytes) != string(after) {
+		t.Fatal("refused snapshot changed")
 	}
 }

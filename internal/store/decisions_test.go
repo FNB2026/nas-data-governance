@@ -351,6 +351,7 @@ func TestSaveGroupDecisionUpsertReplaces(t *testing.T) {
 		DecisionType: domain.DecisionDeferred,
 		Reason:       "changed my mind",
 	}
+	d2.Revision = 1
 	if err := st.SaveGroupDecision(ctx, d2); err != nil {
 		t.Fatalf("SaveGroupDecision 2: %v", err)
 	}
@@ -685,6 +686,7 @@ func TestSaveGroupDecisionAutoIDUpdatesOnDecisionChange(t *testing.T) {
 		GroupID:      "group-x",
 		DecisionType: domain.DecisionDeferred,
 	}
+	d2.Revision = 1
 	if err := st.SaveGroupDecision(ctx, d2); err != nil {
 		t.Fatalf("SaveGroupDecision d2: %v", err)
 	}

@@ -1,0 +1,90 @@
+package domain
+
+// GovernanceSubject is an explicit group selection, never an action or approval.
+type GovernanceSubject struct {
+	GroupID          string `json:"group_id"`
+	StorageID        string `json:"storage_id"`
+	SHA256           string `json:"sha256"`
+	SubjectVersion   string `json:"subject_version"`
+	DecisionRevision int64  `json:"decision_revision"`
+}
+type GovernanceQuery struct {
+	StorageID    string `json:"storage_id"`
+	Search       string `json:"search"`
+	DecisionType string `json:"decision_type"`
+	MinSize      int64  `json:"min_size"`
+	MaxSize      int64  `json:"max_size"`
+	Sort         string `json:"sort"`
+	Descending   bool   `json:"descending"`
+	Page         int    `json:"page"`
+	PageSize     int    `json:"page_size"`
+}
+type GovernanceGroup struct {
+	GovernanceSubject
+	SamplePath   string   `json:"sample_path"`
+	Size         int64    `json:"size"`
+	PathCount    int      `json:"path_count"`
+	DecisionType string   `json:"decision_type"`
+	Risk         string   `json:"risk"`
+	Role         string   `json:"role"`
+	SafetyFlags  []string `json:"safety_flags"`
+}
+type GovernancePage struct {
+	Items              []GovernanceGroup `json:"items"`
+	TotalCount         int               `json:"total_count"`
+	Page               int               `json:"page"`
+	PageSize           int               `json:"page_size"`
+	UnavailableFilters []string          `json:"unavailable_filters"`
+}
+type GovernanceCapabilities struct {
+	CanRecordDecisions bool     `json:"can_record_decisions"`
+	CanPreview         bool     `json:"can_preview"`
+	RecoveryLockActive bool     `json:"recovery_lock_active"`
+	ScanActive         bool     `json:"scan_active"`
+	MaxBatchSize       int      `json:"max_batch_size"`
+	ReasonCodes        []string `json:"reason_codes"`
+	ProjectScope       string   `json:"project_scope"`
+}
+type PreviewBatchRequest struct {
+	Items        []GovernanceSubject `json:"items"`
+	DecisionType ReviewDecisionType  `json:"decision_type"`
+	Reason       string              `json:"reason"`
+}
+type PreviewItem struct {
+	GovernanceSubject
+	Eligibility string `json:"eligibility"`
+	ReasonCode  string `json:"reason_code"`
+}
+type GovernancePreview struct {
+	PreviewToken string        `json:"preview_token"`
+	ExpiresAt    string        `json:"expires_at"`
+	ProjectScope string        `json:"project_scope"`
+	Items        []PreviewItem `json:"items"`
+	RecordsOnly  bool          `json:"records_only"`
+}
+type CommitBatchRequest struct {
+	PreviewToken   string `json:"preview_token"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+type GovernanceOutcome struct {
+	GroupID          string `json:"group_id"`
+	Status           string `json:"status"`
+	ReasonCode       string `json:"reason_code"`
+	DecisionRevision int64  `json:"decision_revision"`
+}
+type GovernanceCounts struct {
+	Total     int `json:"total"`
+	Saved     int `json:"saved"`
+	Unchanged int `json:"unchanged"`
+	Conflict  int `json:"conflict"`
+	Blocked   int `json:"blocked"`
+	Failed    int `json:"failed"`
+}
+type GovernanceBatchResult struct {
+	BatchID        string              `json:"batch_id"`
+	ProjectScope   string              `json:"project_scope"`
+	Status         string              `json:"status"`
+	RequestedCount int                 `json:"requested_count"`
+	Counts         GovernanceCounts    `json:"counts"`
+	Items          []GovernanceOutcome `json:"items"`
+}
