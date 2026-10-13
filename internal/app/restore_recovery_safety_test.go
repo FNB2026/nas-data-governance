@@ -86,7 +86,11 @@ func newRestoreSafetyFixture(t *testing.T) *restoreSafetyFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.st.Close() })
+	t.Cleanup(func() {
+		if f.st != nil {
+			_ = f.st.Close()
+		}
+	})
 	f.svc = NewQuarantineService(f.st)
 	f.item = seedQuarantineItem(t, f.st, f.source, f.quarantine, "PRIVATE_MARKER.dat", time.Now(), time.Now().Add(time.Hour))
 	f.original, err = os.ReadFile(f.item.QuarantinePath)
@@ -339,11 +343,20 @@ func TestRestoreTerminalPersistenceFailsClosed(t *testing.T) {
 			if table == "operation_logs" {
 				verb = "INSERT"
 			}
-			if _, err = db.Exec("CREATE TRIGGER fail_terminal BEFORE " + verb + " ON " + table + " BEGIN SELECT RAISE(ABORT,'PRIVATE_MARKER confidential path'); END"); err != nil {
+			inject := "CREATE TRIGGER fail_terminal BEFORE " + verb + " ON " + table + " BEGIN SELECT RAISE(ABORT,'PRIVATE_MARKER confidential path'); END"
+			if _, err = db.Exec(inject); err != nil {
 				t.Fatal(err)
 			}
 			f.recover(t, true)
+			// Suspend only the extra synthetic trigger for complete-layout preflight.
+			// Failed durable plan/journal/audit state is not changed by the fixture.
+			if _, err = db.Exec("DROP TRIGGER fail_terminal"); err != nil {
+				t.Fatal("suspend injector")
+			}
 			f.reopen(t)
+			if _, err = db.Exec(inject); err != nil {
+				t.Fatal("reinstate injector")
+			}
 			f.recover(t, true)
 			if _, err = db.Exec("DROP TRIGGER fail_terminal"); err != nil {
 				t.Fatal(err)
@@ -508,6 +521,11 @@ func TestRestoreCompletionTransactionFailurePreservesFullTarget(t *testing.T) {
 	r, err := executor.Snapshot(f.item.SourcePath, true)
 	if err != nil || r.Hash != f.item.ContentSHA256 {
 		t.Fatal("unconfirmed target changed")
+	}
+	// Remove only the test injector; both full target and incomplete durable
+	// completion rows survive reopening and still require manual recovery.
+	if _, err = db.Exec(`DROP TRIGGER fail_complete`); err != nil {
+		t.Fatal("suspend injector")
 	}
 	f.reopen(t)
 	f.recover(t, true)

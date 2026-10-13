@@ -120,7 +120,11 @@ func TestBeta10CrashBCCombinationContract(t *testing.T) {
 			if err != nil {
 				t.Fatal("reopen failed")
 			}
-			defer func() { _ = st.Close() }()
+			defer func() {
+				if st != nil {
+					_ = st.Close()
+				}
+			}()
 			before, err := st.GetPlan(ctx, p.ID)
 			if err != nil {
 				t.Fatal("durable plan missing")
@@ -245,11 +249,23 @@ func TestBeta10CrashBCCombinationContract(t *testing.T) {
 						t.Fatal("failure lost original content")
 					}
 				}
+				// Suspend only the test injector across the supported-layout preflight;
+				// failed recovery rows and source/output bytes are not repaired here.
+				if trigger != "" {
+					if _, e := fault.Exec(`DROP TRIGGER reject_bc`); e != nil {
+						t.Fatal("suspend synthetic injector")
+					}
+				}
 				// Repeat after another restart must retain the lock, not report success.
 				_ = st.Close()
 				st, err = store.Open(ctx, dbPath)
 				if err != nil {
 					t.Fatal("second reopen failed")
+				}
+				if trigger != "" {
+					if _, e := fault.Exec(`CREATE TRIGGER reject_bc ` + trigger + ` BEGIN SELECT RAISE(FAIL,'PRIVATE_BC_CANARY'); END`); e != nil {
+						t.Fatal("restore synthetic injector")
+					}
 				}
 				again, err := NewRecoveryService(st).Recover(ctx)
 				if err != nil || len(again) != 1 || again[0].Action != executor.RecoverySkipped || requireNoRecovery(ctx, st) == nil {

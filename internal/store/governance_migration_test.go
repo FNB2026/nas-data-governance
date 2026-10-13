@@ -6,10 +6,10 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
-	"github.com/FNB2026/nas-data-governance/schemas"
 )
 
 func legacyGovernanceDatabase(t *testing.T, broken bool) string {
@@ -19,7 +19,7 @@ func legacyGovernanceDatabase(t *testing.T, broken bool) string {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = db.Exec(schemas.Schema001 + schemas.Schema008); e != nil {
+	if e = createSupportedLegacySchema11(context.Background(), db); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Exec(`INSERT INTO group_decisions(id,group_id,decision_type,retained_file_id,reason,rule_id,created_at,updated_at) VALUES('primary','primary','PRIMARY_RETENTION',42,'retain synthetic','old-rule','2026-10-12T00:00:00Z','2026-10-12T00:00:00Z'),('unknown','unknown','FUTURE_HISTORICAL',NULL,NULL,NULL,'2026-10-12T00:00:00Z','2026-10-12T00:00:00Z')`); e != nil {
@@ -81,15 +81,29 @@ func TestLegacyReadOnlyDecisionsPreserveUnknownAndPrimary(t *testing.T) {
 }
 func TestGovernanceMigrationFailureRollsBackAdditiveIncrement(t *testing.T) {
 	path := legacyGovernanceDatabase(t, true)
+	before := databaseEvidence(t, path)
 	if s, e := Open(context.Background(), path); e == nil {
 		s.Close()
 		t.Fatal("malformed governance table accepted")
 	}
-	db, e := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if !reflect.DeepEqual(before, databaseEvidence(t, path)) {
+		t.Fatal("public preflight changed unsupported layout")
+	}
+	// Separately exercise the additive migration transaction itself. The
+	// public opener refuses this deliberately corrupted test-only layout.
+	db, e := sql.Open("sqlite", path)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer db.Close()
+	conn, e := db.Conn(context.Background())
+	if e != nil {
+		t.Fatal("fault fixture connection")
+	}
+	if e = applyGovernanceMigration(context.Background(), conn); e == nil {
+		t.Fatal("fault migration succeeded")
+	}
+	conn.Close()
 	var n int
 	for _, q := range []string{`SELECT COUNT(*) FROM pragma_table_info('group_decisions') WHERE name='revision'`, `SELECT COUNT(*) FROM schema_migrations WHERE version=12`, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='governance_project'`} {
 		if db.QueryRow(q).Scan(&n) != nil || n != 0 {

@@ -608,15 +608,21 @@ CREATE TABLE IF NOT EXISTS file_instances (
 		t.Fatalf("close raw db: %v", err)
 	}
 
-	// --- Phase 2: open with Open(), which runs Init() and applies migrations ---
+	// --- Phase 2: explicitly exercise the legacy column migration unit ---
+	// This intentionally partial synthetic schema is not a supported released
+	// project layout and is refused by Open's complete-layout preflight.
 	if err := os.Chmod(dbPath, 0600); err != nil {
 		t.Fatal(err)
 	} // synthetic owner-controlled backup fixture
-	s, err := Open(ctx, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		t.Fatalf("open with migration: %v", err)
+		t.Fatal("synthetic migration connection")
 	}
+	s := &SQLiteStore{db: db, path: dbPath}
 	t.Cleanup(func() { _ = s.Close() })
+	if err = s.Init(ctx); err != nil {
+		t.Fatalf("legacy migration unit: %v", err)
+	}
 
 	// The migration must have added link_count with DEFAULT 0.
 	if err := s.db.QueryRowContext(ctx,

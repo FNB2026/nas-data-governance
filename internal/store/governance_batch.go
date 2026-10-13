@@ -201,7 +201,7 @@ func (s *SQLiteStore) commitDecisionItem(ctx context.Context, batchID string, in
 		o.ReasonCode = "SUBJECT_CHANGED"
 	} else {
 		var reason string
-		err := tx.QueryRowContext(ctx, `SELECT COALESCE(reason,'') FROM group_decisions WHERE group_id=? ORDER BY updated_at DESC,id DESC LIMIT 1`, item.GroupID).Scan(&reason)
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(reason,'') FROM group_decisions WHERE group_id=? ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC,id DESC LIMIT 1`, item.GroupID).Scan(&reason)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return ErrGovernanceRejected
 		}

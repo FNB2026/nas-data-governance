@@ -55,35 +55,62 @@ func applyGovernanceMigration(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
-// Reject future or unidentified nonempty databases before the writable DSN
-// enables WAL or any legacy migration runs. Reads include existing WAL state;
-// do not use immutable=1 to hide an uncheckpointed version marker.
+// Reject unsupported layouts before the writable DSN enables WAL or any legacy
+// migration runs. A common marker table does not establish NDG identity. Read a
+// single SQLite snapshot including WAL; immutable=1 could conceal live markers.
+// These hashes identify supported layouts, not database provenance or ownership.
 func preflightGovernanceSchema(ctx context.Context, path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return ErrGovernanceRejected
 	}
-	if info.Size() == 0 {
-		return nil
+	// A closed WAL-mode database with no sidecars otherwise creates new WAL/SHM
+	// files even through mode=ro. Only the owner-locked, sidecar-free case may
+	// use immutable. Existing WAL must always remain visible. Incomplete or
+	// nonregular sidecar pairs are ambiguous and refused without opening them.
+	// A rollback journal may require recovery before the main-file schema is
+	// authoritative. Do not allow immutable or a writable recovery to bypass
+	// identity checking; even a seemingly empty journal requires manual review.
+	if _, journalErr := os.Lstat(path + "-journal"); !os.IsNotExist(journalErr) {
+		return ErrGovernanceRejected
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	wal, walErr := os.Lstat(path + "-wal")
+	shm, shmErr := os.Lstat(path + "-shm")
+	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)"
+	if os.IsNotExist(walErr) && os.IsNotExist(shmErr) {
+		dsn += "&immutable=1"
+	} else if walErr != nil || shmErr != nil || !wal.Mode().IsRegular() || !shm.Mode().IsRegular() {
+		return ErrGovernanceRejected
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return ErrGovernanceRejected
 	}
 	defer db.Close()
-	var markers, objects int
-	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'`).Scan(&markers) != nil {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
 		return ErrGovernanceRejected
 	}
-	if markers == 0 {
-		if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).Scan(&objects) != nil || objects != 0 {
-			return ErrGovernanceRejected
-		}
+	defer tx.Rollback()
+	layout, err := schemaLayoutFingerprint(ctx, tx)
+	if err != nil {
+		return ErrGovernanceRejected
+	}
+	if layout == emptySchemaLayout {
+		return nil // New disposable/project database, no application objects.
+	}
+	if layout != legacySchema11Layout && layout != governanceSchema12Layout {
+		return ErrGovernanceRejected
+	}
+	var count, lowest, highest int
+	if tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(version),0),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &lowest, &highest) != nil {
+		return ErrGovernanceRejected
+	}
+	// All frozen beta.1–beta.11 initializers create the complete legacy layout
+	// without populating schema_migrations. The additive governance increment
+	// is the first to persist a marker, and commits it with the entire layout.
+	if (layout == legacySchema11Layout && count == 0) ||
+		(layout == governanceSchema12Layout && count == 1 && lowest == 12 && highest == 12) {
 		return nil
 	}
-	var version int
-	if db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&version) != nil || version < 0 || version > 12 {
-		return ErrGovernanceRejected
-	}
-	return nil
+	return ErrGovernanceRejected
 }

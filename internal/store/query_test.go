@@ -42,6 +42,16 @@ func seedGroupDecision(t *testing.T, st *SQLiteStore, groupID, decisionType, rea
 	}
 }
 
+func seedGroupDecisionAt(t *testing.T, st *SQLiteStore, id, groupID, decisionType, updatedAt string) {
+	t.Helper()
+	_, err := st.db.ExecContext(context.Background(),
+		`INSERT INTO group_decisions(id, group_id, decision_type, reason, rule_id, created_at, updated_at)
+		 VALUES(?, ?, ?, '', '', ?, ?)`, id, groupID, decisionType, updatedAt, updatedAt)
+	if err != nil {
+		t.Fatalf("seed timestamped group decision: %v", err)
+	}
+}
+
 func TestListDuplicateGroupsBasic(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
@@ -422,6 +432,32 @@ func TestListDuplicateGroupsWithDecision(t *testing.T) {
 	}
 	if page2.Groups[0].DecisionType != "KEEP_ALL" {
 		t.Errorf("DecisionType: expected KEEP_ALL, got %s", page2.Groups[0].DecisionType)
+	}
+}
+
+func TestListDuplicateGroupsUsesChronologicallyLatestDecision(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedStorage(t, st, "s1")
+	seedFile(t, st, "s1", "/vol/a.txt", 100, "hashA")
+	seedFile(t, st, "s1", "/vol/b.txt", 100, "hashA")
+	page, err := st.ListDuplicateGroups(ctx, query.GroupQuery{PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListDuplicateGroups: %v", err)
+	}
+	if len(page.Groups) != 1 {
+		t.Fatalf("expected one group, got %d", len(page.Groups))
+	}
+	groupID := page.Groups[0].GroupID
+	seedGroupDecisionAt(t, st, "decision-old", groupID, "KEEP_ALL", "2026-10-13T00:00:00.12345Z")
+	seedGroupDecisionAt(t, st, "decision-new", groupID, "DEFERRED", "2026-10-13T00:00:00.123450001Z")
+
+	page, err = st.ListDuplicateGroups(ctx, query.GroupQuery{PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListDuplicateGroups after decisions: %v", err)
+	}
+	if got := page.Groups[0].DecisionType; got != "DEFERRED" {
+		t.Fatalf("latest decision = %q, want DEFERRED", got)
 	}
 }
 

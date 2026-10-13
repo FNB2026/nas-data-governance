@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "observed_date": "2026-10-13",
+  "buildkit_image": "moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c",
+  "govulncheck_module": "golang.org/x/vuln/cmd/govulncheck@v1.1.4",
+  "node_audit_image": "node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402",
+  "tools": {
+    "buildx": {
+      "version": "v0.38.0",
+      "official_release": "https://github.com/docker/buildx/releases/tag/v0.38.0",
+      "checksum_url": "https://github.com/docker/buildx/releases/download/v0.38.0/checksums.txt",
+      "archives": {
+        "amd64": {
+          "filename": "buildx-v0.38.0.linux-amd64",
+          "url": "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-amd64",
+          "sha256": "4fe4cc38adf48169132749b6ca22a990928db0118e3407584ee553723115d287"
+        },
+        "arm64": {
+          "filename": "buildx-v0.38.0.linux-arm64",
+          "url": "https://github.com/docker/buildx/releases/download/v0.38.0/buildx-v0.38.0.linux-arm64",
+          "sha256": "38e890e1a162bfdbf32fbe91404991dc4fc28e55b0de901b34374a061bab4d2c"
+        }
+      }
+    },
+    "syft": {
+      "version": "v1.54.1",
+      "official_release": "https://github.com/anchore/syft/releases/tag/v1.54.1",
+      "checksum_url": "https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt",
+      "archives": {
+        "amd64": {
+          "filename": "syft_1.54.1_linux_amd64.tar.gz",
+          "url": "https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_linux_amd64.tar.gz",
+          "sha256": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47"
+        },
+        "arm64": {
+          "filename": "syft_1.54.1_linux_arm64.tar.gz",
+          "url": "https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_linux_arm64.tar.gz",
+          "sha256": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054"
+        }
+      }
+    },
+    "grype": {
+      "version": "v0.120.1",
+      "official_release": "https://github.com/anchore/grype/releases/tag/v0.120.1",
+      "checksum_url": "https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_checksums.txt",
+      "archives": {
+        "amd64": {
+          "filename": "grype_0.120.1_linux_amd64.tar.gz",
+          "url": "https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_linux_amd64.tar.gz",
+          "sha256": "0a9ee97ef5ae2ee953b0a80098105052e846cdbe319a57d808b519c33cd1343d"
+        },
+        "arm64": {
+          "filename": "grype_0.120.1_linux_arm64.tar.gz",
+          "url": "https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_linux_arm64.tar.gz",
+          "sha256": "29f47391dc283aa79fcc38e65224cd61f64dec0ecfd0db7074128ebf8ff23514"
+        }
+      }
+    }
+  }
+}
