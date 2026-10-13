@@ -114,6 +114,29 @@ reservation against other services' simultaneous writes. No daemon settings,
 paths, ownership or production data are altered to pass. Actual container UID,
 no-new-privileges and exact bounded noexec tmpfs must also match create options.
 
+Mount identity is proved using a held Linux O_PATH|O_DIRECTORY|O_NOFOLLOW|
+O_CLOEXEC descriptor, not by assuming a directory's stat device equals a
+mountinfo major:minor field. Pre/post path lstat and held-FD fstat must agree on
+device, inode, mode and owner. The FD's unique `mnt_id` must match the unique
+nearest covering mountinfo entry, with allowed filesystem and unchanged mapping
+before/after the check. Trusted ancestor device/inode and mount namespace
+identity must also stay fixed; ancestry ownership/mode policy is checked again.
+Missing
+kernel handle/fdinfo, wrong or duplicate IDs, unknown/network filesystems,
+unmount/remapping, changed path/FD or namespace all reject; the descriptor is
+closed on success and refusal. Each daemon mutation repeats this check and
+compares mount ID, filesystem, mapping fingerprint and namespace as well as the
+original directory identity. An exclusive operator window remains required;
+this does not certify protection against hostile root remounts after a check.
+
+The Linux kernel's [proc documentation, sections 3.8 and 3.5](https://www.kernel.org/doc/html/latest/filesystems/proc.html#proc-pid-fdinfo-fd-information-about-opened-file)
+defines FD mount IDs and their mountinfo correspondence. The stable synthetic
+Btrfs subvolume case first reproduced the old device-equality refusal, then
+passed with matching kernel FD identity. This is a proof replacement preserving
+path-to-FD device checks, not an allowlist exemption. The earlier exact a4e10ae
+device preflight remains BLOCKED and its private evidence is retained; it does
+not become host scan PASS because of this compatibility change.
+
 ## Actual checks and evidence scope
 
 The host scenario verifies authentication refusal, every create/approve/dry-run/
@@ -145,7 +168,7 @@ package hard block and immutable beta.11 assets remain unchanged.
 
 ## Implementation verification (not host acceptance)
 
-Thirty-one offline tests exercise real synthetic archive/fixture bytes plus
+Thirty-eight offline tests exercise real synthetic archive/fixture bytes plus
 mocked Docker/HTTP: default no side effects, explicit preflight refusal, frozen
 source/content mismatch, existing destination preservation, links, tag refusal,
 exact-ID cleanup, ownership/mount/limits/foreign-endpoint refusal, source hashing,
@@ -158,6 +181,11 @@ receipt; raw paths never appear in rejection messages.
 FIFO tests cover descriptor/type/direction refusal, atomic stable identity,
 preflight null-root handoff, default no writes and initial-handoff failure before
 any mutation. A completed response with inconsistent counts is a test FAIL.
+The prior 31 tests remain, with seven kernel-metadata regressions for stable Btrfs
+different devices/matching mount ID, wrong/missing/malformed fdinfo, duplicate/
+changing mount mappings, changed FD/path/namespace, missing/open-failed kernel
+handle, replaced ancestry and daemon fingerprint changes. These are deterministic mocks; real
+operator metadata evidence is separate from a successful disposable host run.
 The actual frozen amd64 OCI was also converted locally and its unchanged config
 and layer identities checked, without calling Docker. Required local Go tests,
 vet/build, full race, public/version/release checks passed; this is distinct from

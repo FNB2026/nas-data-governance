@@ -272,37 +272,141 @@ class SmokeChecks(unittest.TestCase):
         self.assertNotIn(str(self.root), output.getvalue())
 
     def metadata(self, *, mode=stat.S_IFDIR | 0o1777, uid=0, device=0, inode=1):
-        return SimpleNamespace(st_mode=mode, st_uid=uid, st_dev=device, st_ino=inode)
+        return SimpleNamespace(st_mode=mode, st_uid=uid, st_dev=device, st_ino=inode,
+                               mount_id=1, filesystem="ext4", mount_fingerprint="synthetic-mount", namespace=(0, 9))
+
+    @contextlib.contextmanager
+    def kernel_directory(self, mount, fdinfo="mnt_id:\t1\n", info=None):
+        info = info or self.metadata()
+        def read(path, *args, **kwargs):
+            return mount if str(path) == "/proc/self/mountinfo" else fdinfo
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(smoke.os, "O_PATH", 0x200000, create=True))
+            opened = stack.enter_context(mock.patch.object(smoke.os, "open", return_value=39))
+            closed = stack.enter_context(mock.patch.object(smoke.os, "close"))
+            stack.enter_context(mock.patch.object(smoke.os, "fstat", return_value=info))
+            stack.enter_context(mock.patch.object(smoke.os, "stat", return_value=self.metadata(inode=9)))
+            stack.enter_context(mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"))
+            stack.enter_context(mock.patch.object(Path, "lstat", return_value=info))
+            stack.enter_context(mock.patch.object(Path, "read_text", autospec=True, side_effect=read))
+            yield opened, closed
+
+    def test_btrfs_distinct_stat_device_requires_matching_kernel_mount_id(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n753 1 0:56 /subvol /synthetic-daemon rw - btrfs synthetic-volume rw\n"
+        info = self.metadata(mode=stat.S_IFDIR | 0o700, device=os.makedev(0, 57))
+        with self.kernel_directory(mount, "pos:\t0\nmnt_id:\t753\n", info) as (opened, closed):
+            witness = smoke.local_directory(Path("/synthetic-daemon"))
+            self.assertEqual(witness.mount_id, 753)
+            self.assertEqual(witness.filesystem, "btrfs")
+            self.assertEqual(witness.st_dev, info.st_dev)
+            opened.assert_called_once_with(Path("/synthetic-daemon"), smoke.os.O_PATH | smoke.os.O_DIRECTORY | smoke.os.O_NOFOLLOW | smoke.os.O_CLOEXEC)
+            closed.assert_called_once_with(39)
+
+    def test_fd_mount_missing_wrong_duplicate_or_unreadable_refuses_and_closes(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        for text in ["", "mnt_id:\t2\n", "mnt_id:\t1\nmnt_id:\t1\n", "mnt_id:\tunconfirmed\n", "mnt_id:\n1\n"]:
+            with self.subTest(fdinfo=text), self.kernel_directory(mount, text) as (_, closed):
+                with self.assertRaisesRegex(smoke.Blocked, "directory_mount_identity_changed"):
+                    smoke.local_directory(Path("/tmp"))
+                closed.assert_called_once_with(39)
+        with self.kernel_directory(mount) as (_, closed), mock.patch.object(Path, "read_text", side_effect=OSError("synthetic private path")):
+            with self.assertRaisesRegex(smoke.Blocked, "^kernel_directory_identity_unconfirmed$"):
+                smoke.local_directory(Path("/tmp"))
+            closed.assert_called_once_with(39)
+
+    def test_duplicate_mount_ids_and_changed_table_refuse_and_close(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        for text in [mount + "1 0 0:0 / /unrelated rw - ext4 synthetic-other rw\n", mount + "2 1 0:0 / /tmp rw - tmpfs synthetic-a rw\n3 2 0:0 / /tmp rw - tmpfs synthetic-b rw\n"]:
+            with self.subTest(table=text), self.kernel_directory(text) as (_, closed):
+                with self.assertRaises(smoke.Blocked):
+                    smoke.local_directory(Path("/tmp"))
+                closed.assert_called_once_with(39)
+        with self.kernel_directory(mount) as (_, closed), mock.patch.object(Path, "read_text", side_effect=[mount, "mnt_id:\t1\n", mount.replace("ext4", "nfs")]):
+            with self.assertRaises(smoke.Blocked):
+                smoke.local_directory(Path("/tmp"))
+            closed.assert_called_once_with(39)
+
+    def test_fd_and_path_identity_and_mount_namespace_are_independent(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        for changes in [[self.metadata(inode=2)], [self.metadata(), self.metadata(device=1)]]:
+            with self.subTest(fd=changes), self.kernel_directory(mount) as (_, closed), mock.patch.object(smoke.os, "fstat", side_effect=changes):
+                with self.assertRaisesRegex(smoke.Blocked, "directory_identity_changed"):
+                    smoke.local_directory(Path("/tmp"))
+                closed.assert_called_once_with(39)
+        with self.kernel_directory(mount) as (_, closed), mock.patch.object(smoke.os, "stat", side_effect=[self.metadata(inode=9), self.metadata(inode=10)]):
+            with self.assertRaisesRegex(smoke.Blocked, "mount_namespace_changed"):
+                smoke.local_directory(Path("/tmp"))
+            closed.assert_called_once_with(39)
+
+    def test_kernel_directory_handle_missing_or_open_failure_never_falls_back(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        with self.kernel_directory(mount) as (opened, closed):
+            flag = smoke.os.O_PATH
+            del smoke.os.O_PATH
+            try:
+                with self.assertRaisesRegex(smoke.Blocked, "kernel_directory_handle_unavailable"):
+                    smoke.local_directory(Path("/tmp"))
+            finally:
+                smoke.os.O_PATH = flag
+            opened.assert_not_called()
+            closed.assert_not_called()
+
+    def test_directory_ancestry_change_refuses_while_fd_held(self):
+        mount = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        with self.kernel_directory(mount) as (_, closed), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry", side_effect=[("synthetic", [("parent", 0, 1)]), ("synthetic", [("parent", 0, 2)])]):
+            with self.assertRaisesRegex(smoke.Blocked, "directory_ancestry_changed"):
+                smoke.local_directory(Path("/tmp"))
+            closed.assert_called_once_with(39)
+        with self.kernel_directory(mount) as (_, closed), mock.patch.object(smoke.os, "open", side_effect=OSError("private replaced path")):
+            with self.assertRaisesRegex(smoke.Blocked, "^kernel_directory_identity_unconfirmed$"):
+                smoke.local_directory(Path("/tmp"))
+            closed.assert_not_called()
+
+    def test_daemon_fingerprint_keeps_mount_namespace_and_filesystem(self):
+        docker = mock.Mock()
+        docker.value.return_value = {"root": str(self.root), "driver": "overlay2", "id": "synthetic-daemon"}
+        info = self.metadata(mode=stat.S_IFDIR | 0o700)
+        with mock.patch.object(smoke, "local_directory", return_value=info), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)):
+            before = smoke.daemon_capacity(docker)
+            self.assertEqual(before["mount_id"], 1)
+            self.assertEqual(before["filesystem"], "ext4")
+            self.assertEqual(before["namespace"], (0, 9))
+            for key, value in [("mount_id", 2), ("filesystem", "btrfs"), ("mount_fingerprint", "changed"), ("namespace", (0, 10))]:
+                old = getattr(info, key)
+                setattr(info, key, value)
+                with self.subTest(key=key), self.assertRaisesRegex(smoke.Blocked, "daemon_identity_changed"):
+                    smoke.daemon_capacity(docker, before)
+                setattr(info, key, old)
 
     def test_fixed_tmp_ignores_caller_production_environment(self):
         info = self.metadata()
         text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
-        with mock.patch.dict(os.environ, {"TMPDIR": "/synthetic-production", "TMP": "/synthetic-production", "TEMP": "/synthetic-production"}), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry") as ancestry, mock.patch.object(Path, "lstat", return_value=info), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+        with self.kernel_directory(text, info=info), mock.patch.dict(os.environ, {"TMPDIR": "/synthetic-production", "TMP": "/synthetic-production", "TEMP": "/synthetic-production"}), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry") as ancestry, mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
             self.assertEqual(smoke.temporary_parent(), Path("/tmp"))
-            ancestry.assert_called_once_with(Path("/tmp"))
+            self.assertEqual(ancestry.call_args_list, [mock.call(Path("/tmp")), mock.call(Path("/tmp"))])
 
     def test_network_and_unknown_tmp_mounts_refuse_before_disk_or_creation(self):
         for kind in ["nfs", "nfs4", "cifs", "9p", "fuse.sshfs", "unknown"]:
             text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n2 1 0:0 / /tmp rw - " + kind + " synthetic-remote rw\n"
-            with self.subTest(kind=kind), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", return_value=self.metadata()), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("no remote statvfs")), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+            with self.subTest(kind=kind), self.kernel_directory(text), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("no remote statvfs")), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
                 with self.assertRaisesRegex(smoke.Blocked, "^nonlocal_or_unknown_filesystem$"):
                     smoke.temporary_parent()
 
     def test_tmp_owner_link_sticky_and_capacity_refusals(self):
         text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
         for info, reason in [(self.metadata(uid=10001), "untrusted_local_directory"), (self.metadata(mode=stat.S_IFLNK | 0o777), "untrusted_local_directory"), (self.metadata(mode=stat.S_IFDIR | 0o755), "temporary_parent_not_root_sticky"), (self.metadata(), "insufficient_temporary_disk")]:
-            with self.subTest(reason=reason), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", return_value=info), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=1)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+            with self.subTest(reason=reason), self.kernel_directory(text, info=info), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=1)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
                 with self.assertRaisesRegex(smoke.Blocked, "^" + reason + "$"):
                     smoke.temporary_parent()
 
     def test_mount_device_ambiguity_and_directory_replacement_refuse(self):
         entries = [
-            ("1 0 0:1 / / rw - ext4 synthetic-root rw\n", [self.metadata()], "directory_mount_identity_changed"),
+            ("2 0 0:0 / / rw - ext4 synthetic-root rw\n", [self.metadata()], "directory_mount_identity_changed"),
             ("1 0 0:0 / / rw - ext4 synthetic-root rw\n2 1 0:0 / /tmp rw - tmpfs synthetic-a rw\n3 2 0:0 / /tmp rw - tmpfs synthetic-b rw\n", [self.metadata()], "nonlocal_or_unknown_filesystem"),
             ("1 0 0:0 / / rw - ext4 synthetic-root rw\n", [self.metadata(), self.metadata(inode=2)], "directory_identity_changed"),
         ]
         for text, infos, reason in entries:
-            with self.subTest(reason=reason), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", side_effect=infos), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("not proved")):
+            with self.subTest(reason=reason), self.kernel_directory(text), mock.patch.object(Path, "lstat", side_effect=infos), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("not proved")):
                 with self.assertRaisesRegex(smoke.Blocked, "^" + reason + "$"):
                     smoke.temporary_parent()
 

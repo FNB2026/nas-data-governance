@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit disposable host test only; default is a side-effect-free protocol."""
 import argparse
+from dataclasses import dataclass
 import fcntl
 import gzip
 import hashlib
@@ -89,29 +90,74 @@ def operator_handoff(fd, phase, root, nonce, *, result=None, receipt_sha=None, i
     return common
 
 
-def local_directory(path):
-    """Metadata-only mount/ancestry check; no host directory enumeration."""
-    path = Path(path)
-    require(path.is_absolute(), "untrusted_local_directory")
-    evidence.boundary.trusted_ancestry(path)
-    before = path.lstat()
-    require(stat.S_ISDIR(before.st_mode) and before.st_uid == 0, "untrusted_local_directory")
-    text = Path("/proc/self/mountinfo").read_text()
+@dataclass(frozen=True)
+class DirectoryWitness:
+    st_dev: int
+    st_ino: int
+    st_mode: int
+    st_uid: int
+    mount_id: int
+    filesystem: str
+    mount_fingerprint: str
+    namespace: tuple
+
+
+def directory_identity(info):
+    return info.st_dev, info.st_ino, info.st_mode, info.st_uid
+
+
+def closest_mount(path, text):
     require(len(text) <= 4 * 1024 * 1024, "mount_table_unconfirmed")
     evidence.boundary.linux_mountpoints(text)  # Validate kernel escape/layout.
     covering = []
+    ids = set()
     for line in text.splitlines():
         fields = line.split()
+        require(fields[0].isdigit() and int(fields[0]) > 0 and int(fields[0]) not in ids, "mount_table_unconfirmed")
+        ids.add(int(fields[0]))
         point = Path(re.sub(r"\\([0-7]{3})", lambda item: chr(int(item[1], 8)), fields[4]))
         if path == point or point in path.parents:
-            covering.append((len(point.parts), fields[2], fields[fields.index("-") + 1]))
+            covering.append((len(point.parts), int(fields[0]), fields[fields.index("-") + 1], digest(line.encode())))
     require(bool(covering), "mount_table_unconfirmed")
     nearest = [item for item in covering if item[0] == max(value[0] for value in covering)]
     require(len(nearest) == 1 and nearest[0][2] in LOCAL_FILESYSTEMS, "nonlocal_or_unknown_filesystem")
-    require(nearest[0][1] == str(os.major(before.st_dev)) + ":" + str(os.minor(before.st_dev)), "directory_mount_identity_changed")
-    after = path.lstat()
-    require((after.st_dev, after.st_ino, after.st_mode, after.st_uid) == (before.st_dev, before.st_ino, before.st_mode, before.st_uid), "directory_identity_changed")
-    return before
+    return nearest[0][1:]
+
+
+def local_directory(path):
+    """Pin a metadata-only directory FD and prove its kernel mount identity.
+
+    proc fdinfo mnt_id maps directly to proc mountinfo mount ID. Btrfs
+    subvolume stat devices need not equal the mountinfo major:minor field.
+    """
+    path = Path(path)
+    require(path.is_absolute(), "untrusted_local_directory")
+    ancestry = evidence.boundary.trusted_ancestry(path)
+    before = path.lstat()
+    require(stat.S_ISDIR(before.st_mode) and before.st_uid == 0, "untrusted_local_directory")
+    require(hasattr(os, "O_PATH"), "kernel_directory_handle_unavailable")
+    fd = None
+    try:
+        namespace = os.stat("/proc/self/ns/mnt")
+        namespace_id = namespace.st_dev, namespace.st_ino
+        fd = os.open(path, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        require(directory_identity(os.fstat(fd)) == directory_identity(before), "directory_identity_changed")
+        mount = closest_mount(path, Path("/proc/self/mountinfo").read_text())
+        fdinfo = Path("/proc/self/fdinfo/" + str(fd)).read_text()
+        require(len(fdinfo) <= 16384, "kernel_mount_id_unconfirmed")
+        ids = re.findall(r"^mnt_id:[ \t]+([0-9]+)[ \t]*$", fdinfo, re.MULTILINE)
+        require(len(ids) == 1 and int(ids[0]) == mount[0], "directory_mount_identity_changed")
+        require(closest_mount(path, Path("/proc/self/mountinfo").read_text()) == mount, "directory_mount_identity_changed")
+        require(directory_identity(os.fstat(fd)) == directory_identity(before) and directory_identity(path.lstat()) == directory_identity(before), "directory_identity_changed")
+        require(evidence.boundary.trusted_ancestry(path) == ancestry, "directory_ancestry_changed")
+        namespace = os.stat("/proc/self/ns/mnt")
+        require((namespace.st_dev, namespace.st_ino) == namespace_id, "mount_namespace_changed")
+        return DirectoryWitness(*directory_identity(before), *mount, namespace_id)
+    except OSError:
+        raise Blocked("kernel_directory_identity_unconfirmed") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def temporary_parent():
@@ -131,7 +177,8 @@ def daemon_capacity(docker, expected=None):
     path = Path(info["root"]).resolve(strict=True)
     witness = local_directory(path)
     require(not witness.st_mode & 0o022, "daemon_directory_writable_by_other")
-    capacity = {"root": str(path), "driver": info["driver"], "id": info["id"], "device": witness.st_dev, "inode": witness.st_ino}
+    capacity = {"root": str(path), "driver": info["driver"], "id": info["id"], "device": witness.st_dev, "inode": witness.st_ino,
+                "mount_id": witness.mount_id, "filesystem": witness.filesystem, "mount_fingerprint": witness.mount_fingerprint, "namespace": witness.namespace}
     require(expected is None or capacity == expected, "daemon_identity_changed")
     require(shutil.disk_usage(path).free >= 1024 * 1024 * 1024, "insufficient_daemon_disk")
     return capacity
