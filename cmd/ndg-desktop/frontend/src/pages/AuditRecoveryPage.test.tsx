@@ -275,7 +275,7 @@ describe("AuditRecoveryPage summary & guidance", () => {
     const { container } = render(<AuditRecoveryPage />);
 
     const grid = await screen.findByLabelText("审计与恢复概览");
-    expect(grid).toHaveTextContent("6");
+    await waitFor(() => expect(grid).toHaveTextContent("6"));
     expect(grid).toHaveTextContent("4");
     expect(grid).toHaveTextContent("2");
     expect(grid).toHaveTextContent("3");

@@ -130,6 +130,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isReadWrite, setIsReadWrite] = useState(false);
+  const [backendCapabilities, setBackendCapabilities] = useState<wails.AppCapabilitiesDTO | null>(null);
+  const [capabilityRevision, setCapabilityRevision] = useState(0);
 
   // Storages
   const [storages, setStorages] = useState<wails.StorageInfo[]>([]);
@@ -465,7 +467,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       // Recovery cannot authorize new writes without a fresh lock result.
       setRecoveryLockActive(true);
       return null;
-    }
+    } finally { setCapabilityRevision((value) => value + 1); }
   }, []);
 
   // Shared post-open wiring: bump rev, set project state, check recovery
@@ -478,6 +480,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     // Bump project revision to invalidate any in-flight poll from a
     // previous project session.
     projectRevRef.current++;
+    setBackendCapabilities(null);
     setProject(info);
     setProjectPath(info.path);
     setIsReadWrite(readWrite);
@@ -492,7 +495,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         pushToast("warning", "恢复锁激活", `检测到 ${status.executing_count} 个未完成执行计划`);
       }
     } catch {
-      setRecoveryLockActive(false);
+      // A missing lock result cannot establish a safe write state.
+      setRecoveryLockActive(true);
     }
 
     const loads: Promise<void>[] = [loadStorages(), loadRecentProjects()];
@@ -683,10 +687,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     // Polling will detect CANCELLED state and reset cancelling.
   }, [activeJobId, pushToast]);
 
+  // Authoritative channel/record/approval policy is read-only and can only
+  // restrict local UI capability. Unknown or late responses never grant writes.
+  useEffect(() => {
+    let current = true;
+    const revision = projectRevRef.current;
+    setBackendCapabilities(null);
+    if (project) {
+      void Promise.resolve().then(() => api.capabilities.get()).then((value) => {
+        if (current && revision === projectRevRef.current) setBackendCapabilities(value);
+      }).catch(() => {
+        if (current && revision === projectRevRef.current) setBackendCapabilities(null);
+      });
+    }
+    return () => { current = false; };
+  }, [project?.path, dataRevision, capabilityRevision]);
+
   // ---- Derived values ----
 
   const projectOpen = project !== null;
-  const capabilities = deriveCapabilities({ projectOpen, isReadWrite, recoveryLockActive });
+  const capabilities = deriveCapabilities({ projectOpen, isReadWrite, recoveryLockActive, backend: backendCapabilities });
 
   // Scan progress percent (kept as-is; Phase 2 will fix DISCOVERING phase)
   // Exported via context for pages that need it.
