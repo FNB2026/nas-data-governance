@@ -66,6 +66,8 @@ export function ListAllPlans():Promise<Array<wails.PlanDTO>>;
 
 export function ListDuplicateGroups(arg1:wails.ListGroupsRequest):Promise<wails.ListGroupsResponse>;
 
+export function ListGovernanceBatches(arg1:domain.GovernanceBatchQuery):Promise<domain.GovernanceBatchPage>;
+
 export function ListGovernanceGroups(arg1:domain.GovernanceQuery):Promise<domain.GovernancePage>;
 
 export function ListGroupDecisions(arg1:string):Promise<Array<wails.GroupDecisionDTO>>;

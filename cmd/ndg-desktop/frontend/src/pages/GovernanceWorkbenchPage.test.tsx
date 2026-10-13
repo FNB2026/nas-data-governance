@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { BatchResult, GovernanceQuery, PreviewRequest, ReviewGroup } from "../lib/governance";
 
 const { bridge, context, oldApi } = vi.hoisted(() => ({
-  bridge: { available: vi.fn(), capabilities: vi.fn(), list: vi.fn(), preview: vi.fn(), commit: vi.fn(), result: vi.fn() },
+  bridge: { available: vi.fn(), capabilities: vi.fn(), list: vi.fn(), preview: vi.fn(), commit: vi.fn(), result: vi.fn(), historyAvailable: vi.fn() },
   context: {} as Record<string, unknown>,
   oldApi: { duplicates: { getDetail: vi.fn(), listGroups: vi.fn() } },
 }));
@@ -32,6 +32,7 @@ beforeEach(() => {
     dataRevision: 0, pathPrivacyMode: false, displayPath: (path: string) => context.pathPrivacyMode ? maskPath(path) : path,
     storages: [{ id: "synthetic-source" }], activeJobId: null, connectionStatus: "connected" });
   bridge.available.mockReset().mockReturnValue(true);
+  bridge.historyAvailable.mockReset().mockReturnValue(false);
   bridge.capabilities.mockReset().mockResolvedValue({ can_record_decisions: true, can_preview: true, recovery_lock_active: false,
     scan_active: false, max_batch_size: 100, reason_codes: [], project_scope: "project-a" });
   bridge.list.mockReset().mockImplementation(async (query: GovernanceQuery) => ({ items: query.page === 1 ? groups.slice(0, 2) : groups.slice(2), total_count: 3, page: query.page, page_size: 2, unavailable_filters: ["risk"] }));

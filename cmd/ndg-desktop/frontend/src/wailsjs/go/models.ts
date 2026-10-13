@@ -207,6 +207,78 @@ export namespace domain {
 	    }
 	}
 
+	export class GovernanceBatchSummary {
+	    batch_id: string;
+	    status: string;
+	    requested_count: number;
+	    recorded_count: number;
+	    created_at: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceBatchSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.batch_id = source["batch_id"];
+	        this.status = source["status"];
+	        this.requested_count = source["requested_count"];
+	        this.recorded_count = source["recorded_count"];
+	        this.created_at = source["created_at"];
+	    }
+	}
+	export class GovernanceBatchPage {
+	    project_scope: string;
+	    items: GovernanceBatchSummary[];
+	    total_count: number;
+	    page: number;
+	    page_size: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceBatchPage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project_scope = source["project_scope"];
+	        this.items = this.convertValues(source["items"], GovernanceBatchSummary);
+	        this.total_count = source["total_count"];
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GovernanceBatchQuery {
+	    page: number;
+	    page_size: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GovernanceBatchQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	    }
+	}
 	export class GovernanceOutcome {
 	    group_id: string;
 	    status: string;
@@ -287,6 +359,7 @@ export namespace domain {
 		    return a;
 		}
 	}
+
 	export class GovernanceCapabilities {
 	    can_record_decisions: boolean;
 	    can_preview: boolean;
