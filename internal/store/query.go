@@ -375,7 +375,8 @@ SELECT COUNT(*) FROM (
 
 // batchGroupDecisions loads the latest decision type for each group_id.
 // Returns a map of group_id -> decision_type. When multiple decisions
-// exist for the same group, the one with the most recent updated_at wins.
+// exist for the same group, the one with the most recent parsed timestamp
+// wins; ID DESC provides a stable tie-breaker for equal instants.
 func (s *SQLiteStore) batchGroupDecisions(ctx context.Context, groupIDs []string) (map[string]string, error) {
 	if len(groupIDs) == 0 {
 		return nil, nil
@@ -389,7 +390,7 @@ func (s *SQLiteStore) batchGroupDecisions(ctx context.Context, groupIDs []string
 	q := fmt.Sprintf(`
 SELECT group_id, decision_type FROM group_decisions
 WHERE group_id IN (%s)
-ORDER BY group_id, updated_at DESC`, strings.Join(placeholders, ","))
+ORDER BY group_id, `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC`, strings.Join(placeholders, ","))
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {

@@ -107,6 +107,7 @@
 
 ## Unreleased
 
+- 治理复核决策按解析后的 UTC RFC3339Nano 时间排序，避免小数秒精度差异导致“较旧决策排在最新之前”；读取只生成排序键，不改写历史时间值，并对无效时间戳 fail closed。
 - 开源前安全收口：非 dry-run `execute` 强制要求 SQLite `--db`，Journal 初始化或动作完成记录失败即停止并回滚；核心索引、计划、审计和 SQLite 产物统一为目录 `0700`、文件 `0600`，并收紧既有宽权限文件。
 - 源根目录和隔离根目录必须是互不重叠的真实目录且不能是符号链接；根目录自身也纳入执行前符号链接检查。
 - Go module 统一为 `github.com/FNB2026/nas-data-governance`；构建写入版本、提交和构建时间，增加 `version` 子命令及 macOS/Linux 兼容的 SHA-256 发布校验。

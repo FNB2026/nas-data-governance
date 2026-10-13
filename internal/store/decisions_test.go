@@ -2,11 +2,160 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
+
+func insertTimestampedDecision(t *testing.T, st *SQLiteStore, id, groupID, updatedAt string) {
+	t.Helper()
+	_, err := st.db.Exec(`INSERT INTO group_decisions
+		(id, group_id, decision_type, reason, rule_id, created_at, updated_at)
+		VALUES(?, ?, ?, '', '', ?, ?)`, id, groupID, string(domain.DecisionKeepAll), updatedAt, updatedAt)
+	if err != nil {
+		t.Fatalf("insert timestamped decision: %v", err)
+	}
+}
+
+func TestGroupDecisionOrderingUsesChronologicalRFC3339Nano(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	rows := []struct {
+		id, group, updatedAt string
+	}{
+		{"whole-second", "g-whole", "2026-10-13T00:00:00Z"},
+		{"one-digit-fraction", "g-one", "2026-10-13T00:00:00.1Z"},
+		{"five-digit-fraction", "g-five", "2026-10-13T00:00:00.12345Z"},
+		{"nine-digit-fraction", "g-nine", "2026-10-13T00:00:00.123450001Z"},
+		{"offset-equivalent-z", "g-offset-z", "2026-10-13T00:00:00.000000001Z"},
+		{"offset-equivalent-plus-one", "g-offset-plus", "2026-10-13T01:00:00.000000001+01:00"},
+	}
+	for _, row := range rows {
+		insertTimestampedDecision(t, st, row.id, row.group, row.updatedAt)
+	}
+
+	got, err := st.ListGroupDecisions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListGroupDecisions: %v", err)
+	}
+	want := []string{"nine-digit-fraction", "five-digit-fraction", "one-digit-fraction", "offset-equivalent-z", "offset-equivalent-plus-one", "whole-second"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d decisions, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].ID != want[i] {
+			t.Errorf("ListGroupDecisions[%d] = %q, want %q", i, got[i].ID, want[i])
+		}
+	}
+
+	// Equivalent instants must use a stable secondary key rather than SQLite
+	// row order, which can change with query plans or indexes.
+	insertTimestampedDecision(t, st, "tie-a", "g-tie-a", "2026-10-13T00:00:02.123456789Z")
+	insertTimestampedDecision(t, st, "tie-z", "g-tie-z", "2026-10-13T01:00:02.123456789+01:00")
+	got, err = st.ListGroupDecisions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListGroupDecisions with equal instants: %v", err)
+	}
+	if got[0].ID != "tie-z" || got[1].ID != "tie-a" {
+		t.Fatalf("equal-instant decisions ordered as %q, %q; want stable ID DESC", got[0].ID, got[1].ID)
+	}
+}
+
+func TestGetGroupDecisionOrderingUsesChronologicalRFC3339Nano(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	insertTimestampedDecision(t, st, "earlier-lexically-later", "g-get", "2026-10-13T00:00:00.12345Z")
+	insertTimestampedDecision(t, st, "later", "g-get", "2026-10-13T00:00:00.123450001Z")
+
+	got, err := st.GetGroupDecision(ctx, "g-get")
+	if err != nil {
+		t.Fatalf("GetGroupDecision: %v", err)
+	}
+	if got.ID != "later" {
+		t.Fatalf("GetGroupDecision returned %q, want later timestamp row", got.ID)
+	}
+}
+
+func TestGroupDecisionOrderingNormalizesOffsetAcrossDateBoundary(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	insertTimestampedDecision(t, st, "later-utc", "g-later-utc", "2026-10-12T23:30:00Z")
+	insertTimestampedDecision(t, st, "later-local-clock", "g-earlier-utc", "2026-10-13T00:00:00+01:00")
+
+	got, err := st.ListGroupDecisions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListGroupDecisions: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "later-utc" || got[1].ID != "later-local-clock" {
+		t.Fatalf("offset-normalized ordering = %#v, want later-utc before later-local-clock", got)
+	}
+}
+
+func TestGroupDecisionTimestampOrderingRejectsInvalidWithoutEchoingValue(t *testing.T) {
+	st := newTestStore(t)
+	const privateMarker = "private-timestamp-marker"
+	insertTimestampedDecision(t, st, "invalid", "g-invalid", privateMarker)
+
+	_, err := st.ListGroupDecisions(context.Background(), "")
+	if err == nil {
+		t.Fatal("ListGroupDecisions unexpectedly accepted an invalid timestamp")
+	}
+	if strings.Contains(err.Error(), privateMarker) {
+		t.Fatal("timestamp parse failure echoed the stored value")
+	}
+	if !strings.Contains(err.Error(), "invalid decision timestamp") {
+		t.Fatalf("error does not contain the fixed classification: %v", err)
+	}
+}
+
+func TestGroupDecisionOrderingReadOnlyDoesNotMutateDatabaseBytes(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "decisions.db")
+	writable, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	insertTimestampedDecision(t, writable, "a", "g-a", "2026-10-13T00:00:00.12345Z")
+	insertTimestampedDecision(t, writable, "b", "g-b", "2026-10-13T00:00:00.123450001Z")
+	if err := writable.Close(); err != nil {
+		t.Fatalf("close writable store: %v", err)
+	}
+	before, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("read database before read-only queries: %v", err)
+	}
+	beforeHash := sha256.Sum256(before)
+
+	readOnly, err := OpenReadOnly(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	got, err := readOnly.ListGroupDecisions(ctx, "")
+	if err != nil {
+		t.Fatalf("read-only ListGroupDecisions: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "b" {
+		t.Fatalf("read-only ordering = %#v, want b before a", got)
+	}
+	if _, err := readOnly.GetGroupDecision(ctx, "g-a"); err != nil {
+		t.Fatalf("read-only GetGroupDecision: %v", err)
+	}
+	if err := readOnly.Close(); err != nil {
+		t.Fatalf("close read-only store: %v", err)
+	}
+	after, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("read database after read-only queries: %v", err)
+	}
+	if afterHash := sha256.Sum256(after); afterHash != beforeHash {
+		t.Fatal("read-only decision ordering changed database bytes")
+	}
+}
 
 func TestSaveAndGetGroupDecision(t *testing.T) {
 	st := newTestStore(t)
