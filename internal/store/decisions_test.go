@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/query"
 )
 
 func insertTimestampedDecision(t *testing.T, st *SQLiteStore, id, groupID, updatedAt string) {
@@ -110,6 +111,70 @@ func TestGroupDecisionTimestampOrderingRejectsInvalidWithoutEchoingValue(t *test
 	}
 	if !strings.Contains(err.Error(), "invalid decision timestamp") {
 		t.Fatalf("error does not contain the fixed classification: %v", err)
+	}
+}
+
+func TestDecisionTimestampOrderRejectsInvalidOffsetsAndUTCYearOverflow(t *testing.T) {
+	invalidValues := []string{
+		"2026-10-13T00:00:00+24:00",
+		"2026-10-13T00:00:00+23:60",
+		"9999-12-31T23:30:00-01:00",
+		"0000-01-01T00:30:00+01:00",
+	}
+	for _, value := range invalidValues {
+		t.Run(value, func(t *testing.T) {
+			for _, operation := range []string{"get", "list", "summary"} {
+				t.Run(operation, func(t *testing.T) {
+					st := newTestStore(t)
+					insertTimestampedDecision(t, st, "valid", "g-boundary", "2026-10-13T00:00:00Z")
+					insertTimestampedDecision(t, st, "invalid", "g-boundary", value)
+
+					var err error
+					switch operation {
+					case "get":
+						_, err = st.GetGroupDecision(context.Background(), "g-boundary")
+					case "list":
+						_, err = st.ListGroupDecisions(context.Background(), "")
+					case "summary":
+						seedStorage(t, st, "s1")
+						seedFile(t, st, "s1", "/vol/a.txt", 100, "hash-boundary")
+						seedFile(t, st, "s1", "/vol/b.txt", 100, "hash-boundary")
+						page, listErr := st.ListDuplicateGroups(context.Background(), query.GroupQuery{PageSize: 20})
+						if listErr != nil {
+							t.Fatalf("list duplicate groups: %v", listErr)
+						}
+						if len(page.Groups) != 1 {
+							t.Fatalf("got %d groups, want 1", len(page.Groups))
+						}
+						insertTimestampedDecision(t, st, "summary-valid", page.Groups[0].GroupID, "2026-10-13T00:00:00Z")
+						insertTimestampedDecision(t, st, "summary-invalid", page.Groups[0].GroupID, value)
+						_, err = st.ListDuplicateGroups(context.Background(), query.GroupQuery{PageSize: 20})
+					}
+					if err == nil {
+						t.Fatalf("%s accepted invalid timestamp", operation)
+					}
+					if strings.Contains(err.Error(), value) {
+						t.Fatal("timestamp error echoed stored value")
+					}
+					if !strings.Contains(err.Error(), "invalid decision timestamp") {
+						t.Fatalf("error lacks fixed classification: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDecisionTimestampOrderAcceptsTrailingZeroFractionAndOffset(t *testing.T) {
+	st := newTestStore(t)
+	insertTimestampedDecision(t, st, "before", "g-valid", "2026-10-13T00:00:00.123449999Z")
+	insertTimestampedDecision(t, st, "after", "g-valid", "2026-10-13T01:00:00.123450000+01:00")
+	got, err := st.GetGroupDecision(context.Background(), "g-valid")
+	if err != nil {
+		t.Fatalf("GetGroupDecision rejected valid trailing-zero fraction: %v", err)
+	}
+	if got.ID != "after" {
+		t.Fatalf("GetGroupDecision = %q, want after", got.ID)
 	}
 }
 
