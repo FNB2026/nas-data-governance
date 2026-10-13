@@ -147,6 +147,27 @@ describe("governance workbench selection and records-only flow", () => {
     expect(bridge.commit).toHaveBeenCalledTimes(1);
     expect(bridge.result).toHaveBeenCalledWith("key:" + bridge.commit.mock.calls[0][1]);
   });
+  it("does not duplicate an in-flight mutation after route remount", async () => {
+    const pending = deferred<BatchResult>(); bridge.commit.mockReturnValue(pending.promise);
+    const first = render(<GovernanceWorkbenchPage />); await chooseFirst(); await preview();
+    fireEvent.click(screen.getByRole("button", { name: "保存决定（未批准、未执行）" }));
+    first.unmount(); render(<GovernanceWorkbenchPage />);
+    const retry = await screen.findByRole("button", { name: "重试相同请求" });
+    expect(retry).toBeDisabled(); fireEvent.click(retry);
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+    pending.resolve(result(["g1"]));
+    bridge.result.mockResolvedValue(result(["g1"]));
+    fireEvent.click(screen.getByRole("button", { name: "查询已提交批次回执" }));
+    await screen.findByText("逐组回执：已核对终态");
+    expect(bridge.commit).toHaveBeenCalledTimes(1);
+  });
+  it("shows the exact escaped note in confirmation before committing", async () => {
+    render(<GovernanceWorkbenchPage />); await chooseFirst();
+    fireEvent.change(screen.getByLabelText("备注（可选，不写入普通日志）"), { target: { value: "核对 <synthetic> 用途" } });
+    await preview();
+    expect(screen.getByRole("dialog")).toHaveTextContent("将记录的备注：核对 <synthetic> 用途");
+    expect(document.querySelector("synthetic")).toBeNull();
+  });
   it("prevents double clicks from submitting two mutations", async () => {
     const pending = deferred<BatchResult>(); bridge.commit.mockReturnValue(pending.promise);
     render(<GovernanceWorkbenchPage />); await chooseFirst(); await preview();

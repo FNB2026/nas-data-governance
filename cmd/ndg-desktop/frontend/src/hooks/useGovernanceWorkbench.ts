@@ -18,6 +18,7 @@ const CLOSED_CAPS: GovernanceCapabilities = {
 type Submission = { token: string; key: string; ids: string[]; scope: string; batchId?: string };
 // Session-only reconciliation survives route unmounts. No paths, notes or
 // selection payloads enter localStorage, URLs or ordinary logs.
+const inFlightMutations = new Set<string>();
 const unresolved = new Map<string, { sent: Submission; preview: ReviewPreview; selection: Map<string, SelectedReview> }>();
 
 export function useGovernanceWorkbench() {
@@ -157,7 +158,7 @@ export function useGovernanceWorkbench() {
     finally { if (epoch === projectEpoch.current) { activeOperation.current = false; setOperation(null); } }
   };
 
-  const canRecord = boundProject.current === projectKey && context.isReadWrite && context.capabilities.can_edit_reviews &&
+  const canRecord = !inFlightMutations.has(projectKey) && boundProject.current === projectKey && context.isReadWrite && context.capabilities.can_edit_reviews &&
     !context.capabilities.recovery_lock_active && !context.activeJobId && caps.can_record_decisions && !caps.recovery_lock_active && !caps.scan_active;
 
   const acceptReceipt = async (value: BatchResult, sent: NonNullable<typeof submission.current>, ticket: number, epoch: number) => {
@@ -178,7 +179,7 @@ export function useGovernanceWorkbench() {
   };
 
   const commit = async () => {
-    if (!canRecord || !preview?.preview_token || activeOperation.current) return;
+    if (!canRecord || !preview?.preview_token || activeOperation.current || inFlightMutations.has(projectKey)) return;
     if (!submission.current) {
       const bytes = crypto.getRandomValues(new Uint8Array(16));
       const key = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -188,14 +189,14 @@ export function useGovernanceWorkbench() {
     const sent = submission.current;
     const ticket = generation.current;
     const epoch = projectEpoch.current;
-    activeOperation.current = true; setOperation("commit"); setError(null);
+    activeOperation.current = true; inFlightMutations.add(projectKey); setOperation("commit"); setError(null);
     try {
       const value = await governanceApi.commit(sent.token, sent.key);
       if (epoch !== projectEpoch.current || boundProject.current !== projectKey) return;
       if (value.project_scope !== sent.scope || !validBatchResult(value, sent.ids)) throw new Error("UNAVAILABLE");
       await acceptReceipt(value, sent, ticket, epoch);
     } catch { if (epoch === projectEpoch.current) setError("响应未能确认。已提交的决定可能已持久化；请使用“重试相同请求”核对，不要重复创建批次。"); }
-    finally { if (epoch === projectEpoch.current) { activeOperation.current = false; setOperation(null); } }
+    finally { inFlightMutations.delete(projectKey); if (epoch === projectEpoch.current) { activeOperation.current = false; setOperation(null); } }
   };
 
   const queryReceipt = async () => {

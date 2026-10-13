@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { decisionLabel, reasonLabel, type DecisionKind, type ReviewPreview, type SelectedReview } from "../lib/governance";
 
-export default function GovernancePreview({ preview, selection, kind, canRecord, busy, ambiguous, onClose, onCommit, canQueryReceipt, onQueryReceipt }: {
+export default function GovernancePreview({ preview, selection, kind, canRecord, busy, ambiguous, onClose, onCommit, canQueryReceipt, onQueryReceipt, note }: {
   preview: ReviewPreview; selection: Map<string, SelectedReview>; kind: DecisionKind;
-  canRecord: boolean; busy: boolean; ambiguous: boolean; canQueryReceipt: boolean; onQueryReceipt: () => void; onClose: () => void; onCommit: () => void;
+  note: string | null; canRecord: boolean; busy: boolean; ambiguous: boolean; canQueryReceipt: boolean; onQueryReceipt: () => void; onClose: () => void; onCommit: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
@@ -33,6 +33,7 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
   return <div className="gov-modal-backdrop"><div ref={container} className="gov-modal card" role="dialog" aria-modal="true" aria-labelledby="gov-preview-title" onKeyDown={keyboard}>
     <h3 id="gov-preview-title" ref={title} tabIndex={-1}>确认要记录的决定</h3>
     <p><strong>{decisionLabel(kind)}</strong> · 显式选择 {preview.items.length} 组；可记录 {eligible} 组，其余需核对。</p>
+    {note === null ? <p className="muted">隐私模式隐藏备注；不会在此展示私人内容。</p> : note && <p className="gov-path">将记录的备注：{note}</p>}
     <p className="gov-records-notice">仅更新治理数据库与审计：不会删除、移动或修改源文件。保存后仍未批准、未执行。</p>
     <p className="muted">保护、恢复锁和平台限制不会因这个预览被解除。部分冲突会逐项反馈。</p>
     <ol className="gov-preview-items">{preview.items.map((item, index) => <li key={item.group_id}>
