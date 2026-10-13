@@ -100,7 +100,7 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 		`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
 		 FROM group_decisions
 		 WHERE group_id = ?
-		 ORDER BY updated_at DESC
+		 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC
 		 LIMIT 1`, groupID).Scan(
 		&id, &scannedGroupID, &decisionType, &retainedFileID, &reason, &ruleID,
 		&createdAt, &updatedAt)
@@ -122,13 +122,20 @@ func (s *SQLiteStore) GetGroupDecision(ctx context.Context, groupID string) (dom
 		v := retainedFileID.Int64
 		d.RetainedFileID = &v
 	}
-	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision created_at: %w", err)
+	}
+	d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+	if err != nil {
+		return domain.GroupDecision{}, fmt.Errorf("store: GetGroupDecision updated_at: %w", err)
+	}
 	return d, nil
 }
 
 // ListGroupDecisions returns review decisions, optionally filtered by type.
-// Results are ordered by updated_at DESC (most recent first).
+// Results are ordered by parsed chronological updated_at DESC (most recent
+// first), with ID as a stable tie-breaker for equal instants.
 func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domain.ReviewDecisionType) ([]domain.GroupDecision, error) {
 	var (
 		rows *sql.Rows
@@ -139,12 +146,12 @@ func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domai
 			`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
 			 FROM group_decisions
 			 WHERE decision_type = ?
-			 ORDER BY updated_at DESC`, string(decisionType))
+			 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC`, string(decisionType))
 	} else {
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT id, group_id, decision_type, retained_file_id, reason, rule_id, created_at, updated_at
 			 FROM group_decisions
-			 ORDER BY updated_at DESC`)
+			 ORDER BY `+decisionTimestampOrderFunction+`(updated_at) DESC, id DESC`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: ListGroupDecisions: %w", err)
@@ -172,8 +179,14 @@ func (s *SQLiteStore) ListGroupDecisions(ctx context.Context, decisionType domai
 			v := retainedFileID.Int64
 			d.RetainedFileID = &v
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		d.CreatedAt, err = parseDecisionTimestamp(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions created_at: %w", err)
+		}
+		d.UpdatedAt, err = parseDecisionTimestamp(updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListGroupDecisions updated_at: %w", err)
+		}
 		result = append(result, d)
 	}
 	return result, rows.Err()
