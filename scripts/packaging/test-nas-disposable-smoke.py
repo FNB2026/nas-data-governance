@@ -6,13 +6,16 @@ import hashlib
 import importlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import stat
 import tarfile
 import tempfile
 import unittest
 import urllib.error
+from types import SimpleNamespace
 from unittest import mock
 
 sys.dont_write_bytecode = True
@@ -53,6 +56,8 @@ class SmokeChecks(unittest.TestCase):
         self.resources = smoke.Resources(self.docker, self.nonce, self.image, self.root)
         container = self.docker.values[("container", self.docker.container)][0]
         container["HostConfig"] = {"NetworkMode": self.docker.network, "ReadonlyRootfs": True, "Privileged": False, "Memory": 384 * 1024 * 1024, "NanoCpus": 1_000_000_000, "PidsLimit": 128, "CapDrop": ["ALL"]}
+        container["Config"]["User"] = "10001:10001"
+        container["HostConfig"].update(SecurityOpt=["no-new-privileges"], Tmpfs={"/tmp": "rw,nosuid,nodev,noexec,size=64m"})
         container["Mounts"] = [{"Type": "bind", "Source": str(self.root / name), "Destination": target, "RW": rw} for name, target, rw in [("source", "/sources/source_a", False), ("config", "/config", False), ("state", "/data", True)]]
 
     def synthetic_bundle(self):
@@ -68,6 +73,68 @@ class SmokeChecks(unittest.TestCase):
         with mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("Docker forbidden")), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("write forbidden")), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(smoke.main(["--bundle", "/synthetic-does-not-exist"]), 0)
         self.assertEqual(output.getvalue(), "nas-smoke: protocol_only_no_docker_no_files_no_credentials\n")
+
+    def test_operator_pipe_only_accepts_inherited_writable_fifo(self):
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        self.addCleanup(os.close, write)
+        self.assertEqual(smoke.operator_pipe(write), write)
+        for fd in [0, 1, 2, read, 999999]:
+            with self.subTest(fd=fd), self.assertRaisesRegex(smoke.Blocked, "invalid_operator_pipe"):
+                smoke.operator_pipe(fd)
+        with (self.root / "regular").open("wb") as regular:
+            with self.assertRaisesRegex(smoke.Blocked, "invalid_operator_pipe"):
+                smoke.operator_pipe(regular.fileno())
+        with mock.patch.object(smoke.os, "write", side_effect=AssertionError("default must ignore fd")), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(smoke.main(["--operator-receipt-fd", "999999"]), 0)
+
+    def test_operator_handoff_atomic_stable_private_identity(self):
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        self.addCleanup(os.close, write)
+        original = os.write
+        with mock.patch.object(smoke.os, "write", wraps=original) as calls:
+            identity = smoke.operator_handoff(write, "initial", self.root, self.nonce)
+            result = {"status": "PASS", "test_status": "PASS"}
+            smoke.operator_handoff(write, "final", self.root, self.nonce, result=result, receipt_sha="c" * 64, identity=identity)
+            self.assertEqual(calls.call_count, 2)
+            self.assertTrue(all(len(call.args[1]) <= 4096 for call in calls.call_args_list))
+        initial, final = [json.loads(line) for line in os.read(read, 8192).splitlines()]
+        self.assertEqual(initial["phase"], "initial")
+        self.assertEqual(final["phase"], "final")
+        self.assertEqual(initial["pid"], os.getpid())
+        for key in ["pid", "root", "device", "inode", "nonce"]:
+            self.assertEqual(initial[key], final[key])
+        self.assertEqual(final["receipt_sha256"], "c" * 64)
+        with self.assertRaisesRegex(smoke.Blocked, "handoff_fixture_identity_changed"):
+            smoke.operator_handoff(write, "final", self.root, self.nonce, result=result, identity=dict(identity, inode=-1))
+
+    def test_operator_preflight_rejection_has_no_fixture_or_private_stdout(self):
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        self.addCleanup(os.close, write)
+        with mock.patch.object(smoke.platform, "system", return_value="Synthetic"), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("fixture forbidden")), mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("daemon forbidden")), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(smoke.main(["--execute-disposable", "--operator-receipt-fd", str(write)]), 1)
+        final = json.loads(os.read(read, 4096))
+        self.assertEqual(final["phase"], "final")
+        self.assertIsNone(final["root"])
+        self.assertIsNone(final["receipt_sha256"])
+        self.assertEqual(final["status"], "BLOCKED")
+        self.assertNotIn(str(self.root), output.getvalue())
+        with mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("fixture forbidden")), mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("daemon forbidden")), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(smoke.main(["--execute-disposable", "--operator-receipt-fd", str(read)]), 1)
+        self.assertIn("invalid_operator_pipe", output.getvalue())
+
+    def test_operator_handoff_failure_blocks_before_any_daemon_mutation(self):
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        self.addCleanup(os.close, write)
+        docker = mock.Mock()
+        docker.call.return_value = subprocess.CompletedProcess([], 0, b"unix:///var/run/docker.sock", b"")
+        docker.inventory.return_value = {}
+        with mock.patch.object(smoke.platform, "system", return_value="Linux"), mock.patch.object(smoke.platform, "machine", return_value="x86_64"), mock.patch.object(smoke.os, "geteuid", return_value=0), mock.patch.object(smoke, "temporary_parent", return_value=self.root), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)), mock.patch.object(smoke, "Docker", return_value=docker), mock.patch.object(smoke, "daemon_capacity", return_value={}), mock.patch.object(smoke, "operator_handoff", side_effect=smoke.Blocked("operator_handoff_failed")), mock.patch.object(smoke, "docker_archive", side_effect=AssertionError("conversion after failed handoff forbidden")), mock.patch.object(smoke.Path, "read_text", return_value="MemAvailable: 2000000 kB\n"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(smoke.main(["--execute-disposable", "--bundle", "/synthetic", "--operator-receipt-fd", str(write)]), 1)
+        self.assertTrue(all(tuple(call.args[0][:2]) not in smoke.MUTATIONS for call in docker.call.call_args_list))
 
     def test_frozen_conversion_preserves_config_and_uncompressed_layers(self):
         case, expected = self.synthetic_bundle()
@@ -204,6 +271,82 @@ class SmokeChecks(unittest.TestCase):
             self.assertEqual(smoke.main(["--execute-disposable"]), 1)
         self.assertNotIn(str(self.root), output.getvalue())
 
+    def metadata(self, *, mode=stat.S_IFDIR | 0o1777, uid=0, device=0, inode=1):
+        return SimpleNamespace(st_mode=mode, st_uid=uid, st_dev=device, st_ino=inode)
+
+    def test_fixed_tmp_ignores_caller_production_environment(self):
+        info = self.metadata()
+        text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        with mock.patch.dict(os.environ, {"TMPDIR": "/synthetic-production", "TMP": "/synthetic-production", "TEMP": "/synthetic-production"}), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry") as ancestry, mock.patch.object(Path, "lstat", return_value=info), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+            self.assertEqual(smoke.temporary_parent(), Path("/tmp"))
+            ancestry.assert_called_once_with(Path("/tmp"))
+
+    def test_network_and_unknown_tmp_mounts_refuse_before_disk_or_creation(self):
+        for kind in ["nfs", "nfs4", "cifs", "9p", "fuse.sshfs", "unknown"]:
+            text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n2 1 0:0 / /tmp rw - " + kind + " synthetic-remote rw\n"
+            with self.subTest(kind=kind), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", return_value=self.metadata()), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("no remote statvfs")), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+                with self.assertRaisesRegex(smoke.Blocked, "^nonlocal_or_unknown_filesystem$"):
+                    smoke.temporary_parent()
+
+    def test_tmp_owner_link_sticky_and_capacity_refusals(self):
+        text = "1 0 0:0 / / rw - ext4 synthetic-root rw\n"
+        for info, reason in [(self.metadata(uid=10001), "untrusted_local_directory"), (self.metadata(mode=stat.S_IFLNK | 0o777), "untrusted_local_directory"), (self.metadata(mode=stat.S_IFDIR | 0o755), "temporary_parent_not_root_sticky"), (self.metadata(), "insufficient_temporary_disk")]:
+            with self.subTest(reason=reason), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", return_value=info), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=1)), mock.patch.object(smoke.tempfile, "mkdtemp", side_effect=AssertionError("no write")):
+                with self.assertRaisesRegex(smoke.Blocked, "^" + reason + "$"):
+                    smoke.temporary_parent()
+
+    def test_mount_device_ambiguity_and_directory_replacement_refuse(self):
+        entries = [
+            ("1 0 0:1 / / rw - ext4 synthetic-root rw\n", [self.metadata()], "directory_mount_identity_changed"),
+            ("1 0 0:0 / / rw - ext4 synthetic-root rw\n2 1 0:0 / /tmp rw - tmpfs synthetic-a rw\n3 2 0:0 / /tmp rw - tmpfs synthetic-b rw\n", [self.metadata()], "nonlocal_or_unknown_filesystem"),
+            ("1 0 0:0 / / rw - ext4 synthetic-root rw\n", [self.metadata(), self.metadata(inode=2)], "directory_identity_changed"),
+        ]
+        for text, infos, reason in entries:
+            with self.subTest(reason=reason), mock.patch.object(smoke.evidence.boundary, "trusted_ancestry"), mock.patch.object(Path, "lstat", side_effect=infos), mock.patch.object(Path, "read_text", return_value=text), mock.patch.object(smoke.shutil, "disk_usage", side_effect=AssertionError("not proved")):
+                with self.assertRaisesRegex(smoke.Blocked, "^" + reason + "$"):
+                    smoke.temporary_parent()
+
+    def test_daemon_capacity_is_independent_and_stable(self):
+        docker = mock.Mock()
+        docker.value.return_value = {"root": str(self.root), "driver": "overlay2", "id": "synthetic-daemon"}
+        with mock.patch.object(smoke, "local_directory", return_value=self.metadata(mode=stat.S_IFDIR | 0o700)), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=2 * 1024**3)):
+            witness = smoke.daemon_capacity(docker)
+            self.assertEqual(smoke.daemon_capacity(docker, witness), witness)
+            docker.value.return_value["id"] = "different-daemon"
+            with self.assertRaisesRegex(smoke.Blocked, "daemon_identity_changed"):
+                smoke.daemon_capacity(docker, witness)
+        docker.value.return_value["id"] = "synthetic-daemon"
+        with mock.patch.object(smoke, "local_directory", return_value=self.metadata(mode=stat.S_IFDIR | 0o700)), mock.patch.object(smoke.shutil, "disk_usage", return_value=SimpleNamespace(free=1)):
+            with self.assertRaisesRegex(smoke.Blocked, "insufficient_daemon_disk"):
+                smoke.daemon_capacity(docker)
+        docker.value.return_value["driver"] = "unknown"
+        with mock.patch.object(smoke, "local_directory", side_effect=AssertionError("unconfirmed driver")):
+            with self.assertRaisesRegex(smoke.Blocked, "daemon_identity_unconfirmed"):
+                smoke.daemon_capacity(docker)
+
+    def test_every_daemon_mutation_requires_capacity_before_subprocess(self):
+        docker = smoke.Docker(self.root / "private")
+        for operation in smoke.MUTATIONS:
+            with self.subTest(operation=operation), mock.patch.object(smoke.subprocess, "run", side_effect=AssertionError("mutation forbidden")):
+                with self.assertRaisesRegex(smoke.Blocked, "daemon_capacity_not_proved"):
+                    docker.call([*operation, "synthetic"])
+                docker.capacity = {"synthetic": True}
+                with mock.patch.object(smoke, "daemon_capacity", side_effect=smoke.Blocked("insufficient_daemon_disk")):
+                    with self.assertRaisesRegex(smoke.Blocked, "insufficient_daemon_disk"):
+                        docker.call([*operation, "synthetic"])
+                docker.capacity = None
+
+    def test_actual_user_security_and_tmpfs_must_match_creation(self):
+        self.resources.create_network()
+        item = self.docker.values[("container", self.docker.container)][0]
+        for area, key, value in [("Config", "User", "0:0"), ("HostConfig", "SecurityOpt", []), ("HostConfig", "Tmpfs", {"/tmp": "rw,size=1g"})]:
+            old = item[area][key]
+            with self.subTest(key=key):
+                item[area][key] = value
+                with self.assertRaisesRegex(smoke.Blocked, "container_security_options_changed"):
+                    self.resources.own("container", self.docker.container)
+                item[area][key] = old
+
     def test_runtime_mock_classifies_complete_and_real_byte_change(self):
         self.runtime("PASS")
 
@@ -215,6 +358,9 @@ class SmokeChecks(unittest.TestCase):
 
     def test_runtime_mock_detects_source_changes(self):
         self.runtime("source_bytes_changed")
+
+    def test_completed_with_inconsistent_counters_is_failure(self):
+        self.runtime("coverage_incomplete")
 
     def runtime(self, mode):
         settings, password, marker = smoke.fixture(self.root, 12345)
@@ -247,7 +393,7 @@ class SmokeChecks(unittest.TestCase):
                 status_calls.append(path)
                 if mode == "source_bytes_changed" and len(status_calls) == 2:
                     next((self.root / "source").iterdir()).write_bytes(b"artificial change")
-                value = {"state": "COMPLETED", "failed": 0, "active": 7, "quick": 7, "full": 6, "groups": [{"copies": 2, "bytes": 300}] * 3, "checkpoint": "completed", "missing": 0, "unavailable": 0}
+                value = {"state": "COMPLETED", "discovered": 7, "processed": 7, "scanned": 0 if mode == "coverage_incomplete" else 7, "failed": 0, "active": 7, "quick": 7, "full": 6, "groups": [{"copies": 2, "bytes": 300}] * 3, "checkpoint": "completed", "missing": 0, "unavailable": 0}
             else:
                 value = {"state": "synthetic"}
             return io.BytesIO(json.dumps(value).encode())
@@ -260,7 +406,7 @@ class SmokeChecks(unittest.TestCase):
                 self.assertTrue(value["single_writer_refused"])
                 self.assertEqual(len([path for path in requests if any(path.startswith("/api/" + area + "/") for area in ["quarantine", "restore", "purge"])]), 12)
             else:
-                with self.assertRaisesRegex(smoke.Blocked, "^" + mode + "$"):
+                with self.assertRaisesRegex(smoke.Failed if mode == "coverage_incomplete" else smoke.Blocked, "^" + mode + "$"):
                     smoke.exercise(runtime, self.root, 12345, settings, password, marker, source)
 
 

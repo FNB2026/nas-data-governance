@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit disposable host test only; default is a side-effect-free protocol."""
 import argparse
+import fcntl
 import gzip
 import hashlib
 import http.cookiejar
@@ -31,6 +32,10 @@ FROZEN = {"commit": "063d0ee980ae8115cc92c0c9df0c5c43e540f14b", "tree": "f56e546
           "archive_sha256": "6d59909f00e540d93d5fc60a36754f08692f4dcecd251aaa5843b6d1e9999336",
           "config_digest": "sha256:17286831a665b3d8470db80063014cc8ab96815a12e2a1dbfa1c03f43f8eb7f0",
           "receipt_sha256": "63be102ba9339d3060643f60790b7cd282e95e2bce2a303e3440f3bd213f491a"}
+LOCAL_FILESYSTEMS = {"tmpfs", "ext4", "xfs", "btrfs", "overlay", "zfs"}
+DAEMON_INFO = ["info", "--format", '{"root":{{json .DockerRootDir}},"driver":{{json .Driver}},"id":{{json .ID}}}']
+MUTATIONS = {("image", "load"), ("image", "rm"), ("network", "create"), ("network", "rm"),
+             ("container", "create"), ("container", "start"), ("container", "stop"), ("container", "rm")}
 
 
 class Blocked(Exception):
@@ -43,12 +48,93 @@ class Failed(Blocked):
 
 def require(value, code):
     if not value:
-        failure = {"source_bytes_changed", "dangerous_api_accepted", "unauthenticated_scan_accepted", "privacy_window_failed", "http_privacy_window_failed", "restart_state_lost", "second_writer_not_refused"}
+        failure = {"source_bytes_changed", "dangerous_api_accepted", "unauthenticated_scan_accepted", "privacy_window_failed", "http_privacy_window_failed", "restart_state_lost", "second_writer_not_refused", "coverage_incomplete"}
         raise (Failed if code in failure else Blocked)(code)
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def operator_pipe(fd):
+    if fd is None:
+        return None
+    try:
+        require(fd >= 3 and stat.S_ISFIFO(os.fstat(fd).st_mode), "invalid_operator_pipe")
+        require(fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE in {os.O_WRONLY, os.O_RDWR}, "invalid_operator_pipe")
+        require(os.fpathconf(fd, "PC_PIPE_BUF") >= 512, "invalid_operator_pipe")
+    except (OSError, ValueError):
+        raise Blocked("invalid_operator_pipe") from None
+    return fd
+
+
+def operator_handoff(fd, phase, root, nonce, *, result=None, receipt_sha=None, identity=None):
+    if fd is None:
+        return
+    operator_pipe(fd)  # The operator exclusively owns and continuously drains it.
+    info = root.lstat() if root is not None else None
+    require(info is None or stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and info.st_mode & 0o777 == 0o700, "handoff_fixture_identity_unconfirmed")
+    value = {"phase": phase, "pid": os.getpid(), "root": str(root) if root is not None else None,
+             "device": info.st_dev if info else None, "inode": info.st_ino if info else None, "nonce": nonce}
+    common = {key: item for key, item in value.items() if key != "phase"}
+    require(identity is None or common == identity, "handoff_fixture_identity_changed")
+    if result is not None:
+        value.update(status=result["status"], test_status=result.get("test_status", "BLOCKED"), receipt_sha256=receipt_sha)
+    encoded = json.dumps(value, sort_keys=True).encode() + b"\n"
+    require(len(encoded) <= min(4096, os.fpathconf(fd, "PC_PIPE_BUF")), "operator_handoff_too_large")
+    try:
+        require(os.write(fd, encoded) == len(encoded), "operator_handoff_failed")
+    except OSError:
+        raise Blocked("operator_handoff_failed") from None
+    return common
+
+
+def local_directory(path):
+    """Metadata-only mount/ancestry check; no host directory enumeration."""
+    path = Path(path)
+    require(path.is_absolute(), "untrusted_local_directory")
+    evidence.boundary.trusted_ancestry(path)
+    before = path.lstat()
+    require(stat.S_ISDIR(before.st_mode) and before.st_uid == 0, "untrusted_local_directory")
+    text = Path("/proc/self/mountinfo").read_text()
+    require(len(text) <= 4 * 1024 * 1024, "mount_table_unconfirmed")
+    evidence.boundary.linux_mountpoints(text)  # Validate kernel escape/layout.
+    covering = []
+    for line in text.splitlines():
+        fields = line.split()
+        point = Path(re.sub(r"\\([0-7]{3})", lambda item: chr(int(item[1], 8)), fields[4]))
+        if path == point or point in path.parents:
+            covering.append((len(point.parts), fields[2], fields[fields.index("-") + 1]))
+    require(bool(covering), "mount_table_unconfirmed")
+    nearest = [item for item in covering if item[0] == max(value[0] for value in covering)]
+    require(len(nearest) == 1 and nearest[0][2] in LOCAL_FILESYSTEMS, "nonlocal_or_unknown_filesystem")
+    require(nearest[0][1] == str(os.major(before.st_dev)) + ":" + str(os.minor(before.st_dev)), "directory_mount_identity_changed")
+    after = path.lstat()
+    require((after.st_dev, after.st_ino, after.st_mode, after.st_uid) == (before.st_dev, before.st_ino, before.st_mode, before.st_uid), "directory_identity_changed")
+    return before
+
+
+def temporary_parent():
+    # Never honor TMPDIR/TEMP/TMP, and never fall back to a caller-owned source.
+    parent = Path("/tmp")
+    info = local_directory(parent)
+    require(info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX), "temporary_parent_not_root_sticky")
+    require(shutil.disk_usage(parent).free >= 256 * 1024 * 1024, "insufficient_temporary_disk")
+    return parent
+
+
+def daemon_capacity(docker, expected=None):
+    info = docker.value(DAEMON_INFO)
+    require(isinstance(info, dict) and set(info) == {"root", "driver", "id"} and isinstance(info["root"], str) and info["root"].startswith("/") and info["driver"] == "overlay2" and isinstance(info["id"], str) and bool(info["id"]), "daemon_identity_unconfirmed")
+    # Canonicalize the operator-configured path for metadata-only checking;
+    # never create, change, enumerate or clean the production daemon directory.
+    path = Path(info["root"]).resolve(strict=True)
+    witness = local_directory(path)
+    require(not witness.st_mode & 0o022, "daemon_directory_writable_by_other")
+    capacity = {"root": str(path), "driver": info["driver"], "id": info["id"], "device": witness.st_dev, "inode": witness.st_ino}
+    require(expected is None or capacity == expected, "daemon_identity_changed")
+    require(shutil.disk_usage(path).free >= 1024 * 1024 * 1024, "insufficient_daemon_disk")
+    return capacity
 
 
 def private_write(path, data):
@@ -112,8 +198,12 @@ def docker_archive(bundle, expected, destination, tag):
 class Docker:
     def __init__(self, private):
         self.private = private
+        self.capacity = None
 
     def call(self, args, *, check=True, timeout=90):
+        if tuple(args[:2]) in MUTATIONS:
+            require(self.capacity is not None, "daemon_capacity_not_proved")
+            daemon_capacity(self, self.capacity)
         result = subprocess.run(["docker", *args], capture_output=True, timeout=timeout)
         with (self.private / "docker.stdout").open("ab") as output:
             output.write(result.stdout)
@@ -172,6 +262,7 @@ class Resources:
             require(value.get("Image") == self.image, "container_image_changed")
             config = value.get("HostConfig", {})
             require(config.get("NetworkMode") == self.network and config.get("ReadonlyRootfs") is True and config.get("Privileged") is False and config.get("Memory") == 384 * 1024 * 1024 and config.get("NanoCpus") == 1_000_000_000 and config.get("PidsLimit") == 128 and config.get("CapDrop") == ["ALL"], "container_isolation_changed")
+            require(value.get("Config", {}).get("User") == "10001:10001" and config.get("SecurityOpt") in (["no-new-privileges"], ["no-new-privileges:true"]) and config.get("Tmpfs") == {"/tmp": "rw,nosuid,nodev,noexec,size=64m"}, "container_security_options_changed")
             mounts = value.get("Mounts", [])
             actual = {(m.get("Source"), m.get("Destination"), m.get("RW")) for m in mounts if m.get("Type") == "bind"}
             expected = {(str(self.root / "source"), "/sources/source_a", False), (str(self.root / "config"), "/config", False), (str(self.root / "state"), "/data", True)}
@@ -324,7 +415,7 @@ def exercise(resources, root, port, settings, password, marker, source):
             break
         require(result.get("state") not in {"FAILED", "PAUSED_NETWORK"}, "scan_not_completed")
         time.sleep(0.25)
-    require(result.get("state") == "COMPLETED" and result.get("failed") == 0 and result.get("active") == 7 and result.get("quick") == 7 and result.get("full") == 6 and len(result.get("groups", [])) == 3 and all(g.get("copies") == 2 and g.get("bytes") == 300 for g in result["groups"]) and result.get("checkpoint") == "completed" and result.get("missing") == result.get("unavailable") == 0, "coverage_incomplete")
+    require(result.get("state") == "COMPLETED" and result.get("discovered") == result.get("processed") == result.get("scanned") == 7 and result.get("failed") == 0 and result.get("active") == 7 and result.get("quick") == 7 and result.get("full") == 6 and len(result.get("groups", [])) == 3 and all(g.get("copies") == 2 and g.get("bytes") == 300 for g in result["groups"]) and result.get("checkpoint") == "completed" and result.get("missing") == result.get("unavailable") == 0, "coverage_incomplete")
     second = resources.create_container(root)
     resources.transition(second, "start")
     state = resources.docker.call(["container", "wait", second], timeout=15).stdout.strip()
@@ -342,7 +433,7 @@ def exercise(resources, root, port, settings, password, marker, source):
     jar.clear()
     csrf = request("/api/login", {"password": password})["csrf"]
     result = request("/api/status", {"alias": "source_a"})
-    require(result.get("active") == 7 and result.get("quick") == 7 and result.get("full") == 6 and len(result.get("groups", [])) == 3 and result.get("checkpoint") == "completed" and result.get("missing") == result.get("unavailable") == result.get("failed") == 0, "restart_state_lost")
+    require(result.get("scanned") == 7 and result.get("active") == 7 and result.get("quick") == 7 and result.get("full") == 6 and len(result.get("groups", [])) == 3 and result.get("checkpoint") == "completed" and result.get("missing") == result.get("unavailable") == result.get("failed") == 0, "restart_state_lost")
     after = source_hashes(root)
     private_write(root / "private" / "source-after.json", json.dumps(after, sort_keys=True).encode())
     require(after == before, "source_bytes_changed")
@@ -358,6 +449,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute-disposable", action="store_true")
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--operator-receipt-fd", type=int)
     args = parser.parse_args(argv)
     if not args.execute_disposable:
         print("nas-smoke: protocol_only_no_docker_no_files_no_credentials")
@@ -366,8 +458,14 @@ def main(argv=None):
     docker = None
     before = None
     root = None
+    receipt_written = False
+    handoff_fd = None
+    nonce = None
+    receipt_sha = None
+    handoff_identity = None
     result = {"status": "BLOCKED", "scope": "fnos_docker_disposable_readonly_host_only", "fpk": "NOT_RUN", "smb": "NOT_RUN", "real_nas_sources": "NOT_RUN", "release": "NOT_AUTHORIZED"}
     try:
+        handoff_fd = operator_pipe(args.operator_receipt_fd)
         result["harness_sha256"] = digest(Path(__file__).read_bytes())
         require(platform.system() == "Linux" and platform.machine() == "x86_64" and os.geteuid() == 0, "explicit_linux_root_required")
         require(args.bundle is not None, "frozen_evidence_required")
@@ -377,7 +475,8 @@ def main(argv=None):
         match = re.search(r"^MemAvailable:\s+(\d+) kB$", memory, re.MULTILINE)
         require(match is not None and int(match[1]) >= 1024 * 1024, "insufficient_available_memory")
         os.umask(0o077)
-        root = Path(tempfile.mkdtemp(prefix="ndg-host-smoke-")).resolve(strict=True)
+        parent = temporary_parent()
+        root = Path(tempfile.mkdtemp(prefix="ndg-host-smoke-", dir=str(parent))).resolve(strict=True)
         (root / "private").mkdir(mode=0o700)
         require(shutil.disk_usage(root).free >= 256 * 1024 * 1024, "insufficient_temporary_disk")
         # Kernel assigns an unused random loopback port; a later race fails bind
@@ -389,10 +488,14 @@ def main(argv=None):
         docker = Docker(root / "private")
         context = docker.call(["context", "inspect", "default", "--format", "{{.Endpoints.docker.Host}}"])
         require(context.stdout.strip() == b"unix:///var/run/docker.sock", "local_docker_required")
+        docker.capacity = daemon_capacity(docker)
         before = docker.inventory()
         nonce = secrets.token_hex(16)
         resources = Resources(docker, nonce, expected["config_digest"], root)
         resources.record()
+        # This private initial handoff precedes all daemon mutations. It lets
+        # the operator retain the exact owned fixture after timeout, without glob.
+        handoff_identity = operator_handoff(handoff_fd, "initial", root, nonce)
         receipt, converted_sha = docker_archive(args.bundle, expected, root / "private" / "docker-load.tar", resources.tag)
         present = docker.call(["image", "inspect", expected["config_digest"]], check=False)
         if present.returncode != 0:
@@ -447,10 +550,22 @@ def main(argv=None):
                 result.update(status="BLOCKED", reason="existing_state_unconfirmed")
         if root is not None:
             try:
-                private_write(root / "private" / "result.json", json.dumps(result, sort_keys=True).encode())
+                encoded = json.dumps(result, sort_keys=True).encode()
+                private_write(root / "private" / "result.json", encoded)
+                receipt_written = True
+                receipt_sha = digest(encoded)
             except Exception:
                 result.update(status="BLOCKED", reason="private_receipt_not_persisted")
-    print("nas-smoke: " + result["status"].lower() + "_disposable_host_only_private_evidence_retained")
+        try:
+            operator_handoff(handoff_fd, "final", root, nonce, result=result, receipt_sha=receipt_sha, identity=handoff_identity)
+        except Exception:
+            # A persisted test receipt is not proof the operator received it.
+            # Preserve it; fail the operation closed without rewriting evidence.
+            result.update(status="BLOCKED", reason="operator_handoff_failed")
+    boundary = "private_evidence_retained" if receipt_written else "preflight_no_fixture" if root is None else "private_partial_evidence_only"
+    reason = result.get("reason", "")
+    safe_reason = reason if re.fullmatch(r"[a-z0-9_]{1,80}", reason) else "validation_or_tool_failed"
+    print("nas-smoke: " + result["status"].lower() + "_disposable_host_only_" + boundary + (":" + safe_reason if result["status"] != "PASS" else ""))
     return 0 if result["status"] == "PASS" else 1
 
 

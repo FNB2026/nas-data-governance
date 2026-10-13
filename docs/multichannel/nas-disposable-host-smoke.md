@@ -37,6 +37,27 @@ against hostile administrators or concurrent daemon/remount replacement.
 Unknown ownership or incomplete evidence blocks. No existing NAS source,
 database, SMB mount or service configuration is a protocol input.
 
+An operator may pass `--operator-receipt-fd N`, an exclusively owned inherited
+writable FIFO descriptor >= 3. Default protocol mode never reads or writes it.
+In execution mode the descriptor is checked before fixture creation. An
+`initial` JSON line is sent after the fresh resource journal is durable and
+before any Docker mutation; `final` follows durable result persistence. Each
+line uses one `os.write`, bounded by the descriptor's actual PIPE_BUF and 4096
+bytes. The shared fields are `phase`, `pid`, `root`, `device`, `inode`, `nonce`;
+final adds `status`, `test_status`, `receipt_sha256`. The root identity must stay
+unchanged. A preflight final can have null root/identity/nonce/receipt hash.
+
+The caller must continuously drain a private pipe, bind PID to its child,
+validate root device/inode/ownership and the actual receipt SHA, and retain the
+initial owned journal on timeout. It must never discover evidence by filename
+prefix or scan other private directories. Invalid pipe or failed initial
+handoff prevents daemon mutations. A final handoff failure returns BLOCKED and
+preserves the already fsynced test receipt without rewriting it: a test PASS is
+not proof of successful operator evidence transfer. Private paths travel only
+through this opt-in pipe, not stdout/stderr. No secret or source filename is
+included. This is an operator evidence protocol, not a product API or permission
+grant. An exclusive operator window is still required.
+
 ## Content and resource boundaries
 
 The existing OCI verifier checks external frozen source/tree/amd64 expectations,
@@ -53,7 +74,12 @@ source/tree labels and rootfs diff IDs must match the frozen evidence. Cleanup
 may remove only this new nonce reference, after checking no other tags, registry
 digests or containers use it. Uncertain ownership retains the image.
 
-The script creates a fresh 0700 temporary project and private evidence directory,
+Before creating any fixture, the script fixes its parent to `/tmp`, ignoring
+TMPDIR/TEMP/TMP. It checks root ownership, sticky-directory protection, trusted
+ancestry and current mount/device identity. Network, unknown or ambiguous mount
+types reject; only tmpfs/ext4/xfs/btrfs/overlay/zfs are accepted. It never adjusts
+mounts or falls back to a caller-supplied location. The script creates a fresh
+0700 temporary project and private evidence directory,
 seven artificial source files (three identical-content pairs and a singleton),
 state and config. It requires at least 1 GiB MemAvailable and 256 MiB temporary
 free space; these are checks at that moment, not resource reservations. Only
@@ -76,11 +102,23 @@ An uncertain create response may leave a resource for manual review; it never
 authorizes guessing an ID for cleanup. Private fixture/state/evidence files stay
 in place; there is no recursive data cleanup or purge.
 
+The Docker daemon's own storage has an independent check: read-only info returns
+only its ID, storage driver and data directory, never existing container env or
+logs. This host protocol accepts overlay2 only, checks the canonical root-owned
+protected directory on an allowed local filesystem, and requires at least 1 GiB
+free there. Driver/daemon/directory identity and free space are rechecked before
+each daemon mutation, including cleanup; a failed check retains known resources
+for manual review rather than acting on an unconfirmed daemon. The artifact is
+fixed and small; this threshold is a conservative current-space guard, not a
+reservation against other services' simultaneous writes. No daemon settings,
+paths, ownership or production data are altered to pass. Actual container UID,
+no-new-privileges and exact bounded noexec tmpfs must also match create options.
+
 ## Actual checks and evidence scope
 
 The host scenario verifies authentication refusal, every create/approve/dry-run/
 execute path under quarantine/restore/purge returning 403, frozen runtime version,
-7 active/quick, 6 full hashes, three pairs, completed checkpoint, failed/missing/
+7 discovered/processed/scanned/active/quick, 6 full hashes, three pairs, completed checkpoint, failed/missing/
 unavailable zero and unchanged source SHA. A second identical writer must fail
 while the first holds its state; the same second container must run once the
 first is stopped, separating owner refusal from an unrelated startup error.
@@ -107,11 +145,19 @@ package hard block and immutable beta.11 assets remain unchanged.
 
 ## Implementation verification (not host acceptance)
 
-Nineteen offline tests exercise real synthetic archive/fixture bytes plus
+Thirty-one offline tests exercise real synthetic archive/fixture bytes plus
 mocked Docker/HTTP: default no side effects, explicit preflight refusal, frozen
 source/content mismatch, existing destination preservation, links, tag refusal,
 exact-ID cleanup, ownership/mount/limits/foreign-endpoint refusal, source hashing,
 all twelve dangerous API denials and negative API/privacy/source-change cases.
+Additional deterministic tests cover ignored production TMPDIR, remote/unknown/
+ambiguous mounts, device/ancestry replacement, root/sticky/disk refusals, distinct
+daemon capacity/identity and guard-before-every-mutation, plus actual security
+option mismatches. Default/preflight failure does not claim a nonexistent private
+receipt; raw paths never appear in rejection messages.
+FIFO tests cover descriptor/type/direction refusal, atomic stable identity,
+preflight null-root handoff, default no writes and initial-handoff failure before
+any mutation. A completed response with inconsistent counts is a test FAIL.
 The actual frozen amd64 OCI was also converted locally and its unchanged config
 and layer identities checked, without calling Docker. Required local Go tests,
 vet/build, full race, public/version/release checks passed; this is distinct from
