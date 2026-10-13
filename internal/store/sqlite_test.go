@@ -572,6 +572,7 @@ func TestLinkCountMigrationAndRoundTrip(t *testing.T) {
 	// Create a minimal old-schema file_instances table — no link_count,
 	// no file_status, no physical_reliable.
 	oldSchema := `
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS storages (id TEXT PRIMARY KEY, root_path TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS file_instances (
   id INTEGER PRIMARY KEY, storage_id TEXT NOT NULL REFERENCES storages(id), path TEXT NOT NULL,

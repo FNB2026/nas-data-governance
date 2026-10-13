@@ -243,7 +243,7 @@ func TestEndToEnd_RulesLifecycle(t *testing.T) {
 	runScan([]string{"-root", dataRoot, "-out", indexPath, "-storage", "lc", "-db", dbPath})
 	runLearn([]string{"-source", "stats", "-db", dbPath, "-apply"})
 
-	st, _ := store.Open(context.Background(), dbPath)
+	st, _ := store.OpenReadOnly(context.Background(), dbPath)
 	defer st.Close()
 	drafts, _ := st.ListRules(context.Background(), domain.RuleSourceLearned, domain.RuleDraft)
 	if len(drafts) == 0 {

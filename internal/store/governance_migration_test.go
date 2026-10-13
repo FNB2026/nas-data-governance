@@ -100,3 +100,64 @@ func TestGovernanceMigrationFailureRollsBackAdditiveIncrement(t *testing.T) {
 		t.Fatal("legacy records changed on migration failure")
 	}
 }
+
+func TestUnknownFutureSchemaRejectedBeforeDatabaseMutation(t *testing.T) {
+	path := legacyGovernanceDatabase(t, false)
+	db, e := sql.Open("sqlite", path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(99,'2026-10-13T00:00:00Z')`); e != nil {
+		t.Fatal(e)
+	}
+	if e = db.Close(); e != nil {
+		t.Fatal(e)
+	}
+	before, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if st, err := Open(context.Background(), path); err == nil {
+		st.Close()
+		t.Fatal("future schema accepted")
+	}
+	after, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if sha256.Sum256(before) != sha256.Sum256(after) {
+		t.Fatal("unsupported schema was mutated before refusal")
+	}
+}
+
+func TestUnidentifiedDatabaseRejectedBeforeMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unidentified.db")
+	db, e := sql.Open("sqlite", path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(`CREATE TABLE synthetic_business_records(id INTEGER PRIMARY KEY)`); e != nil {
+		t.Fatal(e)
+	}
+	if e = db.Close(); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Chmod(path, 0600); e != nil {
+		t.Fatal(e)
+	}
+	before, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if st, err := Open(context.Background(), path); err == nil {
+		st.Close()
+		t.Fatal("unidentified database accepted")
+	}
+	after, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if sha256.Sum256(before) != sha256.Sum256(after) {
+		t.Fatal("unidentified database mutated")
+	}
+}

@@ -11,11 +11,12 @@ import (
 func TestLegacyDecisionRejectsSandboxAndRecoveryLock(t *testing.T) {
 	for _, mode := range []string{"sandbox", "recovery"} {
 		t.Run(mode, func(t *testing.T) {
-			a := NewAPI()
-			defer a.CloseProject()
-			if _, err := a.OpenProjectReadWrite(createProjectDB(t)); err != nil {
-				t.Fatal(err)
+			a, _ := governanceAPIWithSource(t)
+			page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+			if err != nil || len(page.Items) == 0 {
+				t.Fatal("valid indexed subject required", err)
 			}
+			ref := page.Items[0].GovernanceSubject
 			if mode == "sandbox" {
 				a.sandbox = true
 			}
@@ -29,10 +30,10 @@ func TestLegacyDecisionRejectsSandboxAndRecoveryLock(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := a.SaveGroupDecision(SaveDecisionRequest{GroupID: "synthetic-group", DecisionType: "KEEP_ALL"}); err == nil {
+			if _, err := a.SaveGroupDecision(SaveDecisionRequest{GroupID: ref.GroupID, DecisionType: "KEEP_ALL", SubjectVersion: ref.SubjectVersion, DecisionRevision: ref.DecisionRevision}); err == nil {
 				t.Fatal("restricted decision write accepted")
 			}
-			if _, err := a.store.GetGroupDecision(context.Background(), "synthetic-group"); err == nil {
+			if _, err := a.store.GetGroupDecision(context.Background(), ref.GroupID); err == nil {
 				t.Fatal("restricted decision persisted")
 			}
 		})

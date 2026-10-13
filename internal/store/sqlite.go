@@ -74,6 +74,9 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 	} else if err != nil {
 		return nil, ErrWriterUnavailable
 	}
+	if preflightGovernanceSchema(ctx, absPath) != nil {
+		return nil, ErrGovernanceRejected
+	}
 	// _txlock=immediate makes write transactions acquire the write lock up
 	// front, avoiding "database is locked" mid-transaction. foreign_keys &
 	// busy_timeout make the behavior safer under concurrent readers.

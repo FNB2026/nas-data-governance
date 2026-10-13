@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
 
 	"github.com/FNB2026/nas-data-governance/schemas"
 )
@@ -51,5 +52,38 @@ func applyGovernanceMigration(ctx context.Context, conn *sql.Conn) error {
 		return ErrGovernanceRejected
 	}
 	committed = true
+	return nil
+}
+
+// Reject future or unidentified nonempty databases before the writable DSN
+// enables WAL or any legacy migration runs. Reads include existing WAL state;
+// do not use immutable=1 to hide an uncheckpointed version marker.
+func preflightGovernanceSchema(ctx context.Context, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ErrGovernanceRejected
+	}
+	if info.Size() == 0 {
+		return nil
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return ErrGovernanceRejected
+	}
+	defer db.Close()
+	var markers, objects int
+	if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'`).Scan(&markers) != nil {
+		return ErrGovernanceRejected
+	}
+	if markers == 0 {
+		if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).Scan(&objects) != nil || objects != 0 {
+			return ErrGovernanceRejected
+		}
+		return nil
+	}
+	var version int
+	if db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&version) != nil || version < 0 || version > 12 {
+		return ErrGovernanceRejected
+	}
 	return nil
 }
