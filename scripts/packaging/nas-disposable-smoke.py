@@ -436,8 +436,11 @@ def exercise(resources, root, port, settings, password, marker, source):
     identifier = resources.create_container(root, port)
     resources.transition(identifier, "start")
     own = resources.own("container", identifier)
-    require(own["NetworkSettings"]["Ports"]["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": str(port)}], "loopback_binding_changed")
-    networks = own["NetworkSettings"].get("Networks", {})
+    network_settings = own.get("NetworkSettings")
+    require(isinstance(network_settings, dict), "loopback_binding_changed")
+    ports = network_settings.get("Ports")
+    require(isinstance(ports, dict) and isinstance(ports.get("8080/tcp"), list) and ports["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": str(port)}], "loopback_binding_changed")
+    networks = network_settings.get("Networks", {})
     require(len(networks) == 1 and next(iter(networks.values())).get("NetworkID") == resources.network, "active_network_binding_changed")
     ready()
     try:

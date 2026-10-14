@@ -454,6 +454,23 @@ class SmokeChecks(unittest.TestCase):
     def test_runtime_mock_classifies_complete_and_real_byte_change(self):
         self.runtime("PASS")
 
+    def test_missing_or_malformed_loopback_ports_block_before_http(self):
+        cases = [{}, {"Ports": {}}, {"Ports": None}, {"Ports": []}, {"Ports": {"8080/tcp": None}},
+                 {"Ports": {"8080/tcp": []}}, {"Ports": {"8080/tcp": {}}}, {"Ports": {"8080/tcp": [None]}},
+                 {"Ports": {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "12345"}]}}, None, []]
+        for network_settings in cases:
+            with self.subTest(network_settings=network_settings), tempfile.TemporaryDirectory(prefix="ndg-binding-offline-") as temp:
+                root = Path(temp).resolve()
+                (root / "private").mkdir(mode=0o700)
+                settings, password, marker = smoke.fixture(root, 12345)
+                resources = mock.Mock()
+                resources.create_container.return_value = self.docker.container
+                resources.own.return_value = {"NetworkSettings": network_settings}
+                with mock.patch.object(smoke.urllib.request, "build_opener") as opener:
+                    with self.assertRaisesRegex(smoke.Blocked, "^loopback_binding_changed$"):
+                        smoke.exercise(resources, root, 12345, settings, password, marker, fixtures.SOURCE)
+                    opener.return_value.open.assert_not_called()
+
     def test_runtime_mock_refuses_dangerous_api_success(self):
         self.runtime("dangerous_api_accepted")
 

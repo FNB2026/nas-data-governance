@@ -168,7 +168,7 @@ package hard block and immutable beta.11 assets remain unchanged.
 
 ## Implementation verification (not host acceptance)
 
-Thirty-eight offline tests exercise real synthetic archive/fixture bytes plus
+Thirty-nine offline tests exercise real synthetic archive/fixture bytes plus
 mocked Docker/HTTP: default no side effects, explicit preflight refusal, frozen
 source/content mismatch, existing destination preservation, links, tag refusal,
 exact-ID cleanup, ownership/mount/limits/foreign-endpoint refusal, source hashing,
@@ -188,6 +188,36 @@ handle, replaced ancestry and daemon fingerprint changes. These are deterministi
 operator metadata evidence is separate from a successful disposable host run.
 The actual frozen amd64 OCI was also converted locally and its unchanged config
 and layer identities checked, without calling Docker. Required local Go tests,
-vet/build, full race, public/version/release checks passed; this is distinct from
-an authorized fnOS host run, which remains NOT RUN until a private actual receipt
-exists and an independent reviewer verifies it.
+vet/build, full race, public/version/release checks passed. Successful fnOS host
+scan/restart acceptance remains NOT RUN; attempted protocol blocks below are
+separate from successful runtime evidence and require independent closure.
+
+## Preserved operator attempts (2026-10-14)
+
+The two original a4e10ae preflight attempts remain **BLOCKED**, with their
+private raw evidence intact. Their Btrfs device-equality refusal is retained
+separately from the later kernel-FD compatibility tests and operator read-only
+metadata evidence. They are not overwritten by new source or tests.
+
+At exact harness `92fd581b6e9b20ed7e686dd1b3a61d041e448eb2`, the authorized
+operator's 03:36:56–03:36:59 UTC attempt returned **BLOCKED** /
+`validation_or_tool_failed`. Both inherited-pipe handoffs and child exit 1 were
+observed. Private result SHA-256 is
+`6bd918358d054af301b507f8ea5220d9f652f6cc4ba87dd361878e01ea4968c9`.
+The owned container was running, but actual NetworkSettings.Ports was empty
+despite the requested loopback publication. Direct indexing raised KeyError
+before the HTTP/scan acceptance sequence. This is a protocol/environment block,
+not evidence of a product functional FAIL or successful scan. Source/runtime
+identity remains frozen experimental `063d0ee`, separate from harness `92fd581`
+and the immutable signed beta.11 macOS artifact.
+
+The protocol now checks network-settings/ports/binding types before indexing.
+Missing or malformed actual ports explicitly return `loopback_binding_changed`;
+only the exact requested 127.0.0.1 binding is accepted. The new deterministic
+negative first reproduced the old KeyError, then passed with safe classification
+and no HTTP calls. Internal bridge, loopback publication and all existing
+isolation requirements remain strict; no daemon or network topology is changed
+to make this attempt pass. No automatic host retry is authorized by this fix.
+Raw own-container diagnostics and private source/status closure remain with the
+operator; the independent reviewer must verify them before any stronger runtime
+claim. Real host scan/restart/single-writer/privacy acceptance remains NOT RUN.
