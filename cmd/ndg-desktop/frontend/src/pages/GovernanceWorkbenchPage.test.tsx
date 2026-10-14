@@ -37,7 +37,7 @@ beforeEach(() => {
     scan_active: false, max_batch_size: 100, reason_codes: [], project_scope: "project-a" });
   bridge.list.mockReset().mockImplementation(async (query: GovernanceQuery) => ({ items: query.page === 1 ? groups.slice(0, 2) : groups.slice(2), total_count: 3, page: query.page, page_size: 2, unavailable_filters: ["risk"] }));
   bridge.preview.mockReset().mockImplementation(async (request: PreviewRequest) => ({ preview_token: "synthetic-token", expires_at: new Date(Date.now() + 60000).toISOString(), project_scope: "project-a", records_only: true,
-    items: request.items.map((item) => ({ ...item, eligibility: "ELIGIBLE", reason_code: "" })) }));
+    items: request.items.map((item) => ({ ...item, eligibility: "ELIGIBLE", reason_code: "", source_freshness: "MATCH", source_checked_at: new Date().toISOString() })) }));
   bridge.commit.mockReset().mockImplementation(async () => result(bridge.preview.mock.calls[bridge.preview.mock.calls.length - 1]?.[0].items.map((item: ReviewGroup) => item.group_id) || []));
   bridge.result.mockReset();
   oldApi.duplicates.listGroups.mockReset().mockResolvedValue({ groups, total_count: 3, next_cursor: "" });
@@ -56,6 +56,15 @@ describe("governance workbench selection and records-only flow", () => {
     await screen.findByRole("region", { name: "批次回执" });
     expect(bridge.commit).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/已选 0 组/)).toBeVisible();
+  });
+  it.each([undefined, "UNVERIFIED", "SOURCE_CHANGED"])("does not commit an eligible preview with source freshness %s", async (freshness) => {
+    bridge.preview.mockImplementationOnce(async (request: PreviewRequest) => ({ preview_token: "synthetic-token", expires_at: new Date(Date.now() + 60000).toISOString(), project_scope: "project-a", records_only: true,
+      items: request.items.map((item) => ({ ...item, eligibility: "ELIGIBLE", reason_code: "", ...(freshness === undefined ? {} : { source_freshness: freshness }) })) }));
+    render(<GovernanceWorkbenchPage />); await chooseFirst(); await preview();
+    const button = screen.getByRole("button", { name: "保存决定（未批准、未执行）" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(bridge.commit).not.toHaveBeenCalled();
   });
   it("preserves explicit groups across pages and never submits hidden unselected IDs", async () => {
     render(<GovernanceWorkbenchPage />); await chooseFirst();

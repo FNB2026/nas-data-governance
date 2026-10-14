@@ -74,6 +74,44 @@ func TestGuardedContextRejectsPreCanceledSourceRead(t *testing.T) {
 	}
 }
 
+func TestGuardedContextRejectsSymlinkAboveRegisteredRoot(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("canonical synthetic fixture root")
+	}
+	parent := filepath.Join(base, "parent")
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal("create synthetic root")
+	}
+	path := filepath.Join(root, "file")
+	data := []byte("synthetic-root-ancestor")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal("create synthetic file")
+	}
+	var indexed domain.FileInstance
+	if _, err := scanner.Scan(context.Background(), scanner.Options{Root: root, StorageID: "synthetic-root-ancestor"}, func(file domain.FileInstance) error {
+		indexed = file
+		return nil
+	}); err != nil {
+		t.Fatal("scan synthetic fixture")
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal("move synthetic ancestor")
+	}
+	if err := os.Symlink(moved, parent); err != nil {
+		t.Fatal("replace synthetic ancestor with symlink")
+	}
+	if got, err := GuardedContext(context.Background(), root, indexed); err == nil || got != "" {
+		t.Fatal("freshness verification followed a symlink above the registered root")
+	}
+	got, err := os.ReadFile(filepath.Join(moved, "root", "file"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("synthetic source changed during rejected verification")
+	}
+}
+
 func TestGuardedMatchesHashAndRejectsFileOrAncestorReplacement(t *testing.T) {
 	for _, kind := range []string{"unchanged", "file-symlink", "parent-symlink", "changed", "outside"} {
 		t.Run(kind, func(t *testing.T) {

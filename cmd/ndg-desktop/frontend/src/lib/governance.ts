@@ -121,6 +121,17 @@ export interface ReviewPreview {
   items: PreviewItem[];
   records_only: boolean;
 }
+
+// Only source-verified eligible groups may start a new records-only commit.
+// A blocked group may remain in the same preview while a MATCH group is
+// recorded; an eligible group with missing or non-MATCH freshness fails the
+// whole new submission closed. Existing ambiguous submissions are reconciled
+// separately with their original idempotency key.
+export function canCommitGovernancePreview(preview: ReviewPreview | null): boolean {
+  if (!preview?.preview_token) return false;
+  const eligible = preview.items.filter((item) => item.eligibility === "ELIGIBLE");
+  return eligible.length > 0 && eligible.every((item) => item.source_freshness === "MATCH");
+}
 export type Outcome = "SAVED" | "UNCHANGED" | "CONFLICT" | "BLOCKED" | "FAILED";
 export interface BatchResult {
   batch_id: string;

@@ -20,7 +20,10 @@ import (
 // all source/database data are disposable. This is not a native GUI certificate.
 func governanceAPIWithSource(t *testing.T) (*API, map[string][32]byte) {
 	t.Helper()
-	source := t.TempDir()
+	source, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("canonical synthetic source root")
+	}
 	before := map[string][32]byte{}
 	for i := 0; i < 3; i++ {
 		for j := 0; j < 2; j++ {

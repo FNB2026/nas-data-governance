@@ -23,12 +23,12 @@ var ErrGuardedSourceChanged = errors.New("guarded source changed; path omitted")
 // renaming a parent cannot redirect the read to another tree. The opened file's
 // metadata must match the fresh scan both before and after hashing.
 func Guarded(root string, file domain.FileInstance, full bool) (string, error) {
-	return guardedRead(root, file, func(f *os.File) (string, error) {
+	return guardedReadWithOpener(root, file, func(f *os.File) (string, error) {
 		if full {
 			return fullReader(f)
 		}
 		return quickReader(f, file.Size)
-	})
+	}, openRecovered)
 }
 
 // GuardedContext is Guarded with cancellation checks between file reads. A
@@ -41,12 +41,12 @@ func GuardedContext(ctx context.Context, root string, file domain.FileInstance) 
 	if file.Size < 0 || file.Size == int64(^uint64(0)>>1) {
 		return "", errors.New("recovered fingerprint size invalid; path omitted")
 	}
-	return guardedRead(root, file, func(f *os.File) (string, error) {
+	return guardedReadWithOpener(root, file, func(f *os.File) (string, error) {
 		// Read at most expected size plus one byte. This bounds a file that
 		// grows after its initial descriptor stat; guardedRead checks size again
 		// after hashing and rejects the changed binding.
 		return fullReader(io.LimitReader(contextReader{ctx: ctx, reader: f}, file.Size+1))
-	})
+	}, openRecoveredNoFollowRoot)
 }
 
 type contextReader struct {
@@ -66,6 +66,12 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 func guardedRead(root string, file domain.FileInstance, read func(*os.File) (string, error)) (string, error) {
+	return guardedReadWithOpener(root, file, read, openRecovered)
+}
+
+type recoveredOpener func(root, rel string) (*os.File, unix.Stat_t, error)
+
+func guardedReadWithOpener(root string, file domain.FileInstance, read func(*os.File) (string, error), open recoveredOpener) (string, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
@@ -74,7 +80,7 @@ func guardedRead(root string, file domain.FileInstance, read func(*os.File) (str
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !filepath.IsAbs(file.Path) || filepath.Clean(file.Path) != file.Path {
 		return "", errors.New("recovered fingerprint outside root; path omitted")
 	}
-	f, rootStat, err := openRecovered(root, rel)
+	f, rootStat, err := open(root, rel)
 	if err != nil {
 		return "", err
 	}
@@ -102,7 +108,7 @@ func guardedRead(root string, file domain.FileInstance, read func(*os.File) (str
 	}
 	// Reopen the complete current binding, including ancestors and root. The
 	// original descriptor alone cannot detect rename/replacement of its path.
-	current, currentRoot, err := openRecovered(root, rel)
+	current, currentRoot, err := open(root, rel)
 	if err != nil {
 		return "", err
 	}
@@ -126,6 +132,42 @@ func openRecovered(root, rel string) (*os.File, unix.Stat_t, error) {
 	if err != nil {
 		return nil, unix.Stat_t{}, err
 	}
+	return openRecoveredAtRoot(dir, rel)
+}
+
+// openRecoveredNoFollowRoot walks the absolute registered root from / using
+// directory descriptors. Unlike O_NOFOLLOW on root alone, this rejects a
+// symlink in any ancestor above the root without a check-then-open race. A
+// mount at the registered root remains valid; same-device checks apply only
+// to descendants inside that task root.
+func openRecoveredNoFollowRoot(root, rel string) (*os.File, unix.Stat_t, error) {
+	root = filepath.Clean(root)
+	if !filepath.IsAbs(root) {
+		return nil, unix.Stat_t{}, errors.New("recovered fingerprint root is not absolute; path omitted")
+	}
+	dir, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, unix.Stat_t{}, err
+	}
+	if root != string(filepath.Separator) {
+		for _, part := range strings.Split(strings.TrimPrefix(root, string(filepath.Separator)), string(filepath.Separator)) {
+			if part == "" || part == "." || part == ".." {
+				_ = unix.Close(dir)
+				return nil, unix.Stat_t{}, errors.New("recovered fingerprint root is invalid; path omitted")
+			}
+			next, openErr := unix.Openat(dir, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			if openErr != nil {
+				_ = unix.Close(dir)
+				return nil, unix.Stat_t{}, openErr
+			}
+			_ = unix.Close(dir)
+			dir = next
+		}
+	}
+	return openRecoveredAtRoot(dir, rel)
+}
+
+func openRecoveredAtRoot(dir int, rel string) (*os.File, unix.Stat_t, error) {
 	defer func() { _ = unix.Close(dir) }()
 	var rootStat unix.Stat_t
 	if err := unix.Fstat(dir, &rootStat); err != nil {

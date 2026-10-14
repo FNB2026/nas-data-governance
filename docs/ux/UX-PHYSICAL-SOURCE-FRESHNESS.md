@@ -11,14 +11,19 @@ cannot provide an arbitrary file path or root. The Wails composition root
 obtains the existing source access lease before opening members. The store
 returns metadata only and never opens source files.
 
-Each member is opened through the rooted no-follow reader. Symlink components,
-root replacement, path replacement, and a child on a different device are
-rejected. Size, modification time, and reliable device/inode identity are
-checked before and after hashing, followed by a reopen of the current path
-binding. A differing full SHA-256 blocks recording. A current MATCH is only a
-point-in-time observation: bytes can change after verification and before a
-later executor action. The executor must retain its independent stale check;
-this observation is not execution authority and does not eliminate TOCTOU.
+Each member is opened through the rooted no-follow reader. For this freshness
+entry point, the registered canonical root is reopened by walking every
+absolute path component from `/` with directory descriptors and no-follow
+opens. A symlink in an ancestor, at the root, or below the root is rejected;
+the reader does not resolve a changed path and silently inherit access. A mount
+at the registered root is allowed, while descendants on another device are
+rejected. Root replacement, path replacement, and size, modification-time, or
+reliable device/inode changes are checked before and after hashing, followed by
+a reopen of the current path binding. A differing full SHA-256 blocks
+recording. A current MATCH is only a point-in-time observation: bytes can
+change after verification and before a later executor action. The executor
+must retain its independent stale check; this observation is not execution
+authority and does not eliminate TOCTOU.
 
 The operation is bounded to at most 100 selected groups, 256 actual active
 member rows across those groups, and 128 MiB of indexed member sizes. The
@@ -48,6 +53,13 @@ Legacy `SaveGroupDecision` remains guarded by the existing service policy and
 cannot bypass source verification. These are record-only governance intents;
 they do not approve a plan, execute a file action, clear a Recovery Lock, or
 change quarantine/restore/purge capabilities.
+
+The UI and its submit handler permit a new records-only batch only when each
+`ELIGIBLE` item has `source_freshness=MATCH`. An eligible item with missing,
+unknown, or non-MATCH freshness blocks a new batch. Explicitly `BLOCKED` items
+may remain in a partial batch with MATCH items. After an ambiguous response,
+the UI may retry only the already-created request with its original token and
+idempotency key; this is receipt reconciliation, not a newly authorized batch.
 
 ## Error and channel limits
 

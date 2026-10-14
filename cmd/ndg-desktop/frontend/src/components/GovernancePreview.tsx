@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { decisionLabel, reasonLabel, type DecisionKind, type ReviewPreview, type SelectedReview } from "../lib/governance";
+import { canCommitGovernancePreview, decisionLabel, reasonLabel, type DecisionKind, type ReviewPreview, type SelectedReview } from "../lib/governance";
 
 export default function GovernancePreview({ preview, selection, kind, canRecord, busy, ambiguous, onClose, onCommit, canQueryReceipt, onQueryReceipt, note }: {
   preview: ReviewPreview; selection: Map<string, SelectedReview>; kind: DecisionKind;
@@ -28,8 +28,11 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
     if (event.shiftKey && (document.activeElement === first || document.activeElement === title.current)) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && (document.activeElement === last || document.activeElement === title.current)) { event.preventDefault(); first.focus(); }
   };
-  const eligible = preview.items.filter((item) => item.eligibility === "ELIGIBLE").length;
+  const eligible = preview.items.filter((item) => item.eligibility === "ELIGIBLE" && item.source_freshness === "MATCH").length;
   const expired = !!preview.preview_token && (!Number.isFinite(expiry) || expiry <= now);
+  const mayRetryAmbiguous = ambiguous && !!preview.preview_token;
+  const mayCommit = canRecord && !busy && !!preview.preview_token && !expired && (mayRetryAmbiguous || canCommitGovernancePreview(preview));
+  const commit = () => { if (mayCommit) onCommit(); };
   return <div className="gov-modal-backdrop"><div ref={container} className="gov-modal card" role="dialog" aria-modal="true" aria-labelledby="gov-preview-title" onKeyDown={keyboard}>
     <h3 id="gov-preview-title" ref={title} tabIndex={-1}>确认要记录的决定</h3>
     <p><strong>{decisionLabel(kind)}</strong> · 显式选择 {preview.items.length} 组；可记录 {eligible} 组，其余需核对。</p>
@@ -50,7 +53,7 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
     <div className="gov-actions">
       <button type="button" className="secondary" disabled={busy || ambiguous} onClick={onClose}>返回核对</button>
       {canQueryReceipt && <button type="button" className="secondary" disabled={busy} onClick={onQueryReceipt}>查询已提交批次回执</button>}
-      <button type="button" disabled={busy || !canRecord || !preview.preview_token || !eligible || (expired && !ambiguous)} onClick={onCommit}>
+      <button type="button" disabled={!mayCommit} onClick={commit}>
         {busy ? "正在记录…（关闭不会回滚）" : ambiguous ? "重试相同请求" : "保存决定（未批准、未执行）"}
       </button>
     </div>
