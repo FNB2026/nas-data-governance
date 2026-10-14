@@ -83,7 +83,9 @@ host services bound there; `isolated` removes that bridge address. Therefore
 actual routes, network attachments and host reachability need explicit testing.
 
 [Moby v28.5.2 endpoint.go](https://github.com/moby/moby/blob/v28.5.2/libnetwork/endpoint.go)
-gates `ProgramExternalConnectivity` with `!n.internal`. This is consistent with
+uses `!n.internal` as the condition for the external-connectivity branch in
+`sbJoin`; this does not describe every helper call to
+`ProgramExternalConnectivity`. That branch is consistent with
 the observed pre-HTTP publish refusal, but does not prove all Docker versions or
 configurations behave identically. [setns(2)](https://man7.org/linux/man-pages/man2/setns.2.html)
 changes the calling thread's namespace; a helper must explicitly select
