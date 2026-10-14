@@ -1,5 +1,17 @@
 # NDG 多渠道实时执行台账
 
+## 2026-10-14 Phase B 收口顺序修订
+
+按所有者最新指令，Phase B 分为 B-1（Issue #109 原因分类和安全重新核验）、
+B-2（T01–T10 核心 / T11–T18 异常 / T19–T25 体验）、B-3（UX v2 RC-1 条件）。
+当前 Mac 拒绝的已证原因是此版本尚未实现所需挂载边界证明，发生在源读取及
+授权检查之前，不能解释为 inode、Bookmark、卷 UUID、权限或 NAS 故障。
+B-1 按最新“PASS / 明确拒绝”契约，在独立复核、exact CI 和 post-merge
+通过后可关闭 #109 的分类闭环；原 Mac 正常核验缺口转由 #111 持续追踪，
+保持 BLOCKED，不将分类闭合记作 Mac Source Verification PASS。
+RC-1 要求 T01–T25、Mac Source Verification、GUI、非开发者和最终 exact CI
+均闭合。Docker/fnOS/MAS 在之后各自验收，当前不跨渠道放行。
+
 ## 后续执行优先级：验收收口
 
 用户新顺序：**Phase A 合并与门禁 → Phase B UX v2 完整验收 → Phase C

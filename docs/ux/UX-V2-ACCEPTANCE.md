@@ -1,10 +1,80 @@
 # Governance UX v2 — Phase B acceptance ledger
 
-Date: 2026-10-14. Frozen product source: main
+Date: 2026-10-14. Initial matrix and SQL/store baseline source: main
 `5b802233c2a33a61fb57587d92724e70836400a1`, tree
 `b46284935177c04af81526041651faf80c99fb85`.
+Initial B-1 classification implementation: `c4113e997be3f548ea50f2049ac8334fe169f4b1`,
+tree `6e5d3fd332cc48d79be810ab25ac73676026ef0f` in PR #110. Later revisions
+clarify documentation and remove a UI claim of a local source when network
+identity is unconfirmed; the Go classifier remains unchanged. Final source,
+merge/CI and native/signed GUI identities are separately bound in the PR's
+exact-HEAD receipts. The initial baseline does not certify those later changes.
 Scope: acceptance and confirmed-defect triage; no unrelated feature expansion.
 The owner now orders the work as Phase A → B → C → D → E.
+
+## Owner's revised Phase B sequence
+
+### B-1 — Issue #109: diagnosis before revalidation
+
+`UNVERIFIED → evidence-backed cause → explicit revalidation → MATCH / clear refusal`.
+No automatic retry loop, weaker reader or platform bypass is introduced.
+The current Darwin cause is an unimplemented NDG mount-boundary proof, observed
+before catalog, lease, metadata or content access. It is not evidence of inode
+replacement, expired Bookmark, changed volume UUID, permission denial or a NAS
+outage. The typed refusal is `SOURCE_PLATFORM_PROOF_UNAVAILABLE`; repeated
+explicit previews still refuse without issuing tokens or reading source files.
+
+The reason-contract change separately classifies typed permission, cancellation,
+deadline, mount/symlink rejection, unavailable kernel method, source content
+mismatch and catalog failure. Unknown errors stay unknown and private error
+strings are not returned as reasons. Reader identity/metadata/binding changes
+remain one honest category because the existing reader does not expose a more
+specific observation. Authorization-layer failures do not prove an expired
+Bookmark or changed volume UUID; they keep the existing authorization-required
+category. A network source's missing/read failure is not proof of a server outage.
+
+All rejection reasons are allowlisted by freshness status in preview and commit.
+Only `MATCH` plus existing eligibility/capabilities may record. Commit rechecks
+the source and durably preserves rejection reasons across receipt replay/restart.
+A new explicit preview may succeed only after a recoverable source cause is
+corrected and the trusted reader actually observes MATCH. Platform method
+absence cannot be corrected by retrying or reauthorizing.
+
+Under the owner's revised PASS / clear-refusal contract, Issue #109 may close
+after the classification and explicit revalidation/refusal code contract passes
+independent review, final CI and post-merge checks. The original Mac positive-flow
+blocker is preserved separately in [Issue #111](https://github.com/FNB2026/nas-data-governance/issues/111).
+B-1 closure does not establish Mac Source Verification PASS or close Phase B;
+native/signed GUI evidence remains part of B-2/B-3.
+
+### B-2 — T01–T25 execution groups
+
+| Group | Cases | Evidence needed |
+|---|---|---|
+| Core chain | T01–T10 | Actual supported user flow, selection, current-source preview, durable recording/receipt and restart; source bytes unchanged |
+| Exceptional chain | T11–T18 | Read-only/lock/permission/network/source-change refusal and legal revalidation; no false missing, no automatic unlock |
+| Experience chain | T19–T25 | Upgrade/rollback, native accessibility, privacy, GUI/memory performance, channel/ownership limits and nondeveloper comprehension |
+
+Each case retains the layered status below. Nondeveloper evidence is additionally
+mandatory, not inferred from frontend tests or CI. Applicability/refusal cases
+must show the expected actual refusal; they cannot excuse the required primary
+Mac positive flow. No historical failed runtime result is rewritten.
+
+### B-3 — Governance UX v2 RC-1 readiness contract
+
+This is a readiness label, not a created version, Tag, DMG or release asset.
+
+| Required condition | Current status |
+|---|---|
+| T01–T25 applicable cases closed with source-bound evidence | BLOCKED / partial evidence |
+| Mac Source Verification positive flow and negative boundaries PASS | BLOCKED |
+| Current native GUI walkthrough PASS, with signed-candidate identity when certifying distribution | NOT RUN |
+| Nondeveloper usability PASS (5–8 participants, at least 80% comprehension) | NOT RUN |
+| Full CI/Security at the final frozen RC source and post-merge gate PASS | Required for the future RC; current/old green results are not that identity |
+
+Docker, fnOS and MAS channel rollout remain BLOCKED on this RC exit and their
+own later runtime gates. No approval for public release or cross-channel writes
+is implied. Keep GitHub beta.11 assets immutable.
 
 ## Stage exits
 

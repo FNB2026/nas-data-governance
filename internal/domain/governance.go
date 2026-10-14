@@ -62,8 +62,38 @@ type PreviewItem struct {
 // duplicate members. It is never an execution authorization or a claim that
 // the source cannot change after the observation.
 type SourceFreshness struct {
-	Status    string
-	CheckedAt string
+	Status     string
+	CheckedAt  string
+	ReasonCode string
+}
+
+// SourceFreshnessRejection returns only allowlisted observations consistent
+// with their status. An error string, path or unproven cause is never evidence.
+// Reasons cannot turn a non-MATCH observation into permission to record.
+func SourceFreshnessRejection(check SourceFreshness, present bool) string {
+	if present {
+		allowed := false
+		switch check.Status {
+		case "UNVERIFIED":
+			switch check.ReasonCode {
+			case "SOURCE_PLATFORM_PROOF_UNAVAILABLE", "SOURCE_VERIFICATION_CANCELLED", "SOURCE_VERIFICATION_TIMEOUT", "SOURCE_CATALOG_UNAVAILABLE":
+				allowed = true
+			}
+		case "SOURCE_UNAVAILABLE":
+			switch check.ReasonCode {
+			case "SOURCE_MOUNT_BOUNDARY_REJECTED", "SOURCE_SYMLINK_REJECTED", "SOURCE_VERIFICATION_API_UNAVAILABLE", "SOURCE_READ_FAILED", "SOURCE_FILE_UNAVAILABLE", "SOURCE_REGISTRATION_UNAVAILABLE":
+				allowed = true
+			}
+		case "AUTHORIZATION_REQUIRED":
+			allowed = check.ReasonCode == "SOURCE_PERMISSION_DENIED" || check.ReasonCode == "SOURCE_AUTHORIZATION_MISMATCH"
+		case "SOURCE_CHANGED":
+			allowed = check.ReasonCode == "SOURCE_CONTENT_CHANGED" || check.ReasonCode == "SOURCE_IDENTITY_OR_METADATA_CHANGED"
+		}
+		if allowed {
+			return check.ReasonCode
+		}
+	}
+	return SourceFreshnessReason(check.Status, present)
 }
 
 func SourceFreshnessReason(status string, present bool) string {

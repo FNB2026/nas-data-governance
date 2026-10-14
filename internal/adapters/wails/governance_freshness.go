@@ -40,9 +40,15 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 	set := func(id, status string) {
 		checks[id] = domain.SourceFreshness{Status: status, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	}
+	setReason := func(id, status, reason string) {
+		set(id, status)
+		check := checks[id]
+		check.ReasonCode = reason
+		checks[id] = check
+	}
 	if !governanceFreshnessMountProofAvailable() {
 		for _, ref := range refs {
-			set(ref.GroupID, "UNVERIFIED")
+			setReason(ref.GroupID, "UNVERIFIED", "SOURCE_PLATFORM_PROOF_UNAVAILABLE")
 		}
 		return checks
 	}
@@ -55,7 +61,7 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 	storages, err := a.store.ListStorages(ctx)
 	if err != nil {
 		for _, ref := range refs {
-			set(ref.GroupID, "UNVERIFIED")
+			setReason(ref.GroupID, "UNVERIFIED", "SOURCE_CATALOG_UNAVAILABLE")
 		}
 		return checks
 	}
@@ -72,12 +78,12 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 	for _, ref := range refs {
 		storage, ok := storageByID[ref.StorageID]
 		if !ok || storage.RootPath == "" {
-			set(ref.GroupID, "SOURCE_UNAVAILABLE")
+			setReason(ref.GroupID, "SOURCE_UNAVAILABLE", "SOURCE_REGISTRATION_UNAVAILABLE")
 			continue
 		}
 		files, truncated, err := a.store.GovernanceSourceMembers(ctx, ref, governanceFreshnessMaxFiles)
 		if err != nil {
-			set(ref.GroupID, "UNVERIFIED")
+			setReason(ref.GroupID, "UNVERIFIED", "SOURCE_CATALOG_UNAVAILABLE")
 			continue
 		}
 		if truncated {
@@ -109,7 +115,7 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 		}
 		root := filepath.Clean(group.storage.RootPath)
 		if !filepath.IsAbs(root) {
-			set(group.ref.GroupID, "SOURCE_UNAVAILABLE")
+			setReason(group.ref.GroupID, "SOURCE_UNAVAILABLE", "SOURCE_REGISTRATION_UNAVAILABLE")
 			continue
 		}
 		lease := leases[group.ref.StorageID]
@@ -121,19 +127,22 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 			}
 			if filepath.Clean(lease.Root) != root {
 				lease.Release()
-				set(group.ref.GroupID, "AUTHORIZATION_REQUIRED")
+				setReason(group.ref.GroupID, "AUTHORIZATION_REQUIRED", "SOURCE_AUTHORIZATION_MISMATCH")
 				continue
 			}
 			leases[group.ref.StorageID] = lease
 		}
 		status := "MATCH"
+		reason := ""
 		for _, file := range group.files {
 			if err := ctx.Err(); err != nil {
 				status = freshnessStatusForLease(lease, err)
+				reason = freshnessReasonForRead(lease, err)
 				break
 			}
 			got, readErr := read(ctx, lease.Root, file)
 			if readErr != nil {
+				reason = freshnessReasonForRead(lease, readErr)
 				if errors.Is(readErr, fingerprint.ErrGuardedSourceChanged) {
 					status = "SOURCE_CHANGED"
 				} else {
@@ -143,10 +152,11 @@ func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []doma
 			}
 			if got != file.ContentSHA256 {
 				status = "SOURCE_CHANGED"
+				reason = "SOURCE_CONTENT_CHANGED"
 				break
 			}
 		}
-		set(group.ref.GroupID, status)
+		setReason(group.ref.GroupID, status, reason)
 	}
 	return checks
 }
@@ -221,5 +231,35 @@ func freshnessStatusForLease(lease *fileaccess.Lease, err error) string {
 		return "SOURCE_UNAVAILABLE"
 	default:
 		return "SOURCE_UNAVAILABLE"
+	}
+}
+
+// Classification is based on typed evidence, never string matching. In
+// particular, permission/guard failures on a network lease are not outages.
+func freshnessReasonForRead(lease *fileaccess.Lease, err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "SOURCE_VERIFICATION_CANCELLED"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "SOURCE_VERIFICATION_TIMEOUT"
+	case errors.Is(err, fingerprint.ErrGuardedMountBoundaryUnverified):
+		return "SOURCE_PLATFORM_PROOF_UNAVAILABLE"
+	case errors.Is(err, fingerprint.ErrGuardedSourceChanged):
+		// The reader does not separately expose inode vs size/time changes.
+		return "SOURCE_IDENTITY_OR_METADATA_CHANGED"
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return "SOURCE_PERMISSION_DENIED"
+	case errors.Is(err, syscall.EXDEV):
+		return "SOURCE_MOUNT_BOUNDARY_REJECTED"
+	case errors.Is(err, syscall.ELOOP):
+		return "SOURCE_SYMLINK_REJECTED"
+	case errors.Is(err, syscall.ENOSYS):
+		return "SOURCE_VERIFICATION_API_UNAVAILABLE"
+	case lease != nil && lease.Network && scanner.IsNetworkUnavailableError(err):
+		return "NETWORK_PAUSED"
+	case errors.Is(err, os.ErrNotExist):
+		return "SOURCE_FILE_UNAVAILABLE"
+	default:
+		return "SOURCE_READ_FAILED"
 	}
 }

@@ -65,3 +65,31 @@ func TestGovernanceFreshnessNetworkClassificationRequiresKnownNetworkEvidence(t 
 		})
 	}
 }
+
+func TestGovernanceFreshnessCauseUsesTypedEvidenceOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		network bool
+		want    string
+	}{
+		{"method missing", fingerprint.ErrGuardedMountBoundaryUnverified, true, "SOURCE_PLATFORM_PROOF_UNAVAILABLE"},
+		{"cancelled", context.Canceled, true, "SOURCE_VERIFICATION_CANCELLED"},
+		{"deadline", context.DeadlineExceeded, true, "SOURCE_VERIFICATION_TIMEOUT"},
+		{"permission", &os.PathError{Op: "open", Path: "/synthetic-private-marker", Err: syscall.EACCES}, true, "SOURCE_PERMISSION_DENIED"},
+		{"mount crossing", syscall.EXDEV, true, "SOURCE_MOUNT_BOUNDARY_REJECTED"},
+		{"symlink", syscall.ELOOP, true, "SOURCE_SYMLINK_REJECTED"},
+		{"kernel method missing", syscall.ENOSYS, false, "SOURCE_VERIFICATION_API_UNAVAILABLE"},
+		{"typed identity or metadata change", fingerprint.ErrGuardedSourceChanged, true, "SOURCE_IDENTITY_OR_METADATA_CHANGED"},
+		{"network unavailable", syscall.ENETDOWN, true, "NETWORK_PAUSED"},
+		{"local missing", os.ErrNotExist, false, "SOURCE_FILE_UNAVAILABLE"},
+		{"network missing is ambiguous", os.ErrNotExist, true, "NETWORK_PAUSED"},
+		{"unknown error text must not become evidence", errors.New("ENOENT bookmark expired volume UUID changed /private-marker"), true, "SOURCE_READ_FAILED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := freshnessReasonForRead(&fileaccess.Lease{Network: tc.network}, tc.err); got != tc.want {
+				t.Fatalf("cause = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

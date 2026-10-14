@@ -34,3 +34,17 @@ it("unknown reason codes cannot resolve inherited object properties", () => {
     expect(reasonLabel(code)).toBe("未完成安全校验，请重新载入并人工核对。");
   }
 });
+
+it("explains the platform proof limitation without recommending a retry loop", () => {
+  const label = reasonLabel("SOURCE_PLATFORM_PROOF_UNAVAILABLE");
+  expect(label).toContain("平台");
+  expect(label).toContain("挂载边界");
+  expect(label).toContain("重试");
+  expect(label).not.toContain("重新授权");
+  expect(label).not.toContain("恢复连接");
+});
+
+it("does not infer a local volume when network identity is unconfirmed", () => {
+  expect(reasonLabel("SOURCE_FILE_UNAVAILABLE")).not.toContain("本地");
+  expect(reasonLabel("SOURCE_FILE_UNAVAILABLE")).toContain("未标记 missing");
+});

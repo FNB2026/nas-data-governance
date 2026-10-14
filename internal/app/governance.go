@@ -78,7 +78,7 @@ func (s *GovernanceDecisionService) Preview(ctx context.Context, q domain.Previe
 		item.SourceFreshness, item.SourceCheckedAt = check.Status, check.CheckedAt
 		if !ok || check.Status != "MATCH" {
 			item.Eligibility = "BLOCKED"
-			item.ReasonCode = domain.SourceFreshnessReason(check.Status, ok)
+			item.ReasonCode = domain.SourceFreshnessRejection(check, ok)
 		}
 	}
 	return s.store.PersistGovernancePreview(ctx, q, preview)
