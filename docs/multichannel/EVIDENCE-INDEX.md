@@ -207,3 +207,24 @@ UX v2 附件 679 行 SHA-256 见实时台账。前端 frozen author commit
 
 新的端口安全分类代码与后续 docs 精确 freeze、CI 和独立增量报告见 PR #103；
 未经新运行证据不升级此主机窗口。UX 源新鲜度的新独立工作正在实施，未合并。
+
+
+### PR #103 源码及证据归档合并
+
+最终 exact `335958156ad379159f752b0bddc0a41239828ce3`，tree
+`7249a157ff8f1a206b6577b814748b6527189480`，full binary diff SHA
+`90e36694d6c8aebe8766859b12e0f3e9ced80c0e82cf68aa040441e6e3854c41`。
+Independent `/root/fnos_official_audit` 无新增 P1/P2；39 NAS 模拟、19 OCI、
+24 fnOS 检查与 full required/race 已通过，最终增量仅文档归因/限定 closure。
+[CI 38508267303](https://github.com/FNB2026/nas-data-governance/actions/runs/38508267303)、
+[Security 38508267317](https://github.com/FNB2026/nas-data-governance/actions/runs/38508267317)、
+[Linux 38508267313](https://github.com/FNB2026/nas-data-governance/actions/runs/38508267313)
+三个 exact run 八项全 SUCCESS，review threads 无未解决项，正常转 Ready / squash，
+不使用作者自批或 admin bypass。merge `95eade639a05141aee169ab22fd19b7bec7b15fa`，
+`2026-10-14T03:59:02Z`。新分类源码没有再次设备执行；原 LIMITED BLOCKED 不变。
+合并后本地 required 实际 exit 0，私有日志 SHA
+`b7ab0da0987a8e6bf0b37b26d5ab5665554878a88908119cee4f110b9c160a7c`；
+同一 merge source `95eade6` 的 [CI 38509046556](https://github.com/FNB2026/nas-data-governance/actions/runs/38509046556)、
+[Security 38509373812](https://github.com/FNB2026/nas-data-governance/actions/runs/38509373812)、
+[Linux 38509378059](https://github.com/FNB2026/nas-data-governance/actions/runs/38509378059)
+独立读取均 completed/SUCCESS，八项 checks 成功，不借用 PR checks 代替。

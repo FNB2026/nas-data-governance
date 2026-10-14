@@ -81,3 +81,13 @@
   新 FD/mount_id 预检修正不追认历史根因，也不把数字不等说成真实挂载变化。
 - UX 源新鲜度必须限选定成员、明确预算/取消、授权租约和根目录；无权限
   不等于 missing，不可因重新授权或读取失败解除 Journal Recovery Lock。
+
+
+R30 后续来源归因（只读研究，不是新设备试验）：
+[Moby v28.5.2 endpoint 源码](https://raw.githubusercontent.com/moby/moby/v28.5.2/libnetwork/endpoint.go)
+仅在非 internal 网络调用外部连接编程；本窗口没有端口映射与该逻辑一致。
+这是官方源码解释，不证明设备二进制逐字对应源码，也不追认首次未知原因。
+[Docker internal 规范](https://docs.docker.com/reference/cli/docker/network/create/#network-internal-mode---internal)
+说明 host 与内部网络仍可互访；不能宣称 Internal=true 就隔绝宿主服务。
+后续只研究固定自身 namespace / probe 身份与权限下降，未经新精确安全复核
+不执行，不改生产 daemon，不引入未知工具镜像，不把其他连接方式叫原 publish PASS。
