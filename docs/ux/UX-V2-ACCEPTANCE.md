@@ -1,8 +1,13 @@
 # Governance UX v2 — Phase B acceptance ledger
 
-Date: 2026-10-14. Frozen product source: main
+Date: 2026-10-14. Initial matrix and SQL/store baseline source: main
 `5b802233c2a33a61fb57587d92724e70836400a1`, tree
 `b46284935177c04af81526041651faf80c99fb85`.
+Later B-1 classification code: `c4113e997be3f548ea50f2049ac8334fe169f4b1`,
+tree `6e5d3fd332cc48d79be810ab25ac73676026ef0f` in PR #110. Subsequent
+documentation-only revisions preserve those product bytes. Final merge/CI and
+any native/signed GUI identities are separate receipts; the initial baseline
+does not certify the later classification implementation.
 Scope: acceptance and confirmed-defect triage; no unrelated feature expansion.
 The owner now orders the work as Phase A → B → C → D → E.
 
