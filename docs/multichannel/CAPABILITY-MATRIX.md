@@ -39,3 +39,18 @@ G6 #97 为离线 OCI 验证实现，正式 native collector 尚未执行。旧 b
   12个现有容器。仅独立新disposable区域/资源验证已授权；现有数据/容器不变。
   NAS Docker host smoke、FPK、内置SMB/其他NAS平台都尚未运行，不能扩大支持。
 - fnOS可用不解决独立macOS/Bookmark/CarbonCore环境，MAS状态不变。
+
+
+## 2026-10-14 当前能力增量
+
+- #98/#102/#100 已按独立 exact review 正常合并 main，真实 SQLite、Wails
+  调用链、组件及 CI 证据闭合。批次历史发现仅只读，不能重放/修复状态。
+- 完整 UX v2 仍未 PASS：外部源变更但未重新索引的 P0 检查正在独立实现；
+  原生 GUI、未来正式候选、5–8 名非开发者理解走查仍 NOT RUN。
+- fnOS 主机试验已真实启动专用限制容器，但缺少要求的 loopback 映射，
+  在 HTTP 之前安全停止：LIMITED BLOCKED。已取得本窗口源字节/既有容器
+  状态与精确自有资源清理证据，不等于扫描、单 writer 或重启持久化 PASS。
+- 容器镜像仍绑定历史 unsigned `063d0ee` 实验源码，不含最新 main UX 代码；
+  不把本轮主机协议代码、Ubuntu CI 或原有 Mac DMG 混为同一发行身份。
+- FPK 安装/升级/卸载、真实 SMB、其他 NAS 平台、MAS 写入能力未开放。
+  beta.11 资产不变；MAS 1A/1B INCONCLUSIVE、CarbonCore FAIL 与 NO-GO 保留。

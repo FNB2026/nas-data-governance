@@ -147,3 +147,63 @@ UX v2 附件 679 行 SHA-256 见实时台账。前端 frozen author commit
   只在本机私有归档，不在公共文档保存地址、账号、路径、环境变量或密码。
 
 以上日期绑定证据不把旧FAIL覆写成PASS。MAS/正式native/真实SMB/FPK/其他NAS依赖仍保持。
+
+
+## 2026-10-14 合并与真实设备窗口
+
+### 正常合并 / main
+
+- #102 exact `bd3b96be18cd0c7607920dc591e69012f182e30d`，merge
+  `02164ad63ddc0c818e4b764ee1e69ed998c4b00f`：UTC 四位年、非法 offset、
+  variable fraction 时间排序、Get/List DTO 及真实旧 audit 独立复核。
+- #98 exact `390f80844b39c46334c86b25c816ac89798a3a07`，merge
+  `ed7287c1842aec2dd0608895cd027fc502990864`：最后 audit/共享时间函数
+  真实 SQLite RED/GREEN 与独立增量审查；完整 P0 不追认 PASS。
+- #100 exact `ae653be45681dcb425251620a7d560af15adac94`，merge
+  `82f6fd3dbe2e0f434e6f7d715866676abbc54f40`：独立完整身份集合、状态、
+  安全 reason 与 project late-response 复核；仅 read-only discovery。
+- 合并后同一 source `82f6fd3`：
+  [CI 38432368339](https://github.com/FNB2026/nas-data-governance/actions/runs/38432368339)、
+  [Security 38432566773](https://github.com/FNB2026/nas-data-governance/actions/runs/38432566773)、
+  [Linux 38432573333](https://github.com/FNB2026/nas-data-governance/actions/runs/38432573333)
+  均 SUCCESS，八项检查成功。实际本地 required exit 0，私有日志 SHA-256
+  `8cbe63edb9b2689185dd345973ff869b12d7d8e3fe92312e280c34bbb5ccda0f`。
+
+### fnOS 限定主机试验（不是正式产品扫描 PASS）
+
+- [PR #103](https://github.com/FNB2026/nas-data-governance/pull/103) 实际执行
+  harness source `92fd581b6e9b20ed7e686dd1b3a61d041e448eb2`，SHA-256
+  `63737b140de16695ff890dbe9caf09bfeda4790c12b61a04ba8fe4651d1577d8`。
+  独立 reviewer `/root/fnos_official_audit` 精确代码/transport/operator 及
+  本机私有运行证据复核；不是作者自批 GitHub Review。
+- Operator SHA `184de2ef1491ebcffb9adf8cad5b9a3a7f5e3a3b8567fb86e2e8b9e738426f17`；
+  transport SHA `fba1bd35182c0a9c9215b6fd32c294cec87a1c275e0a9f70717c5431a280eeb4`。
+  14 regular members逐 SHA；外层/子 Python `-I -S -B` 防字节缓存，
+  不声称系统认证日志或所有系统副作用为零。
+- 实际 UTC `2026-10-14T03:36:56.857732Z` 至
+  `2026-10-14T03:36:59.492376Z`：两段可信 handoff，child exit 1；
+  operator SSH exit 0 是封装返回，**不代表测试通过**。
+  结果 **LIMITED BLOCKED**，receipt/precleanup 内容相同 SHA
+  `6bd918358d054af301b507f8ea5220d9f652f6cc4ba87dd361878e01ea4968c9`。
+- 自有容器 Running=true、Ports={}；独立冻结代码 exercise 模拟复现
+  `KeyError('8080/tcp')`，HTTP 调用 0。没有 auth/扫描/重启/单 writer
+  或该 HTTP 日志隐私 PASS。缺失映射的配置/环境原因不能扩大为产品缺陷。
+- 15 个既有 opaque ID、12 running/3 stopped，30 个限定八字段状态 JSON
+  前后逐项一致；不读取这些容器的配置、环境、挂载或日志。source-before
+  与独立 after 清单均 7 项且字节相同 SHA
+  `11ea3bdcd0fc27acac4cf6ce9a004dba295714b955cfd4fc5549999a2a6365d6`。
+  仅本轮 journal 记录的一 container/一 network/一 nonce image tag 取得
+  exact not-found 响应。原先简单 No-such 文本检查的 false 不证明残留。
+- Docker stdout SHA `be15e2dd58f4dec013891150c3cc0621c4e906416a5b4b3c9e91ecc7b69ceb20`；
+  stderr SHA `27be5602e8dce67078666bea843d08082443ed25da221135d8f7c97fb06bb539`；
+  private NDJSON SHA `bf2cef190b59f367e692111b048dc650bd014947bee52a71338c686f6369fced`。
+  原始路径、ID、文件名、标记和凭据不入公共记录。
+- App image仍 frozen `063d0ee980ae8115cc92c0c9df0c5c43e540f14b` unsigned
+  web-experimental，OCI SHA `6d59909f00e540d93d5fc60a36754f08692f4dcecd251aaa5843b6d1e9999336`。
+  它不是最新 UX main 或 beta.11 Mac 正式签名 DMG。
+- 首次 a4 handoff 缺失且根因未知；第二次是已取得的设备数字比较拒绝。
+  后续 Linux FD/mount_id 修正保持路径↔FD身份、namespace、所有权与容量；
+  不覆盖任一次原始 BLOCKED。FPK/SMB/生产源/其他 NAS 仍 NOT RUN。
+
+新的端口安全分类代码与后续 docs 精确 freeze、CI 和独立增量报告见 PR #103；
+未经新运行证据不升级此主机窗口。UX 源新鲜度的新独立工作正在实施，未合并。
