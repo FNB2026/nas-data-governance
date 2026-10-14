@@ -85,7 +85,7 @@
 
 R30 后续来源归因（只读研究，不是新设备试验）：
 [Moby v28.5.2 endpoint 源码](https://raw.githubusercontent.com/moby/moby/v28.5.2/libnetwork/endpoint.go)
-仅在非 internal 网络调用外部连接编程；本窗口没有端口映射与该逻辑一致。
+`sbJoin` 的该外部连接编程分支以 `!n.internal` 为条件；本窗口没有端口映射与该逻辑一致。
 这是官方源码解释，不证明设备二进制逐字对应源码，也不追认首次未知原因。
 [Docker internal 规范](https://docs.docker.com/reference/cli/docker/network/create/#network-internal-mode---internal)
 说明 host 与内部网络仍可互访；不能宣称 Internal=true 就隔绝宿主服务。
