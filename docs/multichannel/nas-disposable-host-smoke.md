@@ -194,10 +194,14 @@ separate from successful runtime evidence and require independent closure.
 
 ## Preserved operator attempts (2026-10-14)
 
-The two original a4e10ae preflight attempts remain **BLOCKED**, with their
-private raw evidence intact. Their Btrfs device-equality refusal is retained
-separately from the later kernel-FD compatibility tests and operator read-only
-metadata evidence. They are not overwritten by new source or tests.
+The two original a4e10ae attempts remain **BLOCKED**, with private raw evidence
+intact. The first wrapper did not receive an initial handoff: its underlying
+failure cause, reached phase and resource closure are unknown, and later
+Btrfs metadata must not be used to assign it a cause retroactively. The second
+attempt explicitly returned `directory_mount_identity_changed` at the old
+device-equality check. That refusal is not evidence that a mount actually
+changed. Its classification is kept separate from later kernel-FD compatibility
+tests and read-only metadata evidence. No original record is overwritten.
 
 At exact harness `92fd581b6e9b20ed7e686dd1b3a61d041e448eb2`, the authorized
 operator's 03:36:56–03:36:59 UTC attempt returned **BLOCKED** /
@@ -219,5 +223,20 @@ and no HTTP calls. Internal bridge, loopback publication and all existing
 isolation requirements remain strict; no daemon or network topology is changed
 to make this attempt pass. No automatic host retry is authorized by this fix.
 Raw own-container diagnostics and private source/status closure remain with the
-operator; the independent reviewer must verify them before any stronger runtime
-claim. Real host scan/restart/single-writer/privacy acceptance remains NOT RUN.
+operator. Independent closure for this exact third attempt verified 15 existing
+containers (12 running, 3 stopped): 30 minimal stable-state JSON records form
+15 equal before/after pairs. The seven disposable source files remain present;
+their before/after hash-list bytes are identical, SHA-256
+`11ea3bdcd0fc27acac4cf6ce9a004dba295714b955cfd4fc5549999a2a6365d6`.
+Read-only exact-ID queries found this attempt's one container, one network and
+one nonce image absent at that query time. This establishes bounded closure,
+not cleanup of all earlier experiments or any production directory.
+
+The independent reviewer checked read-only export revision `90ae1033` and the
+three actual stderr responses. The original diagnostic rule checked only
+`NoSuch` and incorrectly interpreted the network's `not found` response; that
+false rule result is retained as a diagnostic limitation, not proof of a
+remaining resource. Neither SSH/wrapper return 0 nor unchanged source bytes
+changes the child exit 1 and **LIMITED BLOCKED** result. HTTP acceptance was not
+executed. Real host scan/restart/single-writer/privacy acceptance remains NOT RUN;
+no further device retry or topology weakening is authorized by this record.
