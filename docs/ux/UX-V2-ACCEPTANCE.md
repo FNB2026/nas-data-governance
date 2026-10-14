@@ -34,9 +34,12 @@ A new explicit preview may succeed only after a recoverable source cause is
 corrected and the trusted reader actually observes MATCH. Platform method
 absence cannot be corrected by retrying or reauthorizing.
 
-Issue #109 remains OPEN until its primary Mac positive-flow blocker has a proved
-safe resolution. A clearer refusal closes the diagnosis gap only; it does not
-establish Mac Source Verification PASS or close Phase B.
+Under the owner's revised PASS / clear-refusal contract, Issue #109 may close
+after the classification and explicit revalidation/refusal code contract passes
+independent review, final CI and post-merge checks. The original Mac positive-flow
+blocker is preserved separately in [Issue #111](https://github.com/FNB2026/nas-data-governance/issues/111).
+B-1 closure does not establish Mac Source Verification PASS or close Phase B;
+native/signed GUI evidence remains part of B-2/B-3.
 
 ### B-2 — T01–T25 execution groups
 
