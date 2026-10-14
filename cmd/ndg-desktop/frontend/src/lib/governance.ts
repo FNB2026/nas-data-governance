@@ -38,6 +38,12 @@ export const REASON_LABELS: Record<string, string> = {
   IDEMPOTENCY_CONFLICT: "重试标识与请求不一致，不能自动重放。",
   UNSUPPORTED_DECISION: "此决定需要单独核对，当前批量接口不支持。",
   GROUP_NOT_FOUND: "此组已不在当前结果中，请重新载入。",
+  SOURCE_CHANGED: "所选组中的源文件已变化，请重新扫描并核对结果。未记录决定。",
+  SOURCE_UNAVAILABLE: "所选组中的源文件当前不可读取；未标记为缺失，也未记录决定。",
+  AUTHORIZATION_REQUIRED: "需要重新授权所选源目录；未记录决定。",
+  NETWORK_PAUSED: "网络源暂不可用；请恢复连接后重新预览。未记录决定。",
+  SOURCE_LIMIT_EXCEEDED: "所选文件超过本次核验预算；请缩小选择。未记录决定。",
+  SOURCE_UNVERIFIED: "无法确认所选源文件当前内容；未记录决定。",
   UNAVAILABLE: "安全接口暂不可用；可以查看结果，不能提交决定。",
 };
 
@@ -102,13 +108,29 @@ export interface GovernanceCapabilities {
 
 export type ReviewSubject = Pick<ReviewGroup, "group_id" | "storage_id" | "sha256" | "subject_version" | "decision_revision">;
 export interface PreviewRequest { items: ReviewSubject[]; decision_type: DecisionKind; reason: string }
-export interface PreviewItem extends ReviewSubject { eligibility: "ELIGIBLE" | "BLOCKED" | "CONFLICT"; reason_code: string }
+export interface PreviewItem extends ReviewSubject {
+  eligibility: "ELIGIBLE" | "BLOCKED" | "CONFLICT";
+  reason_code: string;
+  source_freshness?: string;
+  source_checked_at?: string;
+}
 export interface ReviewPreview {
   preview_token: string;
   expires_at: string;
   project_scope: string;
   items: PreviewItem[];
   records_only: boolean;
+}
+
+// Only source-verified eligible groups may start a new records-only commit.
+// A blocked group may remain in the same preview while a MATCH group is
+// recorded; an eligible group with missing or non-MATCH freshness fails the
+// whole new submission closed. Existing ambiguous submissions are reconciled
+// separately with their original idempotency key.
+export function canCommitGovernancePreview(preview: ReviewPreview | null): boolean {
+  if (!preview?.preview_token) return false;
+  const eligible = preview.items.filter((item) => item.eligibility === "ELIGIBLE");
+  return eligible.length > 0 && eligible.every((item) => item.source_freshness === "MATCH");
 }
 export type Outcome = "SAVED" | "UNCHANGED" | "CONFLICT" | "BLOCKED" | "FAILED";
 export interface BatchResult {

@@ -13,61 +13,104 @@ import (
 )
 
 func (s *SQLiteStore) PreviewBatchDecisions(ctx context.Context, req domain.PreviewBatchRequest, persist bool) (domain.GovernancePreview, error) {
+	v, caps, e := s.EvaluateGovernancePreview(ctx, req)
+	if e != nil {
+		return v, e
+	}
+	if !persist || !caps.CanRecordDecisions {
+		for i := range v.Items {
+			v.Items[i].Eligibility, v.Items[i].ReasonCode = "BLOCKED", "RECORDING_UNAVAILABLE"
+		}
+		return v, nil
+	}
+	return s.PersistGovernancePreview(ctx, req, v)
+}
+
+// EvaluateGovernancePreview reads indexed decision subjects without writing a
+// preview token. Source verification is performed by the authorized
+// application layer before PersistGovernancePreview is called.
+func (s *SQLiteStore) EvaluateGovernancePreview(ctx context.Context, req domain.PreviewBatchRequest) (domain.GovernancePreview, domain.GovernanceCapabilities, error) {
 	v := domain.GovernancePreview{Items: []domain.PreviewItem{}, RecordsOnly: true}
 	b, _ := json.Marshal(req)
 	if len(req.Items) == 0 || len(req.Items) > 100 || len(b) > 131072 || len(req.Reason) > 2048 || !supportedDecision(req.DecisionType) {
-		return v, ErrGovernanceRejected
+		return v, domain.GovernanceCapabilities{}, ErrGovernanceRejected
 	}
 	seen := map[string]bool{}
 	for _, ref := range req.Items {
 		if seen[ref.GroupID] || len(ref.SubjectVersion) > 64 || ref.DecisionRevision < 0 || len(ref.SHA256) != 64 || ref.GroupID != report.StableGroupID(ref.StorageID, ref.SHA256) || len(ref.StorageID) > 256 {
-			return v, ErrGovernanceRejected
+			return v, domain.GovernanceCapabilities{}, ErrGovernanceRejected
 		}
 		seen[ref.GroupID] = true
 	}
 	caps, e := s.GovernanceCapabilities(ctx)
 	if e != nil {
-		return v, e
+		return v, caps, e
 	}
 	v.ProjectScope = caps.ProjectScope
 	tx, e := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if e != nil {
-		return v, ErrGovernanceRejected
+		return v, caps, ErrGovernanceRejected
 	}
 	defer tx.Rollback()
 	for _, input := range req.Items {
-		ref, _, e := governanceSubject(ctx, tx, input)
+		ref, _, subjectErr := governanceSubject(ctx, tx, input)
 		item := domain.PreviewItem{GovernanceSubject: ref, Eligibility: "ELIGIBLE", ReasonCode: "RECORD_ONLY"}
-		if e != nil {
-			item.Eligibility = "BLOCKED"
-			item.ReasonCode = "GROUP_UNAVAILABLE"
+		if subjectErr != nil {
+			item.Eligibility, item.ReasonCode = "BLOCKED", "GROUP_UNAVAILABLE"
 		} else if input.SubjectVersion != "" && (input.SubjectVersion != ref.SubjectVersion || input.DecisionRevision != ref.DecisionRevision) {
-			item.Eligibility = "CONFLICT"
-			item.ReasonCode = "SUBJECT_CHANGED"
-		}
-		if !persist || !caps.CanRecordDecisions {
-			item.Eligibility = "BLOCKED"
-			item.ReasonCode = "RECORDING_UNAVAILABLE"
+			item.Eligibility, item.ReasonCode = "CONFLICT", "SUBJECT_CHANGED"
+		} else if !caps.CanRecordDecisions {
+			item.Eligibility, item.ReasonCode = "BLOCKED", "RECORDING_UNAVAILABLE"
 		}
 		v.Items = append(v.Items, item)
 	}
 	if tx.Commit() != nil {
-		return v, ErrGovernanceRejected
+		return v, caps, ErrGovernanceRejected
 	}
-	if !persist || !caps.CanRecordDecisions {
+	return v, caps, nil
+}
+
+// PersistGovernancePreview stores a source-checked preview and rechecks its
+// indexed subject immediately before persistence.
+func (s *SQLiteStore) PersistGovernancePreview(ctx context.Context, req domain.PreviewBatchRequest, v domain.GovernancePreview) (domain.GovernancePreview, error) {
+	caps, e := s.GovernanceCapabilities(ctx)
+	if e != nil || !caps.CanRecordDecisions || v.ProjectScope != caps.ProjectScope || v.PreviewToken != "" || v.ExpiresAt != "" || len(req.Items) == 0 || len(req.Items) != len(v.Items) || len(req.Items) > 100 {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	eligible := 0
+	sourceChecked := false
+	for i := range v.Items {
+		if v.Items[i].GroupID != req.Items[i].GroupID {
+			return domain.GovernancePreview{}, ErrGovernanceRejected
+		}
+		ref, _, err := governanceSubject(ctx, s.db, req.Items[i])
+		sourceChecked = sourceChecked || v.Items[i].SourceFreshness != ""
+		if err != nil || ref.SubjectVersion != v.Items[i].SubjectVersion || ref.DecisionRevision != v.Items[i].DecisionRevision {
+			v.Items[i].Eligibility, v.Items[i].ReasonCode = "CONFLICT", "SUBJECT_CHANGED"
+		} else if v.Items[i].Eligibility == "ELIGIBLE" {
+			eligible++
+		}
+	}
+	if eligible == 0 && sourceChecked {
 		return v, nil
 	}
 	token, e := opaqueID()
 	if e != nil {
-		return v, e
+		return domain.GovernancePreview{}, e
 	}
 	v.PreviewToken = token
 	v.ExpiresAt = time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339Nano)
-	payload, _ := json.Marshal(req)
-	snapshot, _ := json.Marshal(v)
-	tx, e = s.db.BeginTx(ctx, nil)
+	payload, e := json.Marshal(req)
+	if e != nil || len(payload) > 131072 {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	snapshot, e := json.Marshal(v)
+	if e != nil || len(snapshot) > 131072 {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
-		return v, ErrGovernanceRejected
+		return domain.GovernancePreview{}, ErrGovernanceRejected
 	}
 	defer tx.Rollback()
 	if guardedGovernanceWrite(ctx, s, tx) != nil {
@@ -86,7 +129,36 @@ func (s *SQLiteStore) PreviewBatchDecisions(ctx context.Context, req domain.Prev
 	return v, nil
 }
 
+func (s *SQLiteStore) GetGovernancePreview(ctx context.Context, token string) (domain.GovernancePreview, error) {
+	if !validKey(token) {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	var scope, snapshot string
+	if err := s.db.QueryRowContext(ctx, `SELECT scope,preview_json FROM governance_previews WHERE token=?`, token).Scan(&scope, &snapshot); err != nil || len(snapshot) > 131072 {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	var preview domain.GovernancePreview
+	if json.Unmarshal([]byte(snapshot), &preview) != nil || preview.PreviewToken != token || preview.ProjectScope != scope || len(preview.Items) == 0 || len(preview.Items) > 100 {
+		return domain.GovernancePreview{}, ErrGovernanceRejected
+	}
+	return preview, nil
+}
+
 func (s *SQLiteStore) CommitBatchDecisions(ctx context.Context, req domain.CommitBatchRequest) (domain.GovernanceBatchResult, error) {
+	return s.commitBatchDecisions(ctx, req, nil)
+}
+
+// CommitBatchDecisionsWithFreshness is the authorized application path. The
+// source checks are supplied by the composition root after re-reading the
+// persisted preview's selected members. This remains decision recording only.
+func (s *SQLiteStore) CommitBatchDecisionsWithFreshness(ctx context.Context, req domain.CommitBatchRequest, freshness map[string]domain.SourceFreshness) (domain.GovernanceBatchResult, error) {
+	if freshness == nil {
+		return domain.GovernanceBatchResult{}, ErrGovernanceRejected
+	}
+	return s.commitBatchDecisions(ctx, req, freshness)
+}
+
+func (s *SQLiteStore) commitBatchDecisions(ctx context.Context, req domain.CommitBatchRequest, freshness map[string]domain.SourceFreshness) (domain.GovernanceBatchResult, error) {
 	s.governanceMu.Lock()
 	defer s.governanceMu.Unlock()
 	if !validKey(req.PreviewToken) || !validKey(req.IdempotencyKey) {
@@ -151,7 +223,15 @@ func (s *SQLiteStore) CommitBatchDecisions(ctx context.Context, req domain.Commi
 		if ctx.Err() != nil {
 			return s.GetBatchDecisionResult(context.Background(), batchID)
 		}
-		if e = s.commitDecisionItem(ctx, batchID, input, preview.Items[i]); e != nil {
+		item := preview.Items[i]
+		if freshness != nil && item.Eligibility == "ELIGIBLE" {
+			check, ok := freshness[item.GroupID]
+			if !ok || check.Status != "MATCH" {
+				item.Eligibility = "BLOCKED"
+				item.ReasonCode = domain.SourceFreshnessReason(check.Status, ok)
+			}
+		}
+		if e = s.commitDecisionItem(ctx, batchID, input, item); e != nil {
 			return s.GetBatchDecisionResult(context.Background(), batchID)
 		}
 	}

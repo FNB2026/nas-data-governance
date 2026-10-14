@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"modernc.org/sqlite"
 
@@ -17,6 +18,59 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/report"
 	"github.com/FNB2026/nas-data-governance/internal/version"
 )
+
+// GovernanceSourceMembers returns only active indexed members of one
+// explicitly selected duplicate group. It is metadata for the application
+// authorization layer; this package never opens these paths. truncated is
+// true when the group exceeds the caller's bounded member budget.
+func (s *SQLiteStore) GovernanceSourceMembers(ctx context.Context, ref domain.GovernanceSubject, maxMembers int) ([]domain.FileInstance, bool, error) {
+	if maxMembers < 2 || maxMembers > 4096 || len(ref.StorageID) > 256 || len(ref.SHA256) != 64 || ref.GroupID != report.StableGroupID(ref.StorageID, ref.SHA256) {
+		return nil, false, ErrGovernanceRejected
+	}
+	if _, err := hex.DecodeString(ref.SHA256); err != nil {
+		return nil, false, ErrGovernanceRejected
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT path,size,mtime,device,inode,physical_reliable,content_sha256 FROM file_instances WHERE file_status='active' AND storage_id=? AND content_sha256=? ORDER BY id LIMIT ?`, ref.StorageID, ref.SHA256, maxMembers+1)
+	if err != nil {
+		return nil, false, ErrGovernanceRejected
+	}
+	defer rows.Close()
+	members := make([]domain.FileInstance, 0, maxMembers)
+	for rows.Next() {
+		var file domain.FileInstance
+		var mtime, hash string
+		var device, inode int64
+		var reliable bool
+		if err := rows.Scan(&file.Path, &file.Size, &mtime, &device, &inode, &reliable, &hash); err != nil {
+			return nil, false, ErrGovernanceRejected
+		}
+		if hash != ref.SHA256 || file.Size < 0 {
+			return nil, false, ErrGovernanceRejected
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, mtime)
+		if err != nil {
+			return nil, false, ErrGovernanceRejected
+		}
+		file.StorageID, file.ContentSHA256 = ref.StorageID, hash
+		file.ModifiedAt = parsed
+		file.Device, file.Inode = uint64(device), uint64(inode)
+		file.Physical.Reliable = reliable && device != 0 && inode != 0
+		if file.Physical.Reliable {
+			file.Physical.Device, file.Physical.Inode = uint64(device), uint64(inode)
+		}
+		members = append(members, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, ErrGovernanceRejected
+	}
+	if len(members) > maxMembers {
+		return nil, true, nil
+	}
+	if len(members) < 2 {
+		return nil, false, ErrGovernanceRejected
+	}
+	return members, false, nil
+}
 
 var ErrGovernanceRejected = errors.New("governance request rejected")
 

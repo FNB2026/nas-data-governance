@@ -20,7 +20,14 @@ import (
 // all source/database data are disposable. This is not a native GUI certificate.
 func governanceAPIWithSource(t *testing.T) (*API, map[string][32]byte) {
 	t.Helper()
-	source := t.TempDir()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("canonical synthetic fixture base")
+	}
+	source := filepath.Join(base, "source-root")
+	if err := os.Mkdir(source, 0700); err != nil {
+		t.Fatal("synthetic source root setup")
+	}
 	before := map[string][32]byte{}
 	for i := 0; i < 3; i++ {
 		for j := 0; j < 2; j++ {
@@ -56,7 +63,145 @@ func governanceAPIWithSource(t *testing.T) (*API, map[string][32]byte) {
 	}
 	return a, before
 }
+
+func requireGovernanceFreshnessMountProof(t *testing.T) {
+	t.Helper()
+	if !governanceFreshnessMountProofAvailable() {
+		t.Skip("this platform cannot prove the registered-root mount boundary; runtime freshness remains unverified")
+	}
+}
+
+func TestGovernanceFreshnessCancellationReleasesAuthorizedLease(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	a, native, root := sandboxTestAPI(t)
+	for _, name := range []string{"disposable-a", "disposable-b"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("same disposable bytes"), 0600); err != nil {
+			t.Fatal("synthetic source setup")
+		}
+	}
+	if _, err := a.PickDirectory(""); err != nil {
+		t.Fatal("synthetic source authorization")
+	}
+	if _, err := a.CreateProjectFromSource(CreateProjectInput{SourcePath: root}); err != nil {
+		t.Fatal("synthetic project setup")
+	}
+	job, err := a.StartScan(StartScanRequest{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal("synthetic scan start")
+	}
+	progress := waitForJobTerminal(t, a, job.JobID, 10*time.Second)
+	if progress.State != "COMPLETED" || progress.Processed != 2 || progress.Failed != 0 {
+		t.Fatal("synthetic duplicate scan did not complete")
+	}
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 10})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal("synthetic duplicate subject unavailable")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	native.mu.Lock()
+	before := native.releases
+	native.afterResolve = cancel
+	native.mu.Unlock()
+	checks := a.verifyGovernanceSources(ctx, []domain.GovernanceSubject{page.Items[0].GovernanceSubject})
+	if got := checks[page.Items[0].GroupID].Status; got != "UNVERIFIED" {
+		t.Fatalf("canceled freshness observation should fail closed, got %q", got)
+	}
+	done := make(chan struct{})
+	go func() {
+		a.access.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("access manager remained blocked, indicating an unreleased source lease")
+	}
+	native.mu.Lock()
+	defer native.mu.Unlock()
+	if native.releases <= before {
+		t.Fatal("authorized source lease cleanup did not run")
+	}
+}
+
+func TestGovernanceFreshnessMemberCeilingCreatesNoPreviewToken(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	root := t.TempDir()
+	for i := 0; i <= governanceFreshnessMaxFiles; i++ {
+		path := filepath.Join(root, fmt.Sprintf("disposable-member-%03d", i))
+		if err := os.WriteFile(path, []byte("same bounded fixture"), 0600); err != nil {
+			t.Fatal("synthetic source setup")
+		}
+	}
+	a := NewAPI()
+	a.sandbox = false // Explicit disposable GitHub/DMG test composition.
+	t.Cleanup(func() { _ = a.CloseProject() })
+	if _, err := a.OpenProjectReadWrite(filepath.Join(t.TempDir(), "freshness-limit.db")); err != nil {
+		t.Fatal("synthetic project setup")
+	}
+	job, err := a.StartScan(StartScanRequest{Root: root, Workers: 2})
+	if err != nil {
+		t.Fatal("synthetic scan start")
+	}
+	progress := waitForJobTerminal(t, a, job.JobID, 30*time.Second)
+	if progress.State != "COMPLETED" || progress.Processed != governanceFreshnessMaxFiles+1 || progress.Failed != 0 {
+		t.Fatal("synthetic member scan did not complete")
+	}
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 10})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal("synthetic duplicate group unavailable")
+	}
+	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
+	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].ReasonCode != "SOURCE_LIMIT_EXCEEDED" {
+		t.Fatal("oversized duplicate group was not blocked before source reads", err)
+	}
+}
+
+func TestSandboxGovernancePreviewDoesNotAcquireSourceLeaseOrPersistToken(t *testing.T) {
+	a, native, root := sandboxTestAPI(t)
+	for _, name := range []string{"disposable-a", "disposable-b"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("same disposable bytes"), 0600); err != nil {
+			t.Fatal("synthetic source setup")
+		}
+	}
+	if _, err := a.PickDirectory(""); err != nil {
+		t.Fatal("synthetic source authorization")
+	}
+	if _, err := a.CreateProjectFromSource(CreateProjectInput{SourcePath: root}); err != nil {
+		t.Fatal("synthetic project setup")
+	}
+	job, err := a.StartScan(StartScanRequest{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal("synthetic scan start")
+	}
+	progress := waitForJobTerminal(t, a, job.JobID, 10*time.Second)
+	if progress.State != "COMPLETED" || progress.Processed != 2 || progress.Failed != 0 {
+		t.Fatal("synthetic duplicate scan did not complete")
+	}
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 10})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal("synthetic duplicate group unavailable")
+	}
+	native.mu.Lock()
+	beforeResolve := native.releases
+	leaseAttempted := false
+	native.afterResolve = func() { leaseAttempted = true }
+	native.mu.Unlock()
+	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
+	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].ReasonCode != "RECORDING_UNAVAILABLE" {
+		t.Fatal("sandbox preview did not remain read-only", err)
+	}
+	if leaseAttempted {
+		t.Fatal("sandbox recording-disabled preview unnecessarily reacquired a source lease")
+	}
+	native.mu.Lock()
+	afterResolve := native.releases
+	native.mu.Unlock()
+	if afterResolve != beforeResolve {
+		t.Fatal("sandbox preview resolved an additional source bookmark")
+	}
+}
 func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
 	var nonce [16]byte
 	if _, e := rand.Read(nonce[:]); e != nil {
 		t.Fatal("disposable nonce creation")
@@ -160,7 +305,181 @@ func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) 
 	}
 }
 
+func TestGovernancePreviewRejectsPhysicalSourceChangedWithoutReindex(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	a, _ := governanceAPIWithSource(t)
+	ctx := context.Background()
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic duplicate group unavailable")
+	}
+	ref := page.Items[0].GovernanceSubject
+	files, err := a.store.ListFiles(ctx, ref.StorageID)
+	if err != nil {
+		t.Fatal("synthetic indexed members unavailable")
+	}
+	var changed *domain.FileInstance
+	for i := range files {
+		if files[i].ContentSHA256 == ref.SHA256 {
+			changed = &files[i]
+			break
+		}
+	}
+	if changed == nil {
+		t.Fatal("synthetic indexed member unavailable")
+	}
+	original, err := os.ReadFile(changed.Path)
+	if err != nil {
+		t.Fatal("synthetic source read")
+	}
+	if len(original) == 0 {
+		t.Fatal("synthetic source unexpectedly empty")
+	}
+	mutated := append([]byte(nil), original...)
+	mutated[0] ^= 0x7f
+	if err := os.WriteFile(changed.Path, mutated, 0600); err != nil {
+		t.Fatal("synthetic source mutation")
+	}
+	if err := os.Chtimes(changed.Path, changed.ModifiedAt, changed.ModifiedAt); err != nil {
+		t.Fatal("restore synthetic source timestamp")
+	}
+	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.DecisionKeepAll, Reason: "synthetic stale-source test"})
+	if err != nil {
+		t.Fatal("preview should return a safe blocked result", err)
+	}
+	if len(preview.Items) != 1 || preview.Items[0].Eligibility == "ELIGIBLE" || preview.Items[0].ReasonCode != "SOURCE_CHANGED" {
+		t.Fatalf("stale physical source must block preview, got eligibility=%q reason=%q", preview.Items[0].Eligibility, preview.Items[0].ReasonCode)
+	}
+	if preview.PreviewToken != "" {
+		t.Fatal("stale source must not create a durable preview token")
+	}
+	if _, err := a.SaveGroupDecision(SaveDecisionRequest{GroupID: ref.GroupID, DecisionType: string(domain.DecisionKeepAll)}); err == nil {
+		t.Fatal("legacy decision binding bypassed physical source freshness")
+	}
+	// A source freshness check is read-only and must not reconcile scan status.
+	rows, err := a.store.ListFiles(ctx, ref.StorageID)
+	if err != nil {
+		t.Fatal("indexed rows unavailable after preview")
+	}
+	for _, row := range rows {
+		if row.Path == changed.Path && row.ContentSHA256 != ref.SHA256 {
+			t.Fatal("preview changed indexed source state")
+		}
+	}
+	summary, err := a.store.ScanSummary(ctx, ref.StorageID)
+	if err != nil || summary.Missing != 0 || summary.Unavailable != 0 {
+		t.Fatal("freshness check incorrectly reconciled file status")
+	}
+}
+
+func TestGovernanceCommitRechecksSourceAfterPreview(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	a, _ := governanceAPIWithSource(t)
+	ctx := context.Background()
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic duplicate group unavailable")
+	}
+	ref := page.Items[0].GovernanceSubject
+	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.DecisionKeepAll, Reason: "synthetic stale-at-commit test"})
+	if err != nil || preview.PreviewToken == "" || preview.Items[0].SourceFreshness != "MATCH" {
+		t.Fatal("fresh preview missing", err)
+	}
+	files, err := a.store.ListFiles(ctx, ref.StorageID)
+	if err != nil {
+		t.Fatal("synthetic indexed members unavailable")
+	}
+	var changed *domain.FileInstance
+	for i := range files {
+		if files[i].ContentSHA256 == ref.SHA256 {
+			changed = &files[i]
+			break
+		}
+	}
+	if changed == nil {
+		t.Fatal("synthetic indexed member unavailable")
+	}
+	original, err := os.ReadFile(changed.Path)
+	if err != nil {
+		t.Fatal("synthetic source read")
+	}
+	mutated := append([]byte(nil), original...)
+	mutated[len(mutated)-1] ^= 0x33
+	if err := os.WriteFile(changed.Path, mutated, 0600); err != nil {
+		t.Fatal("synthetic source mutation")
+	}
+	if err := os.Chtimes(changed.Path, changed.ModifiedAt, changed.ModifiedAt); err != nil {
+		t.Fatal("restore synthetic source timestamp")
+	}
+	result, err := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: historyTestKey(t)})
+	if err != nil || result.Status != "COMPLETE" || result.Counts.Blocked != 1 || result.Counts.Saved != 0 || result.Items[0].ReasonCode != "SOURCE_CHANGED" {
+		t.Fatal("commit must durably block changed source", result, err)
+	}
+	if _, err := a.store.GetGroupDecision(ctx, ref.GroupID); err == nil {
+		t.Fatal("stale source recorded a decision")
+	}
+	summary, err := a.store.ScanSummary(ctx, ref.StorageID)
+	if err != nil || summary.Missing != 0 || summary.Unavailable != 0 {
+		t.Fatal("stale source was incorrectly reconciled missing/unavailable")
+	}
+}
+
+func TestGovernancePreviewRejectsSymlinkedRootAncestorWithoutProjectMutation(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	a, _ := governanceAPIWithSource(t)
+	ctx := context.Background()
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic governance groups unavailable")
+	}
+	storages, err := a.store.ListStorages(ctx)
+	if err != nil || len(storages) != 1 {
+		t.Fatal("synthetic registered source unavailable")
+	}
+	root := storages[0].RootPath
+	parent := filepath.Dir(root)
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal("move synthetic root ancestor")
+	}
+	if err := os.Symlink(moved, parent); err != nil {
+		_ = os.Rename(moved, parent)
+		t.Fatal("replace synthetic root ancestor with symlink")
+	}
+	defer func() {
+		if err := os.Remove(parent); err != nil {
+			t.Errorf("remove synthetic ancestor symlink: %v", err)
+			return
+		}
+		if err := os.Rename(moved, parent); err != nil {
+			t.Errorf("restore synthetic ancestor directory: %v", err)
+		}
+	}()
+
+	before, err := a.store.ListFiles(ctx, storages[0].ID)
+	if err != nil {
+		t.Fatal("synthetic indexed rows unavailable")
+	}
+	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
+	wantReason := "SOURCE_UNAVAILABLE"
+	if !governanceFreshnessMountProofAvailable() {
+		wantReason = "SOURCE_UNVERIFIED"
+	}
+	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].Eligibility != "BLOCKED" || preview.Items[0].ReasonCode != wantReason {
+		t.Fatalf("symlinked root ancestor must be rejected without a token: %+v, %v", preview, err)
+	}
+	after, err := a.store.ListFiles(ctx, storages[0].ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected freshness observation changed indexed rows")
+	}
+	summary, err := a.store.ScanSummary(ctx, storages[0].ID)
+	if err != nil || summary.Missing != 0 || summary.Unavailable != 0 {
+		t.Fatal("rejected freshness observation reconciled source status")
+	}
+}
+
 func TestGovernanceHistoryReadsUnderRecoveryLockWithoutClearingIt(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
 	a, before := governanceAPIWithSource(t)
 	ctx := context.Background()
 	page, e := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})

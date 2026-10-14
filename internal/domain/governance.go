@@ -52,9 +52,40 @@ type PreviewBatchRequest struct {
 }
 type PreviewItem struct {
 	GovernanceSubject
-	Eligibility string `json:"eligibility"`
-	ReasonCode  string `json:"reason_code"`
+	Eligibility     string `json:"eligibility"`
+	ReasonCode      string `json:"reason_code"`
+	SourceFreshness string `json:"source_freshness,omitempty"`
+	SourceCheckedAt string `json:"source_checked_at,omitempty"`
 }
+
+// SourceFreshness is a point-in-time, read-only observation of the selected
+// duplicate members. It is never an execution authorization or a claim that
+// the source cannot change after the observation.
+type SourceFreshness struct {
+	Status    string
+	CheckedAt string
+}
+
+func SourceFreshnessReason(status string, present bool) string {
+	if !present {
+		return "SOURCE_UNVERIFIED"
+	}
+	switch status {
+	case "SOURCE_CHANGED":
+		return "SOURCE_CHANGED"
+	case "SOURCE_UNAVAILABLE":
+		return "SOURCE_UNAVAILABLE"
+	case "AUTHORIZATION_REQUIRED":
+		return "AUTHORIZATION_REQUIRED"
+	case "NETWORK_PAUSED":
+		return "NETWORK_PAUSED"
+	case "LIMIT_EXCEEDED":
+		return "SOURCE_LIMIT_EXCEEDED"
+	default:
+		return "SOURCE_UNVERIFIED"
+	}
+}
+
 type GovernancePreview struct {
 	PreviewToken string        `json:"preview_token"`
 	ExpiresAt    string        `json:"expires_at"`

@@ -5,7 +5,10 @@ package fingerprint
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +16,101 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
 )
+
+type cancelAfterRead struct {
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (r *cancelAfterRead) Read(p []byte) (int, error) {
+	r.reads++
+	if r.reads == 1 {
+		copy(p, "x")
+		r.cancel()
+		return 1, nil
+	}
+	return 0, errors.New("underlying reader called after cancellation")
+}
+
+func TestContextReaderChecksCancellationBetweenReads(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	underlying := &cancelAfterRead{cancel: cancel}
+	reader := contextReader{ctx: ctx, reader: underlying}
+	buf := make([]byte, 1)
+	if n, err := reader.Read(buf); n != 1 || !errors.Is(err, context.Canceled) || string(buf) != "x" {
+		t.Fatal("cancellation during controlled read", n, err)
+	}
+	if n, err := reader.Read(buf); n != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatal("canceled reader did not stop between chunks", n, err)
+	}
+	if underlying.reads != 1 {
+		t.Fatal("underlying source was read again after cancellation")
+	}
+}
+
+var _ io.Reader = (*cancelAfterRead)(nil)
+
+func TestGuardedContextRejectsPreCanceledSourceRead(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "synthetic-cancel-file")
+	data := []byte("synthetic-cancel-content")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal("synthetic file setup")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal("synthetic file stat")
+	}
+	h := sha256.Sum256(data)
+	file := domain.FileInstance{Path: path, Size: int64(len(data)), ModifiedAt: info.ModTime()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := GuardedContext(ctx, root, file); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-canceled guarded read should fail closed: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, data) || sha256.Sum256(got) != h {
+		t.Fatal("canceled verification changed synthetic source")
+	}
+}
+
+func TestGuardedContextRejectsSymlinkAboveRegisteredRoot(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("canonical synthetic fixture root")
+	}
+	parent := filepath.Join(base, "parent")
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal("create synthetic root")
+	}
+	path := filepath.Join(root, "file")
+	data := []byte("synthetic-root-ancestor")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal("create synthetic file")
+	}
+	var indexed domain.FileInstance
+	if _, err := scanner.Scan(context.Background(), scanner.Options{Root: root, StorageID: "synthetic-root-ancestor"}, func(file domain.FileInstance) error {
+		indexed = file
+		return nil
+	}); err != nil {
+		t.Fatal("scan synthetic fixture")
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal("move synthetic ancestor")
+	}
+	if err := os.Symlink(moved, parent); err != nil {
+		t.Fatal("replace synthetic ancestor with symlink")
+	}
+	if got, err := GuardedContext(context.Background(), root, indexed); err == nil || got != "" {
+		t.Fatal("freshness verification followed a symlink above the registered root")
+	}
+	got, err := os.ReadFile(filepath.Join(moved, "root", "file"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatal("synthetic source changed during rejected verification")
+	}
+}
 
 func TestGuardedMatchesHashAndRejectsFileOrAncestorReplacement(t *testing.T) {
 	for _, kind := range []string{"unchanged", "file-symlink", "parent-symlink", "changed", "outside"} {

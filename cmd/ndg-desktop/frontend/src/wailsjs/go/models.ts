@@ -466,6 +466,8 @@ export namespace domain {
 	    decision_revision: number;
 	    eligibility: string;
 	    reason_code: string;
+	    source_freshness?: string;
+	    source_checked_at?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PreviewItem(source);
@@ -480,6 +482,8 @@ export namespace domain {
 	        this.decision_revision = source["decision_revision"];
 	        this.eligibility = source["eligibility"];
 	        this.reason_code = source["reason_code"];
+	        this.source_freshness = source["source_freshness"];
+	        this.source_checked_at = source["source_checked_at"];
 	    }
 	}
 	export class GovernancePreview {

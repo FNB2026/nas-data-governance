@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { governanceApi } from "../api/governance";
 import { useProject } from "../state/ProjectContext";
 import { wails } from "../wailsjs/go/models";
-import { filterScope, subject, validBatchResult, type BatchResult, type DecisionKind, type GovernanceCapabilities,
+import { canCommitGovernancePreview, filterScope, subject, validBatchResult, type BatchResult, type DecisionKind, type GovernanceCapabilities,
   type GovernanceQuery, type ReviewGroup, type ReviewPage, type ReviewPreview, type SelectedReview } from "../lib/governance";
 
 export const INITIAL_QUERY: GovernanceQuery = {
@@ -188,7 +188,8 @@ export function useGovernanceWorkbench() {
       } catch { if (epoch === projectEpoch.current) setError("决定回执已确认，但列表更新失败；请重新载入。不要重放已成功的条目。"); }
   };
 
-  const canCommit = canRecord && preview?.project_scope === caps.project_scope;
+  const canCommit = canRecord && preview?.project_scope === caps.project_scope &&
+    (submission.current !== null || canCommitGovernancePreview(preview));
   const commit = async () => {
     if (!canCommit || !preview?.preview_token || !previewIntent || activeOperation.current || inFlightMutations.has(projectKey)) return;
     if (!submission.current) {

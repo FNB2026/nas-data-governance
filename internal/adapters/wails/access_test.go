@@ -17,9 +17,11 @@ import (
 )
 
 type nativeTestGrant struct {
-	mu   sync.Mutex
-	root string
-	fail bool
+	mu           sync.Mutex
+	root         string
+	fail         bool
+	afterResolve func()
+	releases     int
 }
 
 func (n *nativeTestGrant) Pick(context.Context) (fileaccess.Grant, func(), error) {
@@ -27,11 +29,20 @@ func (n *nativeTestGrant) Pick(context.Context) (fileaccess.Grant, func(), error
 }
 func (n *nativeTestGrant) Resolve(context.Context, fileaccess.Grant) (fileaccess.Grant, func(), error) {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if n.fail {
+		n.mu.Unlock()
 		return fileaccess.Grant{}, nil, fileaccess.ErrAuthorizationRequired
 	}
-	return fileaccess.Grant{Root: n.root, Bookmark: "sealed", Identity: "directory-identity"}, func() {}, nil
+	root, afterResolve := n.root, n.afterResolve
+	n.mu.Unlock()
+	if afterResolve != nil {
+		afterResolve()
+	}
+	return fileaccess.Grant{Root: root, Bookmark: "sealed", Identity: "directory-identity"}, func() {
+		n.mu.Lock()
+		n.releases++
+		n.mu.Unlock()
+	}, nil
 }
 func sandboxTestAPI(t *testing.T) (*API, *nativeTestGrant, string) {
 	t.Helper()
