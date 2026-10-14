@@ -1,6 +1,24 @@
 # NDG 多渠道实时执行台账
 
-更新时间：2026-10-13。证据基线：main `443beeb0e19fa6a737cd8fef5c20e0197bfe4392`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+更新时间：2026-10-14。证据基线：main `95eade639a05141aee169ab22fd19b7bec7b15fa`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+
+## 2026-10-14 当前执行状态（优先于下方历史快照）
+
+| 工作 | 真实状态 | 未关闭范围 |
+|---|---|---|
+| 时间排序 #102 | MERGED `02164ad63ddc0c818e4b764ee1e69ed998c4b00f`；最终 exact `bd3b96be18cd0c7607920dc591e69012f182e30d` 经独立边界复核 | 原偶发排序 FAIL 保留，不能追认其唯一根因 |
+| UX2 批次安全 #98 | MERGED `ed7287c1842aec2dd0608895cd027fc502990864`；最终 exact `390f80844b39c46334c86b25c816ac89798a3a07` 独立复核 | 库内 subject/CAS 不证明未重新索引的源文件未改变；仅治理意图记录 |
+| UX3 历史查询 #100 | MERGED `82f6fd3dbe2e0f434e6f7d715866676abbc54f40`；最终 exact `ae653be45681dcb425251620a7d560af15adac94` 独立复核 | 只读发现/查询，不自动重放遗失请求、不结案中断批次 |
+| main 合并后门禁 | exact `82f6fd3` 与 `95eade6` 各自本地 required、远端 CI/Security/Linux 八项 SUCCESS | 不替代原生 GUI、正式签名或人类走查 |
+| fnOS disposable host 协议 #103 | MERGED `95eade639a05141aee169ab22fd19b7bec7b15fa`；最终 exact `335958156ad379159f752b0bddc0a41239828ce3` 经独立复核及八项 CI。真实 `92fd581` 窗口 **LIMITED BLOCKED** | `internal` 网络下未取得要求的 loopback 映射；HTTP/扫描/重启/单 writer/隐私验收 NOT RUN |
+| fnOS 本窗口保护证据 | 15 个既有容器（12 running、3 stopped）30 条限定状态记录前后相同；7 合成文件 SHA 不变；本轮 3 自有资源在只读查询时点均不存在 | 不是其他历史试验清理证明，不认证生产 NAS、FPK、SMB 或全系统隐私 |
+| UX 下一 P0 | 独立源新鲜度工作树开始实现；真实合成 same-size/mtime-restored 编辑已复现旧 Preview 放行 | 尚无合并/运行认证；有界、授权、根目录保护与 Commit 再校验须独立复核 |
+| MAS / 其他 NAS | MAS 1A/1B INCONCLUSIVE、环境 BLOCKED、CarbonCore 历史 FAIL、MAS NO-GO；其他 NAS NOT RUN | 当前 fnOS 账号与源码合并均不解除这些门禁 |
+
+beta.11 Release API 再核对仍为公开 Pre-release，原发布时间及四个资产 digest
+一致，未重建或修改。新功能仅未来构建；无新渠道公开授权。
+主手册正文与历史段落完整保留，旧“Draft/HOLD/尚未执行”只代表各自采样时点。
+详见 [本轮证据索引](EVIDENCE-INDEX.md#2026-10-14-合并与真实设备窗口)。
 
 ## 当前事实与历史校准
 
@@ -107,7 +125,7 @@ PR #98 `b1cdae9c` 的 App/SDK 已构建成功，但 MAS 测试因访问容器外
 不是隐私产品放宽；Gitleaks v8.28.0 扫描 308 commits 无新发现。
 
 
-## 2026-10-13 最新校准：UX 与 NAS 并行
+## 2026-10-13 历史校准：UX 与 NAS 并行（当前状态见首节）
 
 | 项目 | 当前实际状态 | 下一步骤及限制 |
 |---|---|---|
