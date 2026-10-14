@@ -40,6 +40,16 @@ file, source, namespace or network I/O. Normal interpreter/module loading is
 outside that claim. No PID, namespace path, URL, shell command, credential or
 output-directory flags exist. The CLI cannot accept/replay supplied witnesses.
 `replay` is an in-memory test function with no callbacks or executable adapter.
+Before semantic checks or witness equality, it validates every declared field
+of Owner, Tool, Handles, Child, Drop, Request and Response, including nested tuple
+elements and event containers/labels. Only exact built-in primitive types and
+exact declared dataclass types are accepted; subclasses and callback objects
+are rejected without iterating, comparing, converting or representing them.
+Strings and tuple lengths are bounded. Unknown `Refused` reasons become fixed
+`malformed_model_input`; exception text and arbitrary exception arguments are
+never converted to public output. This is a field-validation contract, **not a
+Python sandbox**: it does not isolate hostile code monkeypatching trusted module
+globals or class methods in the same calling process.
 Rejected argument messages use a fixed JSON classification. Actual CLI tests
 use a fresh random synthetic marker in unknown option values, positional input,
 unknown `--option=value` and invalid `--prototype=value`; all four exit 2 with
@@ -154,7 +164,7 @@ NOT RUN on the development macOS host, and no test here claims otherwise.
 
 Local verification on macOS for this change: `make test`, `make vet`,
 `go test -race -count=1 ./...`, `make build`, `make public-check` and
-`git diff --check` passed. The standalone namespace model has 14 passing test
+`git diff --check` passed. The standalone namespace model has 19 passing test
 methods; existing `nas-smoke-test` has 39 and `container-evidence-test` has 19.
 These are local results, not GitHub CI or device acceptance. Complete local
 outputs and the exact commit/tree/diff/file digests are retained privately for

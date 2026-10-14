@@ -143,7 +143,109 @@ class Result:
                 "live_backend": "BLOCKED"}
 
 
+SCHEMAS = {
+    Owner: {"daemon": str, "container": str, "nonce": str, "image": str,
+            "network": str, "pid": int, "starttime": int, "boot": str,
+            "netns": ("fixed", (int, int)), "host_netns": ("fixed", (int, int)),
+            "running": bool, "pidfd_alive": bool, "internal": bool,
+            "isolated_ipv4": bool, "ipv6_disabled": bool,
+            "attachments": ("many", str, 16), "published_ports": ("many", int, 16)},
+    Tool: {"path": str, "sha256": str, "uid": int, "mode": int, "regular": bool,
+           "canonical": bool, "trusted_ancestors": bool, "no_file_caps": bool, "pinned": bool},
+    Handles: {"pidfd": int, "netfd": int, "credential_fd": int, "pid": int,
+              "starttime": int, "netns": ("fixed", (int, int)), "netns_type": str,
+              "private_fifo": bool, "exclusive_reader": bool, "credential_bytes": int},
+    Child: {"child_pidfd": int, "namespace": ("fixed", (int, int)),
+            "only_child_switched": bool, "switched_types": ("many", str, 16),
+            "argv": ("many", str, 16),
+            "environment": ("many", ("fixed", (str, str)), 16),
+            "inherited_fds": ("many", int, MAX_FDS)},
+    Drop: {"uid": ("fixed", (int, int, int)), "gid": ("fixed", (int, int, int)),
+           "groups": ("many", int, 16), "caps": ("fixed", (int, int, int, int, int)),
+           "no_new_privs": bool, "readback": bool, "max_seconds": int,
+           "max_output": int, "max_memory": int, "max_fds": int},
+    Request: {"endpoint": ("fixed", (str, str, int, str)), "dns": bool,
+              "proxy": bool, "redirect": bool, "shell": bool,
+              "credential_channel": str, "requests": int},
+    Response: {"status": int, "output_bytes": int, "elapsed": int,
+               "secret_free": bool, "credential_fd_closed": bool},
+}
+REFUSAL_CODES = frozenset({
+    "invalid_owner", "owner_identity_unconfirmed", "nonce_unconfirmed", "image_unconfirmed",
+    "process_identity_unconfirmed", "boot_identity_unconfirmed", "namespace_unconfirmed",
+    "host_namespace_refused", "isolation_or_liveness_unconfirmed", "network_scope_unconfirmed",
+    "trusted_tool_missing", "event_budget_exceeded", "phase_order_refused", "snapshot_unconfirmed",
+    "owner_changed", "tool_changed", "handles_unconfirmed", "pinned_process_changed",
+    "namespace_type_refused", "credential_channel_refused", "child_unconfirmed",
+    "child_handle_unconfirmed", "child_namespace_refused", "command_or_environment_refused",
+    "fd_inheritance_refused", "privilege_or_limits_unconfirmed", "request_scope_refused",
+    "response_unconfirmed", "http_status_refused", "output_budget_exceeded", "timeout",
+    "private_channel_unconfirmed", "child_reap_unconfirmed", "incomplete_protocol",
+    "malformed_model_input",
+})
+
+
+def primitive_shape(value, schema):
+    """Inspect exact built-in types before len, iteration or comparison.
+
+    Schemas are trusted constants. Caller values never supply schema objects.
+    No conversion, repr, subclass method or arbitrary field callback is used.
+    """
+    if schema is str or schema is int or schema is bool:
+        require(type(value) is schema, "malformed_model_input")
+        if schema is str:
+            require(len(value) <= 256, "malformed_model_input")
+        return
+    require(type(value) is tuple, "malformed_model_input")
+    if schema[0] == "fixed":
+        require(len(value) == len(schema[1]), "malformed_model_input")
+        for item, item_schema in zip(value, schema[1]):
+            primitive_shape(item, item_schema)
+    else:
+        require(len(value) <= schema[2], "malformed_model_input")
+        for item in value:
+            primitive_shape(item, schema[1])
+
+
+def object_shape(value, cls):
+    require(type(value) is cls, "malformed_model_input")
+    for name, schema in SCHEMAS[cls].items():
+        primitive_shape(object.__getattribute__(value, name), schema)
+
+
+def input_shapes(expected, tool, events):
+    object_shape(expected, Owner)
+    object_shape(tool, Tool)
+    require(type(events) is tuple, "malformed_model_input")
+    require(len(events) <= MAX_EVENTS, "event_budget_exceeded")
+    payload_types = (None, Handles, None, Child, Drop, Request, Response, None, bool)
+    for phase, payload_type, event in zip(PHASES, payload_types, events):
+        require(type(event) is tuple and len(event) == 2, "malformed_model_input")
+        require(type(event[0]) is str, "malformed_model_input")
+        require(event[0] == phase, "phase_order_refused")
+        value = event[1]
+        if payload_type is None:
+            require(type(value) is tuple and len(value) == 2, "malformed_model_input")
+            object_shape(value[0], Owner)
+            object_shape(value[1], Tool)
+        elif payload_type is bool:
+            primitive_shape(value, bool)
+        else:
+            object_shape(value, payload_type)
+
+
+def safe_refusal_reason(error):
+    # Do not invoke str(error), repr(error) or conversion of arbitrary args.
+    if type(error) is Refused:
+        args = BaseException.args.__get__(error)
+        if type(args) is tuple and len(args) == 1 and type(args[0]) is str:
+            if args[0] in REFUSAL_CODES:
+                return args[0]
+    return "malformed_model_input"
+
+
 def valid_owner(owner):
+    object_shape(owner, Owner)
     require(type(owner) is Owner, "invalid_owner")
     for value in (owner.daemon, owner.container, owner.network):
         require(type(value) is str and HEX64.fullmatch(value), "owner_identity_unconfirmed")
@@ -160,6 +262,7 @@ def valid_owner(owner):
 
 
 def valid_tool(tool):
+    object_shape(tool, Tool)
     require(type(tool) is Tool and tool.path == "/usr/bin/nsenter", "trusted_tool_missing")
     require(type(tool.sha256) is str and HEX64.fullmatch(tool.sha256), "trusted_tool_missing")
     require(type(tool.uid) is int and tool.uid == 0 and type(tool.mode) is int
@@ -181,6 +284,10 @@ def replay(expected, tool, events):
     reason = "model_constraints_satisfied"
     status = "OFFLINE_MODEL_ACCEPTED"
     try:
+        # Validate every declared field and nested tuple element before any
+        # witness equality or logical acquisition. This is not a sandbox for
+        # monkeypatches to this module/classes in the calling Python process.
+        input_shapes(expected, tool, events)
         valid_owner(expected)
         valid_tool(tool)
         require(type(events) is tuple and len(events) <= MAX_EVENTS, "event_budget_exceeded")
@@ -244,7 +351,7 @@ def replay(expected, tool, events):
                 reaped = True
         require(len(events) == len(PHASES), "incomplete_protocol")
     except Refused as error:
-        status, reason = "BLOCKED", str(error)
+        status, reason = "BLOCKED", safe_refusal_reason(error)
     except Exception:
         # Caller payloads, reprs and exception messages never become logs.
         status, reason = "BLOCKED", "malformed_model_input"
