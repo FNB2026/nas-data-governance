@@ -1,6 +1,6 @@
 # NDG 多渠道证据索引
 
-快照时间：2026-10-12。公开索引只保存允许发布的 SHA、状态和回执 URL；原始私人截图、数据库、日志、Bookmark、主机路径与凭据留在本机私有归档。哈希是完整性标记，不证明证据作者或可信来源。
+起始快照时间：2026-10-12；2026-10-14 后续实证见追加章节。公开索引只保存允许发布的 SHA、状态和回执 URL；原始私人截图、数据库、日志、Bookmark、主机路径与凭据留在本机私有归档。哈希是完整性标记，不证明证据作者或可信来源。
 
 ## 基线 / 总授权
 
@@ -228,3 +228,100 @@ Independent `/root/fnos_official_audit` 无新增 P1/P2；39 NAS 模拟、19 OCI
 [Security 38509373812](https://github.com/FNB2026/nas-data-governance/actions/runs/38509373812)、
 [Linux 38509378059](https://github.com/FNB2026/nas-data-governance/actions/runs/38509378059)
 独立读取均 completed/SUCCESS，八项 checks 成功，不借用 PR checks 代替。
+
+## 2026-10-14 后续独立收口
+
+### 台账 #104
+
+final `d646455e8958bd8ce26ff338a22454da2e1ecdbb`、tree
+`97905cd51dbaa4fd11d7caf1ba521d390cec44ed`，五份文档由
+`/root/fnos_official_audit` 独立复核后正常合并。merge
+`af26c584c2b01e2e2261ef6003fe8aa8f837dd83`。同一 main source 的
+[CI 38511123704](https://github.com/FNB2026/nas-data-governance/actions/runs/38511123704)、
+[Security 38511317100](https://github.com/FNB2026/nas-data-governance/actions/runs/38511317100)、
+[Linux 38511321630](https://github.com/FNB2026/nas-data-governance/actions/runs/38511321630)
+八项 SUCCESS；本地 required exit 0，日志 SHA
+`557b6b49ebe98e434534fb4327a42bf0da663797a23f90630aa8ca4a0ea2bacc`。
+
+### NAS 离线 namespace 模型 #106
+
+final `ab1549e609b8955a55f2cfa129f92e0443e1a17f`、tree
+`63ced4712e54526b2f57208481aba225900d3056`、base `af26c584`，full binary
+diff SHA `3169274a710cdb6daf95ab5b5d2dcbbb4cab0b47572b4bd3885830e88b7752bd`。
+helper SHA `0ba66060271d7b84b5cce2ed69423ad5b484e711331ccaa4bede065c04212360`。
+独立 `/root/fnos_official_audit` 对五文件及 old/new 两项真实 RED/GREEN 复核；
+19 项离线测试及额外身份/预算探针通过，回调为零、异常标记无回显。
+无 kernel/network/Docker backend；cleanup 是逻辑值，默认命令仍 BLOCKED。
+[最终独立报告](https://github.com/FNB2026/nas-data-governance/pull/106#issuecomment-6165841007)。
+[CI 38545050877](https://github.com/FNB2026/nas-data-governance/actions/runs/38545050877)、
+[Security 38545050857](https://github.com/FNB2026/nas-data-governance/actions/runs/38545050857)、
+[Linux 38545051054](https://github.com/FNB2026/nas-data-governance/actions/runs/38545051054)
+八项 exact SUCCESS、无 unresolved threads，按当前 strict rules 正常 Ready/squash，
+无作者自批或 admin bypass。merge `b686cfe4dabf0f8eaa182c598e34f092474f415d`。
+合并后本地 required exit 0，日志 SHA
+`6e542f590590277468a952e19b5abe96cdf977ad5431dd6f0d9dda12d8af773d`。
+同一 source post-merge [CI 38546869742](https://github.com/FNB2026/nas-data-governance/actions/runs/38546869742)、
+[Security 38547239368](https://github.com/FNB2026/nas-data-governance/actions/runs/38547239368)、
+[Linux 38547379878](https://github.com/FNB2026/nas-data-governance/actions/runs/38547379878)
+八项标准检查已按同一 source 读取为 completed/SUCCESS，额外 Dependabot 也成功；
+不是借用 PR checks。无新 fnOS 现场动作，原 LIMITED BLOCKED 保留。
+
+### UX 物理源核验 #105：源码审查闭合、门禁待收口
+
+final 产品代码 `0fef4c20f0ff507155b5c9a75fa45a6367cafa87`、tree
+`4f9eefb685c2fd0ef2a885de2078c31e17bf0654`，full binary diff SHA
+`f676a542d7e73145e2a77e8a7367f46e50756537eedb2575f73092a443753495`。
+独立 `/root/linux_web_implementation` 的 31 文件源码复审无新增 P1/P2；
+回执 SHA `557caf14b89b4db6b9f41b06a7ea1bf434f503d5867bb3f37b9e725e505598a6`。
+实际组件/调用链证明过期后仅重试原 token/key；真实 Wails/store/SQLite
+Darwin 注入探针证明 reader/lease 未调用，token/audit/decision/batch/index
+不变及七个合成源 SHA 守恒。这不是正式 GUI 或 Linux 运行证明。
+
+普通合并 #106 后 head `e639c08f47b7360317f51c1ae9e191fc489f43e8`，tree
+`5e06931f4299938fb36ddd61f88287ab8ab52bb7`；相对新 main 的产品 diff SHA 不变。
+本地 required、full race、34 文件/322 前端测试、dev desktop build PASS；
+CI 同等 MAS boundary 定向子集实际 PASS，broad MAS-tagged suite 原 FAIL 保留。
+Linux 仅本地交叉编译，PR-head CI 运行尚待核对；真实 bind mount、SMB/NAS、
+MAS/signed GUI 未认证。Darwin 新核验主动 UNVERIFIED/no-read/no-token；
+Linux ENOSYS/EXDEV 实际分类 SOURCE_UNAVAILABLE/BLOCKED。完整跨平台 P0 未通过。
+原 299/38 的独立 RED、早期 macOS CI binding FAIL 均保留，不用后来绿色覆盖。
+
+e639 的新 [Verify 38547526712](https://github.com/FNB2026/nas-data-governance/actions/runs/38547526712/job/115797165167)
+实测 FAIL：goimports 拒绝测试文件 import 分组。失败发生于 full Linux race 之前，
+其余七项 SUCCESS 不能替代此门禁。原始日志私有 SHA
+`bd22c90689c1cab8f256eff3f59f7a302a57d878f561a9cfc757dd93d19821c8`。
+待最小格式修正及新 exact checks，不通过重复旧 run 掩盖此失败。
+
+格式修正已普通提交/推送 `0e0705b76fe9291459bde9ccc5564326f16d22a5`，tree
+`dfa9397fcd61b79030a942007db621b5ba904170`。独立增量审查确认唯一变化为同一
+unix import 的分组，无逻辑变更；增量 SHA
+`968d44866780fe83aeb1d25a05a664a52a9a46c10f1edcb6eb3dbbeed31b95ca`，
+新完整产品 diff SHA `4834947294b50f7927af08334018e23948972d34b71b3bd7886b7a662b1434b1`。
+独立 final 回执 SHA `7442945b2d3ffab811ec24b544dac05059068f094f622b57a1c80a34b6ddb574`。
+新 exact CI 待读取；不因格式修正或本地定向测试通过自动解除门禁。
+
+### #105 最终 CI 与正常合并（上述 pending 为较早采样）
+
+[最终独立报告](https://github.com/FNB2026/nas-data-governance/pull/105#issuecomment-6166153373)
+与最后三个源码/兼容/格式回执绑定 final `0e0705b`。同一 exact SHA 的
+[CI 38548205662](https://github.com/FNB2026/nas-data-governance/actions/runs/38548205662)、
+[Security 38548205710](https://github.com/FNB2026/nas-data-governance/actions/runs/38548205710)、
+[Linux 38548205643](https://github.com/FNB2026/nas-data-governance/actions/runs/38548205643)
+八项 completed/SUCCESS。实际 Verify 步骤和完整日志证明 full Go race 已执行，
+其中 Wails 66.172 秒、fingerprint 1.047 秒 PASS；私有原始日志 SHA
+`5e044b13f7af3b2c47129e91c0bfb9c333948096159d831c59a3736845c377f5`。
+这证明普通合成 Linux 文件链，不证明实际 bind mount、SMB 或正式 App。
+最新 main/base 一致、无 unresolved threads；按既有 strict rules 正常转 Ready/squash，
+不使用自批或 admin bypass。merge `20c545b60d88a2ea67beef5be1766cc97ec152d0`。
+main post-merge 检查待对应 source 实证，Darwin/full P0/真实环境限制不变。
+
+main `20c545b` 的本地 required（test/vet/build/public/release/version）实际 exit 0，
+私有日志 SHA `4c2f9f7c430e1460aab86beaa7c1e7aa8ca4de977a18efc14ce1d50f22f3050e`。
+远端重新采集间出现 EOF/transport 错误，暂不推断最终 post-merge 状态。
+
+后续成功采样：同一 source `20c545b` 的
+[CI 38549205825](https://github.com/FNB2026/nas-data-governance/actions/runs/38549205825)、
+[Security 38549694781](https://github.com/FNB2026/nas-data-governance/actions/runs/38549694781)、
+[Linux 38549261623](https://github.com/FNB2026/nas-data-governance/actions/runs/38549261623)
+八项标准检查均 completed/SUCCESS。至此仅关闭 #105 代码合并后门禁；
+前述 EOF、原始 FAIL、真实 bind mount/SMB/GUI/MAS 与 Darwin 新能力限制不变。

@@ -1,8 +1,24 @@
 # NDG 多渠道实时执行台账
 
-更新时间：2026-10-14。证据基线：main `95eade639a05141aee169ab22fd19b7bec7b15fa`。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
+更新时间：2026-10-14。当前证据基线：main `20c545b60d88a2ea67beef5be1766cc97ec152d0`；较早快照按下方日期完整保留。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
 
-## 2026-10-14 当前执行状态（优先于下方历史快照）
+## 2026-10-14 后续执行快照（优先于下方历史记录）
+
+本节证据基线为 main `20c545b60d88a2ea67beef5be1766cc97ec152d0`。
+仅记录已经取得的源码、自动化与合并证据，不升级设备或发行验收。
+
+| 工作 | 实际状态 | 保留限制 |
+|---|---|---|
+| 台账 #104 | 已合并 `af26c584c2b01e2e2261ef6003fe8aa8f837dd83`；独立复核及 exact main 本地/远端门禁 PASS | 文档合并不代表新运行场景通过 |
+| NAS namespace #106 | 已正常 squash 合并 `b686cfe4dabf0f8eaa182c598e34f092474f415d`；final `ab1549e609b8955a55f2cfa129f92e0443e1a17f` 五文件独立复核、19 项离线测试及八项 CI SUCCESS | 只有离线约束模型，无真实 kernel、HTTP 或清理后端；设备仍 LIMITED BLOCKED |
+| UX 源新鲜度 #105 | final `0e0705b76fe9291459bde9ccc5564326f16d22a5` 独立源码复核无新 P1/P2，八项 exact CI SUCCESS；已正常 squash 合并 `20c545b60d88a2ea67beef5be1766cc97ec152d0`，main 本地/八项远端 post-merge PASS | Darwin 新核验主动 UNVERIFIED，不读源、不发新 token；Linux 普通文件/合成拒绝 CI 通过，真实挂载负例未认证 |
+| 正式产品和真实环境 | beta.11 资产不变；MAS 1A/1B INCONCLUSIVE、环境 BLOCKED、CarbonCore 历史 FAIL、MAS NO-GO | 新签名 GUI、SMB/其他 NAS、FPK、完整 UX P0 和非开发者理解测试均未通过 |
+
+网络读取与推送曾实际返回 EOF/TLS 错误；后续成功操作按各自 exact SHA 单独留证。
+不能将旧 CI 或本地门禁作为未读到的新远端结果。#106 合并后本地 required 已返回 0，
+其八项标准 post-merge CI/Security/Linux 检查已按同一 source 读取为 SUCCESS。
+
+## 2026-10-14 较早执行快照（历史保留）
 
 | 工作 | 真实状态 | 未关闭范围 |
 |---|---|---|
