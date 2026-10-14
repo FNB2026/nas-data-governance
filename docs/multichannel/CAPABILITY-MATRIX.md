@@ -41,7 +41,7 @@ G6 #97 为离线 OCI 验证实现，正式 native collector 尚未执行。旧 b
 - fnOS可用不解决独立macOS/Bookmark/CarbonCore环境，MAS状态不变。
 
 
-## 2026-10-14 当前能力增量
+## 2026-10-14 较早能力增量（历史保留）
 
 - #98/#102/#100 已按独立 exact review 正常合并 main，真实 SQLite、Wails
   调用链、组件及 CI 证据闭合。批次历史发现仅只读，不能重放/修复状态。
@@ -54,3 +54,24 @@ G6 #97 为离线 OCI 验证实现，正式 native collector 尚未执行。旧 b
   不把本轮主机协议代码、Ubuntu CI 或原有 Mac DMG 混为同一发行身份。
 - FPK 安装/升级/卸载、真实 SMB、其他 NAS 平台、MAS 写入能力未开放。
   beta.11 资产不变；MAS 1A/1B INCONCLUSIVE、CarbonCore FAIL 与 NO-GO 保留。
+
+## 2026-10-14 后续能力校准
+
+- #106 已合并，只验证自有 namespace 探针设计的离线约束和安全拒绝。
+  默认运行仍 BLOCKED，模型接受不是实际 namespace/权限下降/HTTP/清理证明。
+  不连接 NAS，不激活现场后端，不升级此前 LIMITED BLOCKED。
+- #105 新核验只作用于选定重复候选，最多 100 组、256 成员和 128 MiB
+  索引字节，Preview/Commit 分别核验；不会全量读取普通单例。
+  final `0e0705b` 已独立复核，八项 exact CI 全成功并正常合并 #105；
+  同 source main 合并后本地/八项远端门禁也已闭合，不替代真实 GUI 或挂载场景。
+- Linux 源码要求 rooted `openat2` 的 BENEATH/NO_SYMLINKS/NO_XDEV，
+  不支持或拒绝时无路径降级。ENOSYS/EXDEV 的实际分类为
+  SOURCE_UNAVAILABLE/BLOCKED，不是 UNVERIFIED 枚举，不修改索引 file_status。
+  本机只完成 Linux 测试二进制交叉编译，不能记真实 Linux 挂载验收 PASS。
+  新 exact Verify 已实际运行 Linux 全量 Go race 与 Wails/fingerprint 测试，
+  关闭普通合成文件的运行缺口；真实 bind mount/SMB 矩阵仍 NOT RUN。
+- Darwin 没有等价嵌套挂载边界证明，因此新增核验前置 UNVERIFIED，
+  不打开源文件、不获取源租约、不发行新 preview token。
+  旧扫描/Resume/执行路径不变；Mac 的该新增能力仍 BLOCKED，完整跨平台 P0 未通过。
+- 已发起且响应不确定的请求保留原 token/key 进行回执重试；过期的新提交仍拒绝。
+  组件/调用链测试不是原生 GUI 或正式签名 App 证据。
