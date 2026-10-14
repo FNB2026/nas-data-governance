@@ -115,6 +115,9 @@ jobs:
       - name: Check experimental OCI evidence integrity offline
         run: make container-evidence-test
 
+      - name: Check disposable NAS host protocol offline (no Docker)
+        run: make nas-smoke-test
+
       - name: Run go vet
         run: go vet ./...
 
