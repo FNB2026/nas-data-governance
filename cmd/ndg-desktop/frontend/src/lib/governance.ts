@@ -54,7 +54,7 @@ export const REASON_LABELS: Record<string, string> = {
   SOURCE_SYMLINK_REJECTED: "读取被符号链接检查拒绝；请核对源目录与文件绑定，不会跟随链接。",
   SOURCE_VERIFICATION_API_UNAVAILABLE: "系统不支持本次核验所需的文件访问接口；不能使用较弱检查代替，未记录决定。",
   SOURCE_READ_FAILED: "源读取未完成，具体原因尚未确认；请人工核对，不自动判定断网或文件缺失。",
-  SOURCE_FILE_UNAVAILABLE: "登记的本地源文件当前不可访问；请核对路径绑定，未标记 missing，也未记录决定。",
+  SOURCE_FILE_UNAVAILABLE: "登记的源文件当前不可访问；请核对路径绑定，未标记 missing，也未记录决定。",
   SOURCE_REGISTRATION_UNAVAILABLE: "源登记缺失或根目录无效；请核对项目的数据源登记，未记录决定。",
   SOURCE_CONTENT_CHANGED: "源文件 SHA-256 与索引不同；请重新扫描并核对，未记录决定。",
   SOURCE_IDENTITY_OR_METADATA_CHANGED: "源文件身份、大小、修改时间或路径绑定已变化；当前证据无法再细分，请重新扫描并核对。",

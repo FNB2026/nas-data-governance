@@ -43,3 +43,8 @@ it("explains the platform proof limitation without recommending a retry loop", (
   expect(label).not.toContain("重新授权");
   expect(label).not.toContain("恢复连接");
 });
+
+it("does not infer a local volume when network identity is unconfirmed", () => {
+  expect(reasonLabel("SOURCE_FILE_UNAVAILABLE")).not.toContain("本地");
+  expect(reasonLabel("SOURCE_FILE_UNAVAILABLE")).toContain("未标记 missing");
+});

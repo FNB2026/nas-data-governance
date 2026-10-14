@@ -3,11 +3,12 @@
 Date: 2026-10-14. Initial matrix and SQL/store baseline source: main
 `5b802233c2a33a61fb57587d92724e70836400a1`, tree
 `b46284935177c04af81526041651faf80c99fb85`.
-Later B-1 classification code: `c4113e997be3f548ea50f2049ac8334fe169f4b1`,
-tree `6e5d3fd332cc48d79be810ab25ac73676026ef0f` in PR #110. Subsequent
-documentation-only revisions preserve those product bytes. Final merge/CI and
-any native/signed GUI identities are separate receipts; the initial baseline
-does not certify the later classification implementation.
+Initial B-1 classification implementation: `c4113e997be3f548ea50f2049ac8334fe169f4b1`,
+tree `6e5d3fd332cc48d79be810ab25ac73676026ef0f` in PR #110. Later revisions
+clarify documentation and remove a UI claim of a local source when network
+identity is unconfirmed; the Go classifier remains unchanged. Final source,
+merge/CI and native/signed GUI identities are separately bound in the PR's
+exact-HEAD receipts. The initial baseline does not certify those later changes.
 Scope: acceptance and confirmed-defect triage; no unrelated feature expansion.
 The owner now orders the work as Phase A → B → C → D → E.
 
