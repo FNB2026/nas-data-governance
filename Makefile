@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test container-evidence-test nas-smoke-test
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test container-evidence-test nas-smoke-test nas-namespace-model-test
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -32,6 +32,10 @@ container-evidence-test:
 
 nas-smoke-test:
 	python3 scripts/packaging/test-nas-disposable-smoke.py
+
+# Pure synthetic model and executable refusal checks; no privileged backend.
+nas-namespace-model-test:
+	python3 -B scripts/packaging/test-nas-namespace-probe.py
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
