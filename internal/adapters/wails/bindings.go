@@ -1008,10 +1008,12 @@ func (a *API) SaveGroupDecision(req SaveDecisionRequest) (GroupDecisionDTO, erro
 	if a.store == nil {
 		return GroupDecisionDTO{}, ErrNoProjectOpen
 	}
-	if a.scanRunner == nil || a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+	previewCtx, previewCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer previewCancel()
+	if a.scanRunner == nil || a.sandbox || a.closing || a.store.CheckDecisionWrite(previewCtx) != nil {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	ref, e := a.store.FindGovernanceSubject(context.Background(), req.GroupID)
+	ref, e := a.store.FindGovernanceSubject(previewCtx, req.GroupID)
 	if e != nil {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
@@ -1021,15 +1023,17 @@ func (a *API) SaveGroupDecision(req SaveDecisionRequest) (GroupDecisionDTO, erro
 	} else if ref.DecisionRevision != 0 {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	p, e := a.governanceServiceLocked().Preview(context.Background(), domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.ReviewDecisionType(req.DecisionType), Reason: req.Reason})
+	p, e := a.governanceServiceLocked().Preview(previewCtx, domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.ReviewDecisionType(req.DecisionType), Reason: req.Reason})
 	if e != nil || p.PreviewToken == "" {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	v, e := a.governanceServiceLocked().Commit(context.Background(), domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: p.PreviewToken})
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer commitCancel()
+	v, e := a.governanceServiceLocked().Commit(commitCtx, domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: p.PreviewToken})
 	if e != nil || len(v.Items) != 1 || (v.Items[0].Status != "SAVED" && v.Items[0].Status != "UNCHANGED") {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
-	d, e := a.reviewSvc.GetDecision(context.Background(), req.GroupID)
+	d, e := a.reviewSvc.GetDecision(commitCtx, req.GroupID)
 	if e != nil {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}

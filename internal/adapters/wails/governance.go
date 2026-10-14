@@ -12,7 +12,7 @@ import (
 var errGovernanceUnavailable = errors.New("governance recording unavailable; refresh and review safety state")
 
 func (a *API) governanceServiceLocked() *app.GovernanceDecisionService {
-	return app.NewGovernanceDecisionService(a.store, a.scanRunner != nil && !a.sandbox && !a.closing)
+	return app.NewGovernanceDecisionService(a.store, a.scanRunner != nil && !a.sandbox && !a.closing, a)
 }
 func (a *API) GetGovernanceCapabilities() (domain.GovernanceCapabilities, error) {
 	a.mu.RLock()
@@ -48,7 +48,7 @@ func (a *API) PreviewBatchDecisions(q domain.PreviewBatchRequest) (domain.Govern
 	if a.store == nil {
 		return domain.GovernancePreview{}, ErrNoProjectOpen
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	v, e := a.governanceServiceLocked().Preview(ctx, q)
 	if e != nil {
@@ -62,7 +62,7 @@ func (a *API) CommitBatchDecisions(q domain.CommitBatchRequest) (domain.Governan
 	if a.store == nil {
 		return domain.GovernanceBatchResult{}, ErrNoProjectOpen
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	v, e := a.governanceServiceLocked().Commit(ctx, q)
 	if e != nil {

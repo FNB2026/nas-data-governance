@@ -3,7 +3,9 @@
 package fingerprint
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,8 @@ import (
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 )
+
+var ErrGuardedSourceChanged = errors.New("guarded source changed; path omitted")
 
 // Guarded hashes a recovered candidate through directory descriptors anchored
 // at the task root. Every child open rejects symlinks and different devices;
@@ -25,6 +29,40 @@ func Guarded(root string, file domain.FileInstance, full bool) (string, error) {
 		}
 		return quickReader(f, file.Size)
 	})
+}
+
+// GuardedContext is Guarded with cancellation checks between file reads. A
+// filesystem read already blocked in the kernel cannot be interrupted by Go;
+// callers must retain the source lease until it returns.
+func GuardedContext(ctx context.Context, root string, file domain.FileInstance) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if file.Size < 0 || file.Size == int64(^uint64(0)>>1) {
+		return "", errors.New("recovered fingerprint size invalid; path omitted")
+	}
+	return guardedRead(root, file, func(f *os.File) (string, error) {
+		// Read at most expected size plus one byte. This bounds a file that
+		// grows after its initial descriptor stat; guardedRead checks size again
+		// after hashing and rejects the changed binding.
+		return fullReader(io.LimitReader(contextReader{ctx: ctx, reader: f}, file.Size+1))
+	})
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return n, ctxErr
+	}
+	return n, err
 }
 
 func guardedRead(root string, file domain.FileInstance, read func(*os.File) (string, error)) (string, error) {
@@ -48,7 +86,7 @@ func guardedRead(root string, file domain.FileInstance, read func(*os.File) (str
 		}
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok || !info.Mode().IsRegular() || uint64(sys.Dev) != uint64(rootStat.Dev) || info.Size() != file.Size || !info.ModTime().Equal(file.ModifiedAt) || (file.Physical.Reliable && (uint64(sys.Dev) != file.Device || uint64(sys.Ino) != file.Inode)) {
-			return errors.New("recovered fingerprint metadata changed; path omitted")
+			return ErrGuardedSourceChanged
 		}
 		return nil
 	}
@@ -78,7 +116,7 @@ func guardedRead(root string, file domain.FileInstance, read func(*os.File) (str
 		return "", err
 	}
 	if rootStat.Dev != currentRoot.Dev || rootStat.Ino != currentRoot.Ino || !os.SameFile(originalInfo, currentInfo) || currentInfo.Size() != file.Size || !currentInfo.ModTime().Equal(file.ModifiedAt) {
-		return "", errors.New("recovered fingerprint path binding changed; path omitted")
+		return "", ErrGuardedSourceChanged
 	}
 	return hash, nil
 }

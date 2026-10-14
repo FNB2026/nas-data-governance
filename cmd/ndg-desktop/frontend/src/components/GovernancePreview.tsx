@@ -38,7 +38,11 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
     <p className="muted">保护、恢复锁和平台限制不会因这个预览被解除。部分冲突会逐项反馈。</p>
     <ol className="gov-preview-items">{preview.items.map((item, index) => <li key={item.group_id}>
       <strong>组 {index + 1} · {selection.get(item.group_id)?.group.path_count ?? "未知"} 份文件</strong>
-      <span>{item.eligibility === "ELIGIBLE" ? "可以记录决定" : reasonLabel(item.reason_code)}</span>
+      <span>{item.eligibility === "ELIGIBLE"
+        ? item.source_freshness === "MATCH"
+          ? `预览时所选文件 SHA-256 与索引一致；保存时会再次核对${item.source_checked_at ? `（${item.source_checked_at}）` : ""}。`
+          : "未完成源文件核验，不能记录决定。"
+        : reasonLabel(item.reason_code)}</span>
     </li>)}</ol>
     {!canRecord && <p role="status">当前仅可只读预览，不能保存决定。</p>}
     {expired && !ambiguous && <p role="status">预览已过期，请关闭并重新预览。</p>}

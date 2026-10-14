@@ -29,13 +29,16 @@ func NewSandboxAPI(access *fileaccess.Manager, support string) *API {
 	return a
 }
 func (a *API) sourceLease(root string) (*fileaccess.Lease, error) {
+	return a.sourceLeaseContext(context.Background(), root)
+}
+func (a *API) sourceLeaseContext(ctx context.Context, root string) (*fileaccess.Lease, error) {
 	if !a.sandbox {
 		return &fileaccess.Lease{Root: root}, nil
 	}
 	if a.access == nil {
 		return nil, fileaccess.ErrAuthorizationRequired
 	}
-	return a.access.Acquire(context.Background(), root)
+	return a.access.Acquire(ctx, root)
 }
 func (a *API) safeDatabaseDirectory(path string) bool {
 	abs, e := filepath.Abs(path)
