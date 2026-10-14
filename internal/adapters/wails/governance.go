@@ -12,7 +12,7 @@ import (
 var errGovernanceUnavailable = errors.New("governance recording unavailable; refresh and review safety state")
 
 func (a *API) governanceServiceLocked() *app.GovernanceDecisionService {
-	return app.NewGovernanceDecisionService(a.store, a.scanRunner != nil && !a.sandbox && !a.closing, a)
+	return app.NewGovernanceDecisionService(a.store, a.scanRunner != nil && !a.sandbox && !a.closing, governanceSourceVerifier{api: a})
 }
 func (a *API) GetGovernanceCapabilities() (domain.GovernanceCapabilities, error) {
 	a.mu.RLock()

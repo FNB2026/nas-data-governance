@@ -20,11 +20,13 @@ const (
 	governanceFreshnessMaxBytes  = int64(128 << 20)
 )
 
-// VerifyGovernanceSources re-reads only the selected duplicate-group members.
+// verifyGovernanceSources re-reads only the selected duplicate-group members.
 // Roots and member paths come from the open project's store; a MAS source lease
 // must still prove a matching bookmark identity before fingerprint.Guarded is
 // allowed to open any member. This is an observation, never file authority.
-func (a *API) VerifyGovernanceSources(ctx context.Context, refs []domain.GovernanceSubject) map[string]domain.SourceFreshness {
+// It is deliberately not a method on the Wails-bound API, so the frontend can
+// invoke it only through the governance preview/commit workflows.
+func (a *API) verifyGovernanceSources(ctx context.Context, refs []domain.GovernanceSubject) map[string]domain.SourceFreshness {
 	checks := make(map[string]domain.SourceFreshness, len(refs))
 	set := func(id, status string) {
 		checks[id] = domain.SourceFreshness{Status: status, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
@@ -132,6 +134,22 @@ func (a *API) VerifyGovernanceSources(ctx context.Context, refs []domain.Governa
 		set(group.ref.GroupID, status)
 	}
 	return checks
+}
+
+// governanceSourceVerifier is injected into the application service at the
+// composition root. It is not bound to Wails, so raw verification cannot be
+// called as a frontend API outside the governed preview/commit flow.
+type governanceSourceVerifier struct{ api *API }
+
+func (v governanceSourceVerifier) VerifyGovernanceSources(ctx context.Context, refs []domain.GovernanceSubject) map[string]domain.SourceFreshness {
+	if v.api == nil {
+		checks := make(map[string]domain.SourceFreshness, len(refs))
+		for _, ref := range refs {
+			checks[ref.GroupID] = domain.SourceFreshness{Status: "UNVERIFIED", CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		}
+		return checks
+	}
+	return v.api.verifyGovernanceSources(ctx, refs)
 }
 
 func governanceFreshnessBudgetExceeded(groups [][]domain.FileInstance) bool {

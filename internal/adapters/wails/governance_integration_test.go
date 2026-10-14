@@ -87,7 +87,7 @@ func TestGovernanceFreshnessCancellationReleasesAuthorizedLease(t *testing.T) {
 	before := native.releases
 	native.afterResolve = cancel
 	native.mu.Unlock()
-	checks := a.VerifyGovernanceSources(ctx, []domain.GovernanceSubject{page.Items[0].GovernanceSubject})
+	checks := a.verifyGovernanceSources(ctx, []domain.GovernanceSubject{page.Items[0].GovernanceSubject})
 	if got := checks[page.Items[0].GroupID].Status; got != "UNVERIFIED" {
 		t.Fatalf("canceled freshness observation should fail closed, got %q", got)
 	}

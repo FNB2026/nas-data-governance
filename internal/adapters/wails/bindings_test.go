@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,6 +12,15 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
+
+func TestRawGovernanceSourceVerifierIsNotWailsBound(t *testing.T) {
+	if _, ok := reflect.TypeOf(&API{}).MethodByName("VerifyGovernanceSources"); ok {
+		t.Fatal("raw source verification must not be exposed as a Wails API method")
+	}
+	var _ interface {
+		VerifyGovernanceSources(context.Context, []domain.GovernanceSubject) map[string]domain.SourceFreshness
+	} = governanceSourceVerifier{}
+}
 
 type recoveryLockFixture struct {
 	source   []string
