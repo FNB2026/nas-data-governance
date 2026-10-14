@@ -117,6 +117,8 @@ jobs:
 
       - name: Check disposable NAS host protocol offline (no Docker)
         run: make nas-smoke-test
+      - name: Check namespace probe constraint model (no kernel or Docker)
+        run: make nas-namespace-model-test
 
       - name: Run go vet
         run: go vet ./...
