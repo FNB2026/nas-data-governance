@@ -17,6 +17,7 @@ import (
 )
 
 var ErrGuardedSourceChanged = errors.New("guarded source changed; path omitted")
+var ErrGuardedMountBoundaryUnverified = errors.New("guarded source mount boundary unverified; path omitted")
 
 // Guarded hashes a recovered candidate through directory descriptors anchored
 // at the task root. Every child open rejects symlinks and different devices;
@@ -37,6 +38,9 @@ func Guarded(root string, file domain.FileInstance, full bool) (string, error) {
 func GuardedContext(ctx context.Context, root string, file domain.FileInstance) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if !guardedContextMountProofAvailable() {
+		return "", ErrGuardedMountBoundaryUnverified
 	}
 	if file.Size < 0 || file.Size == int64(^uint64(0)>>1) {
 		return "", errors.New("recovered fingerprint size invalid; path omitted")
@@ -135,36 +139,36 @@ func openRecovered(root, rel string) (*os.File, unix.Stat_t, error) {
 	return openRecoveredAtRoot(dir, rel)
 }
 
-// openRecoveredNoFollowRoot walks the absolute registered root from / using
-// directory descriptors. Unlike O_NOFOLLOW on root alone, this rejects a
-// symlink in any ancestor above the root without a check-then-open race. A
-// mount at the registered root remains valid; same-device checks apply only
-// to descendants inside that task root.
-func openRecoveredNoFollowRoot(root, rel string) (*os.File, unix.Stat_t, error) {
+// openRootNoFollow walks the absolute registered root from / using directory
+// descriptors. Unlike O_NOFOLLOW on root alone, this rejects a symlink in any
+// ancestor above the root without a check-then-open race. Mounts before the
+// registered root are allowed; platform-specific member openers enforce the
+// task-root boundary.
+func openRootNoFollow(root string) (int, error) {
 	root = filepath.Clean(root)
 	if !filepath.IsAbs(root) {
-		return nil, unix.Stat_t{}, errors.New("recovered fingerprint root is not absolute; path omitted")
+		return -1, errors.New("recovered fingerprint root is not absolute; path omitted")
 	}
 	dir, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, unix.Stat_t{}, err
+		return -1, err
 	}
 	if root != string(filepath.Separator) {
 		for _, part := range strings.Split(strings.TrimPrefix(root, string(filepath.Separator)), string(filepath.Separator)) {
 			if part == "" || part == "." || part == ".." {
 				_ = unix.Close(dir)
-				return nil, unix.Stat_t{}, errors.New("recovered fingerprint root is invalid; path omitted")
+				return -1, errors.New("recovered fingerprint root is invalid; path omitted")
 			}
 			next, openErr := unix.Openat(dir, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 			if openErr != nil {
 				_ = unix.Close(dir)
-				return nil, unix.Stat_t{}, openErr
+				return -1, openErr
 			}
 			_ = unix.Close(dir)
 			dir = next
 		}
 	}
-	return openRecoveredAtRoot(dir, rel)
+	return dir, nil
 }
 
 func openRecoveredAtRoot(dir int, rel string) (*os.File, unix.Stat_t, error) {

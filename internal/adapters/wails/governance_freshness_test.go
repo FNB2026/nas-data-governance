@@ -3,6 +3,7 @@ package wails
 import (
 	"context"
 	"errors"
+	"golang.org/x/sys/unix"
 	"math"
 	"os"
 	"syscall"
@@ -46,6 +47,8 @@ func TestGovernanceFreshnessNetworkClassificationRequiresKnownNetworkEvidence(t 
 		{name: "known network disappeared", lease: networkLease, err: os.ErrNotExist, want: "NETWORK_PAUSED"},
 		{name: "local source disappeared", lease: localLease, err: os.ErrNotExist, want: "SOURCE_UNAVAILABLE"},
 		{name: "network path guard rejection", lease: networkLease, err: errors.New("cross-device path rejected"), want: "SOURCE_UNAVAILABLE"},
+		{name: "openat2 unavailable", lease: localLease, err: unix.ENOSYS, want: "SOURCE_UNAVAILABLE"},
+		{name: "openat2 rejected mount crossing", lease: networkLease, err: unix.EXDEV, want: "SOURCE_UNAVAILABLE"},
 		{name: "authorization failure wins", lease: networkLease, err: syscall.EACCES, want: "AUTHORIZATION_REQUIRED"},
 		{name: "network cancellation", lease: networkLease, err: context.Canceled, want: "UNVERIFIED"},
 		{name: "network verification deadline", lease: networkLease, err: context.DeadlineExceeded, want: "UNVERIFIED"},

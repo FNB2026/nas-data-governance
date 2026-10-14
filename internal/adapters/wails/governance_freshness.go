@@ -20,16 +20,31 @@ const (
 	governanceFreshnessMaxBytes  = int64(128 << 20)
 )
 
+type governanceFreshnessReader func(context.Context, string, domain.FileInstance) (string, error)
+
 // verifyGovernanceSources re-reads only the selected duplicate-group members.
-// Roots and member paths come from the open project's store; a MAS source lease
-// must still prove a matching bookmark identity before fingerprint.Guarded is
-// allowed to open any member. This is an observation, never file authority.
+// Roots and member paths come from the open project's store. A MAS source
+// lease must prove matching bookmark identity before GuardedContext opens a
+// member. This is an observation, never file authority.
 // It is deliberately not a method on the Wails-bound API, so the frontend can
 // invoke it only through the governance preview/commit workflows.
 func (a *API) verifyGovernanceSources(ctx context.Context, refs []domain.GovernanceSubject) map[string]domain.SourceFreshness {
+	return a.verifyGovernanceSourcesWithReader(ctx, refs, fingerprint.GuardedContext)
+}
+
+func (a *API) verifyGovernanceSourcesWithReader(ctx context.Context, refs []domain.GovernanceSubject, read governanceFreshnessReader) map[string]domain.SourceFreshness {
+	if read == nil {
+		read = fingerprint.GuardedContext
+	}
 	checks := make(map[string]domain.SourceFreshness, len(refs))
 	set := func(id, status string) {
 		checks[id] = domain.SourceFreshness{Status: status, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	}
+	if !governanceFreshnessMountProofAvailable() {
+		for _, ref := range refs {
+			set(ref.GroupID, "UNVERIFIED")
+		}
+		return checks
 	}
 	if len(refs) == 0 || len(refs) > governanceFreshnessMaxGroups || a.store == nil {
 		for _, ref := range refs {
@@ -117,7 +132,7 @@ func (a *API) verifyGovernanceSources(ctx context.Context, refs []domain.Governa
 				status = freshnessStatusForLease(lease, err)
 				break
 			}
-			got, readErr := fingerprint.GuardedContext(ctx, lease.Root, file)
+			got, readErr := read(ctx, lease.Root, file)
 			if readErr != nil {
 				if errors.Is(readErr, fingerprint.ErrGuardedSourceChanged) {
 					status = "SOURCE_CHANGED"
@@ -139,7 +154,10 @@ func (a *API) verifyGovernanceSources(ctx context.Context, refs []domain.Governa
 // governanceSourceVerifier is injected into the application service at the
 // composition root. It is not bound to Wails, so raw verification cannot be
 // called as a frontend API outside the governed preview/commit flow.
-type governanceSourceVerifier struct{ api *API }
+type governanceSourceVerifier struct {
+	api  *API
+	read governanceFreshnessReader // nil in production; injectable only by package tests
+}
 
 func (v governanceSourceVerifier) VerifyGovernanceSources(ctx context.Context, refs []domain.GovernanceSubject) map[string]domain.SourceFreshness {
 	if v.api == nil {
@@ -149,7 +167,10 @@ func (v governanceSourceVerifier) VerifyGovernanceSources(ctx context.Context, r
 		}
 		return checks
 	}
-	return v.api.verifyGovernanceSources(ctx, refs)
+	if v.read == nil {
+		return v.api.verifyGovernanceSources(ctx, refs)
+	}
+	return v.api.verifyGovernanceSourcesWithReader(ctx, refs, v.read)
 }
 
 func governanceFreshnessBudgetExceeded(groups [][]domain.FileInstance) bool {

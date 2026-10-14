@@ -31,7 +31,8 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
   const eligible = preview.items.filter((item) => item.eligibility === "ELIGIBLE" && item.source_freshness === "MATCH").length;
   const expired = !!preview.preview_token && (!Number.isFinite(expiry) || expiry <= now);
   const mayRetryAmbiguous = ambiguous && !!preview.preview_token;
-  const mayCommit = canRecord && !busy && !!preview.preview_token && !expired && (mayRetryAmbiguous || canCommitGovernancePreview(preview));
+  const mayCommit = canRecord && !busy && !!preview.preview_token &&
+    (mayRetryAmbiguous || (!expired && canCommitGovernancePreview(preview)));
   const commit = () => { if (mayCommit) onCommit(); };
   return <div className="gov-modal-backdrop"><div ref={container} className="gov-modal card" role="dialog" aria-modal="true" aria-labelledby="gov-preview-title" onKeyDown={keyboard}>
     <h3 id="gov-preview-title" ref={title} tabIndex={-1}>确认要记录的决定</h3>

@@ -52,3 +52,25 @@ it("permits retry of an exact ambiguous request despite a later non-MATCH previe
   fireEvent.click(button);
   expect(onCommit).toHaveBeenCalledTimes(1);
 });
+
+it("allows the retained ambiguous request to be retried after preview expiry", () => {
+  const value = preview("MATCH", "ELIGIBLE", "RECORD_ONLY");
+  value.expires_at = new Date(Date.now() - 1000).toISOString();
+  const onCommit = vi.fn();
+  render(<GovernancePreview preview={value} selection={selection} kind="KEEP_ALL" canRecord busy={false} ambiguous onClose={vi.fn()} onCommit={onCommit} canQueryReceipt={false} onQueryReceipt={vi.fn()} note={null} />);
+  const retry = screen.getByRole("button", { name: "重试相同请求" });
+  expect(retry).toBeEnabled();
+  fireEvent.click(retry);
+  expect(onCommit).toHaveBeenCalledTimes(1);
+});
+
+it("does not allow a new commit after preview expiry", () => {
+  const value = preview("MATCH", "ELIGIBLE", "RECORD_ONLY");
+  value.expires_at = new Date(Date.now() - 1000).toISOString();
+  const onCommit = vi.fn();
+  render(<GovernancePreview preview={value} selection={selection} kind="KEEP_ALL" canRecord busy={false} ambiguous={false} onClose={vi.fn()} onCommit={onCommit} canQueryReceipt={false} onQueryReceipt={vi.fn()} note={null} />);
+  const button = screen.getByRole("button", { name: "保存决定（未批准、未执行）" });
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(onCommit).not.toHaveBeenCalled();
+});
