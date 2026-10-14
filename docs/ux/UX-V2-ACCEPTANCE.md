@@ -144,13 +144,29 @@ same-key concurrent replay, audit deduplication, close/reopen receipt identity,
 zero created operation plans and source-byte conservation. It calls the store
 directly; it is not a Wails freshness or GUI success.
 
-The 10k-group test uses 20k synthetic rows and ten SQL queries of page size 20:
+The 10k-group test uses 20k synthetic rows and ten timed
+`ListGovernanceGroups` calls of page size 20 (each call contains multiple SQL
+queries, not one SQL statement):
 P50 42.856375 ms, nearest-rank P95 48.784292 ms. Count/filter assertions passed.
 This is an observed SQL baseline, not a preapproved performance PASS, a GUI
 measurement or a source scan. Memory and GUI P95 were not measured. Do not set
 a retrospective pass threshold to match these numbers.
 Private raw output SHA-256:
 `6ce8a17c922ae2c22fa0662b695cf94709a33fdeebb124b9ffe3f64dc7d3779f`.
+
+## Native profile preflight
+
+Read-only source inspection found that the ordinary desktop composition uses
+`NewAPI()` and the default project service. `DefaultSupportBase()` derives the
+NDG application-support root from `os.UserConfigDir()`. This inspection found
+no supported ordinary-desktop runtime profile override; the injectable
+`project.Options.SupportBase` is not itself an exposed App launch contract.
+A different bundle identifier alone therefore does not prove an independent
+ordinary desktop data root. No App was launched against the shared default
+profile, and no existing App, project registry or historical database was adopted.
+Native acceptance needs a proved isolated environment or a separately reviewed
+test composition whose differences are explicitly recorded; it must not be
+represented as the unchanged official App.
 
 ## Next bounded acceptance window
 
