@@ -40,6 +40,10 @@ file, source, namespace or network I/O. Normal interpreter/module loading is
 outside that claim. No PID, namespace path, URL, shell command, credential or
 output-directory flags exist. The CLI cannot accept/replay supplied witnesses.
 `replay` is an in-memory test function with no callbacks or executable adapter.
+Rejected argument messages use a fixed JSON classification. Actual CLI tests
+use a fresh random synthetic marker in unknown option values, positional input,
+unknown `--option=value` and invalid `--prototype=value`; all four exit 2 with
+empty stdout and `unsupported_arguments` stderr, without echoing the marker.
 
 The synthetic model compares exact daemon/container/network IDs, nonce, frozen
 image digest, boot identity, State.Pid, starttime and network namespace device /

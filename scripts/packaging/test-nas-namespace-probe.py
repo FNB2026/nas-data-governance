@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import unittest
@@ -180,14 +181,19 @@ class RefusalTests(unittest.TestCase):
 
     def test_actual_cli_refuses_execution_and_unknown_command_input(self):
         # Executable CLI contract only; this is not an actual kernel test.
+        marker = "synthetic_private_" + secrets.token_hex(16)
         for args, code in (([], 0), (["--prototype"], 2), (["--pid", "123"], 2),
                            (["--url", "http://127.0.0.1:8080"], 2), (["--command", "sh"], 2),
-                           (["--credential", "synthetic_secret_not_for_cli_logs"], 2)):
+                           (["--credential", marker], 2), ([marker], 2),
+                           (["--unknown=" + marker], 2), (["--prototype=" + marker], 2)):
             child = subprocess.run([sys.executable, "-B", str(script), *args], capture_output=True, text=True, timeout=5)
             self.assertEqual(child.returncode, code)
-            self.assertNotIn("synthetic_secret_not_for_cli_logs", child.stdout + child.stderr)
+            self.assertNotIn(marker, child.stdout + child.stderr)
             if args in ([], ["--prototype"]):
                 self.assertEqual(json.loads(child.stdout)["live_backend"], "BLOCKED")
+            else:
+                self.assertEqual(child.stdout, "")
+                self.assertEqual(json.loads(child.stderr)["reason"], "unsupported_arguments")
 
 
 if __name__ == "__main__":
