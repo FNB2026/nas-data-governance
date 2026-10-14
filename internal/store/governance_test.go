@@ -173,6 +173,40 @@ func TestBatchVersionsPartialConflictAndUnchanged(t *testing.T) {
 	checkSourceBytes(t, before)
 }
 
+func TestFreshnessRejectionReasonSurvivesReceiptReplayAndRestart(t *testing.T) {
+	ctx := context.Background()
+	s, refs, before := governanceFixture(t, 1)
+	p := previewFor(t, s, refs, domain.DecisionKeepAll)
+	req := domain.CommitBatchRequest{PreviewToken: p.PreviewToken, IdempotencyKey: governanceTestKey(t)}
+	checks := map[string]domain.SourceFreshness{refs[0].GroupID: {Status: "AUTHORIZATION_REQUIRED", ReasonCode: "SOURCE_PERMISSION_DENIED"}}
+	result, err := s.CommitBatchDecisionsWithFreshness(ctx, req, checks)
+	if err != nil || result.Counts.Saved != 0 || result.Counts.Blocked != 1 || result.Items[0].ReasonCode != "SOURCE_PERMISSION_DENIED" {
+		t.Fatal("commit must persist the observed refusal, not success", result, err)
+	}
+	path := s.path
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	// A later MATCH cannot retroactively turn the recorded rejection into success.
+	checks[refs[0].GroupID] = domain.SourceFreshness{Status: "MATCH"}
+	replayed, err := reopened.CommitBatchDecisionsWithFreshness(ctx, req, checks)
+	if err != nil || !reflect.DeepEqual(result, replayed) {
+		t.Fatal("restart replay changed the refusal", err)
+	}
+	if _, err := reopened.GetGroupDecision(ctx, refs[0].GroupID); err == nil {
+		t.Fatal("rejected observation saved a decision")
+	}
+	if auditCount(t, reopened) != 1 {
+		t.Fatal("replay duplicated rejection audit")
+	}
+	checkSourceBytes(t, before)
+}
+
 func TestBatchDurableFailureResumeAndAtomicAudit(t *testing.T) {
 	runtimeKey0 := governanceTestKey(t)
 	s, refs, _ := governanceFixture(t, 3)

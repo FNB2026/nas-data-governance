@@ -26,6 +26,18 @@ it("shows a safe changed-source reason and disables commit", () => {
   expect(screen.getByRole("button", { name: "保存决定（未批准、未执行）" })).toBeDisabled();
 });
 
+it("renders the observed platform limitation and cannot submit an unverified preview", () => {
+  const onCommit = vi.fn();
+  render(<GovernancePreview preview={preview("UNVERIFIED", "BLOCKED", "SOURCE_PLATFORM_PROOF_UNAVAILABLE")} selection={selection} kind="KEEP_ALL" canRecord busy={false} ambiguous={false} onClose={vi.fn()} onCommit={onCommit} canQueryReceipt={false} onQueryReceipt={vi.fn()} note={null} />);
+  expect(screen.getByText(/此版本尚未实现当前平台所需的安全挂载边界核验/)).toBeVisible();
+  expect(screen.getByText(/重试不会解除此限制/)).toBeVisible();
+  const save = screen.getByRole("button", { name: "保存决定（未批准、未执行）" });
+  expect(save).toBeDisabled();
+  fireEvent.click(save);
+  expect(onCommit).not.toHaveBeenCalled();
+  expect(document.body.textContent).not.toContain("private-name");
+});
+
 it.each([undefined, "UNVERIFIED", "SOURCE_CHANGED"])("fails closed when an eligible item has freshness %s", (freshness) => {
   const value = preview(freshness ?? "", "ELIGIBLE", "RECORD_ONLY");
   if (freshness === undefined) delete value.items[0].source_freshness;

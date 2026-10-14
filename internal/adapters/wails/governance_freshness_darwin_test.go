@@ -27,7 +27,26 @@ func TestGovernancePreviewDarwinDoesNotIssueTokenWithoutMountProof(t *testing.T)
 	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{
 		Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll,
 	})
-	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].SourceFreshness != "UNVERIFIED" || preview.Items[0].ReasonCode != "SOURCE_UNVERIFIED" {
+	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].SourceFreshness != "UNVERIFIED" || preview.Items[0].ReasonCode != "SOURCE_PLATFORM_PROOF_UNAVAILABLE" {
 		t.Fatalf("Darwin must block a new record-only preview without opening source members: %+v, %v", preview, err)
+	}
+}
+
+func TestGovernancePreviewDarwinExplainsPlatformProofRefusal(t *testing.T) {
+	a, _ := governanceAPIWithSource(t)
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 10})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic groups unavailable")
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{
+			Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll,
+		})
+		if err != nil || len(preview.Items) != 1 || preview.Items[0].ReasonCode != "SOURCE_PLATFORM_PROOF_UNAVAILABLE" {
+			t.Fatalf("platform refusal needs its actual cause, not a guessed network or permission error: %+v, %v", preview, err)
+		}
+		if preview.PreviewToken != "" || preview.Items[0].Eligibility != "BLOCKED" || preview.Items[0].SourceFreshness != "UNVERIFIED" {
+			t.Fatal("a fresh explicit revalidation must not bypass the platform boundary")
+		}
 	}
 }

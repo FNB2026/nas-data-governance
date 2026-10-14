@@ -228,7 +228,7 @@ func (s *SQLiteStore) commitBatchDecisions(ctx context.Context, req domain.Commi
 			check, ok := freshness[item.GroupID]
 			if !ok || check.Status != "MATCH" {
 				item.Eligibility = "BLOCKED"
-				item.ReasonCode = domain.SourceFreshnessReason(check.Status, ok)
+				item.ReasonCode = domain.SourceFreshnessRejection(check, ok)
 			}
 		}
 		if e = s.commitDecisionItem(ctx, batchID, input, item); e != nil {

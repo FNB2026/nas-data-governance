@@ -347,7 +347,7 @@ func TestGovernancePreviewRejectsPhysicalSourceChangedWithoutReindex(t *testing.
 	if err != nil {
 		t.Fatal("preview should return a safe blocked result", err)
 	}
-	if len(preview.Items) != 1 || preview.Items[0].Eligibility == "ELIGIBLE" || preview.Items[0].ReasonCode != "SOURCE_CHANGED" {
+	if len(preview.Items) != 1 || preview.Items[0].Eligibility == "ELIGIBLE" || preview.Items[0].ReasonCode != "SOURCE_CONTENT_CHANGED" {
 		t.Fatalf("stale physical source must block preview, got eligibility=%q reason=%q", preview.Items[0].Eligibility, preview.Items[0].ReasonCode)
 	}
 	if preview.PreviewToken != "" {
@@ -412,7 +412,7 @@ func TestGovernanceCommitRechecksSourceAfterPreview(t *testing.T) {
 		t.Fatal("restore synthetic source timestamp")
 	}
 	result, err := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: preview.PreviewToken, IdempotencyKey: historyTestKey(t)})
-	if err != nil || result.Status != "COMPLETE" || result.Counts.Blocked != 1 || result.Counts.Saved != 0 || result.Items[0].ReasonCode != "SOURCE_CHANGED" {
+	if err != nil || result.Status != "COMPLETE" || result.Counts.Blocked != 1 || result.Counts.Saved != 0 || result.Items[0].ReasonCode != "SOURCE_CONTENT_CHANGED" {
 		t.Fatal("commit must durably block changed source", result, err)
 	}
 	if _, err := a.store.GetGroupDecision(ctx, ref.GroupID); err == nil {
@@ -421,6 +421,65 @@ func TestGovernanceCommitRechecksSourceAfterPreview(t *testing.T) {
 	summary, err := a.store.ScanSummary(ctx, ref.StorageID)
 	if err != nil || summary.Missing != 0 || summary.Unavailable != 0 {
 		t.Fatal("stale source was incorrectly reconciled missing/unavailable")
+	}
+}
+
+func TestGovernanceExplicitRevalidationAfterSourceRepair(t *testing.T) {
+	requireGovernanceFreshnessMountProof(t)
+	a, before := governanceAPIWithSource(t)
+	ctx := context.Background()
+	page, err := a.ListGovernanceGroups(domain.GovernanceQuery{PageSize: 20})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("synthetic groups unavailable")
+	}
+	ref := page.Items[0].GovernanceSubject
+	files, err := a.store.ListFiles(ctx, ref.StorageID)
+	if err != nil {
+		t.Fatal("synthetic members unavailable")
+	}
+	var file domain.FileInstance
+	for _, member := range files {
+		if member.ContentSHA256 == ref.SHA256 {
+			file = member
+			break
+		}
+	}
+	original, err := os.ReadFile(file.Path)
+	if err != nil || len(original) == 0 {
+		t.Fatal("synthetic source read failed")
+	}
+	changed := append([]byte(nil), original...)
+	changed[0] ^= 0x55
+	if os.WriteFile(file.Path, changed, 0600) != nil || os.Chtimes(file.Path, file.ModifiedAt, file.ModifiedAt) != nil {
+		t.Fatal("synthetic mutation failed")
+	}
+	request := domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{ref}, DecisionType: domain.DecisionKeepAll}
+	blocked, err := a.PreviewBatchDecisions(request)
+	if err != nil || len(blocked.Items) != 1 || blocked.PreviewToken != "" || blocked.Items[0].ReasonCode != "SOURCE_CONTENT_CHANGED" {
+		t.Fatal("changed content must refuse before issuing a token")
+	}
+	// Only the disposable test repairs its original bytes. Production preview
+	// performs no repair or automatic retry; a new explicit call rehashes.
+	if os.WriteFile(file.Path, original, 0600) != nil || os.Chtimes(file.Path, file.ModifiedAt, file.ModifiedAt) != nil {
+		t.Fatal("synthetic repair failed")
+	}
+	fresh, err := a.PreviewBatchDecisions(request)
+	if err != nil || fresh.PreviewToken == "" || fresh.Items[0].SourceFreshness != "MATCH" {
+		t.Fatal("explicit fresh observation must see repaired source")
+	}
+	result, err := a.CommitBatchDecisions(domain.CommitBatchRequest{PreviewToken: fresh.PreviewToken, IdempotencyKey: historyTestKey(t)})
+	if err != nil || result.Counts.Saved != 1 {
+		t.Fatal("commit must reverify the current source", err)
+	}
+	for path, sum := range before {
+		data, err := os.ReadFile(path)
+		if err != nil || sha256.Sum256(data) != sum {
+			t.Fatal("source bytes changed")
+		}
+	}
+	summary, err := a.store.ScanSummary(ctx, ref.StorageID)
+	if err != nil || summary.Missing != 0 || summary.Unavailable != 0 {
+		t.Fatal("revalidation changed indexed availability")
 	}
 }
 
@@ -461,9 +520,9 @@ func TestGovernancePreviewRejectsSymlinkedRootAncestorWithoutProjectMutation(t *
 		t.Fatal("synthetic indexed rows unavailable")
 	}
 	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
-	wantReason := "SOURCE_UNAVAILABLE"
+	wantReason := "SOURCE_READ_FAILED"
 	if !governanceFreshnessMountProofAvailable() {
-		wantReason = "SOURCE_UNVERIFIED"
+		wantReason = "SOURCE_PLATFORM_PROOF_UNAVAILABLE"
 	}
 	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].Eligibility != "BLOCKED" || preview.Items[0].ReasonCode != wantReason {
 		t.Fatalf("symlinked root ancestor must be rejected without a token: %+v, %v", preview, err)
