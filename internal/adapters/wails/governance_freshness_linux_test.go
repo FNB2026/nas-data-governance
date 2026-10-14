@@ -15,7 +15,14 @@ import (
 )
 
 func TestOpenat2BoundaryErrorsBlockGovernancePreviewWithoutSideEffects(t *testing.T) {
-	for _, injectedErr := range []error{unix.ENOSYS, unix.EXDEV} {
+	for _, tc := range []struct {
+		err    error
+		reason string
+	}{
+		{unix.ENOSYS, "SOURCE_VERIFICATION_API_UNAVAILABLE"},
+		{unix.EXDEV, "SOURCE_MOUNT_BOUNDARY_REJECTED"},
+	} {
+		injectedErr := tc.err
 		t.Run(injectedErr.Error(), func(t *testing.T) {
 			a, before := governanceAPIWithSource(t)
 			ctx := context.Background()
@@ -34,7 +41,7 @@ func TestOpenat2BoundaryErrorsBlockGovernancePreviewWithoutSideEffects(t *testin
 			preview, err := service.Preview(ctx, domain.PreviewBatchRequest{
 				Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll,
 			})
-			if err != nil || !called || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].Eligibility != "BLOCKED" || preview.Items[0].SourceFreshness != "SOURCE_UNAVAILABLE" || preview.Items[0].ReasonCode != "SOURCE_UNAVAILABLE" {
+			if err != nil || !called || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].Eligibility != "BLOCKED" || preview.Items[0].SourceFreshness != "SOURCE_UNAVAILABLE" || preview.Items[0].ReasonCode != tc.reason {
 				t.Fatalf("openat2 %v must block before preview persistence: %+v, %v", injectedErr, preview, err)
 			}
 			if _, err := a.store.GetGroupDecision(ctx, page.Items[0].GroupID); err == nil {
