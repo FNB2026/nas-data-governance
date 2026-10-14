@@ -211,6 +211,8 @@ func freshnessStatusForLease(lease *fileaccess.Lease, err error) string {
 		// observation did not finish. It does not establish that the source or
 		// network is unavailable, so fail closed without asserting either.
 		return "UNVERIFIED"
+	case errors.Is(err, fingerprint.ErrGuardedMountBoundaryUnverified):
+		return "UNVERIFIED"
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return "AUTHORIZATION_REQUIRED"
 	case lease != nil && lease.Network && scanner.IsNetworkUnavailableError(err):

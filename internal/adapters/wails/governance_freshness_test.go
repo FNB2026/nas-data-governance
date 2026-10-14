@@ -11,6 +11,7 @@ import (
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/fileaccess"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
 )
 
 func TestGovernanceFreshnessBudgetBoundaries(t *testing.T) {
@@ -49,6 +50,7 @@ func TestGovernanceFreshnessNetworkClassificationRequiresKnownNetworkEvidence(t 
 		{name: "network path guard rejection", lease: networkLease, err: errors.New("cross-device path rejected"), want: "SOURCE_UNAVAILABLE"},
 		{name: "openat2 unavailable", lease: localLease, err: unix.ENOSYS, want: "SOURCE_UNAVAILABLE"},
 		{name: "openat2 rejected mount crossing", lease: networkLease, err: unix.EXDEV, want: "SOURCE_UNAVAILABLE"},
+		{name: "platform cannot prove mount boundary", lease: localLease, err: fingerprint.ErrGuardedMountBoundaryUnverified, want: "UNVERIFIED"},
 		{name: "authorization failure wins", lease: networkLease, err: syscall.EACCES, want: "AUTHORIZATION_REQUIRED"},
 		{name: "network cancellation", lease: networkLease, err: context.Canceled, want: "UNVERIFIED"},
 		{name: "network verification deadline", lease: networkLease, err: context.DeadlineExceeded, want: "UNVERIFIED"},
