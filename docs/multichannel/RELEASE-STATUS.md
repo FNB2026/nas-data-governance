@@ -1,5 +1,20 @@
 # NDG 多渠道实时执行台账
 
+## 后续执行优先级：验收收口
+
+用户新顺序：**Phase A 合并与门禁 → Phase B UX v2 完整验收 → Phase C
+Docker disposable host 实测 → Phase D fnOS 首次安装实验 → Phase E App Store
+重新评估**。不新增无关功能，只处理验收中确证的阻断缺陷。
+
+Phase A 已取得 main `5b802233c2a33a61fb57587d92724e70836400a1` 的本地
+required 与 CI/Security/Linux 八项成功回执，#105/#106/#107 均已正常合并。
+Phase B 已开始 bounded store 基线与 T01–T25 分层盘点，目前 **BLOCKED**：
+Darwin 新核验无等价挂载证明、正式 GUI 和非开发者走查未认证。
+详见 [Phase B 验收台账](../ux/UX-V2-ACCEPTANCE.md)。
+在 B 关闭前不执行 C/D 新现场试验；可只读登记依赖。不以代码合并、离线模型
+或 SQL 基线升级设备/签名/用户验收。MAS NO-GO、历史 CarbonCore FAIL、
+原 fnOS LIMITED BLOCKED、beta.11 不可变资产均保留。
+
 更新时间：2026-10-14。当前证据基线：main `20c545b60d88a2ea67beef5be1766cc97ec152d0`；较早快照按下方日期完整保留。这是时间绑定的快照；每轮先重新读取远端 main、exact HEAD、工作树和 lease。产品状态与代码合并、测试层、发行物层、运行层分别记录。
 
 ## 2026-10-14 后续执行快照（优先于下方历史记录）
