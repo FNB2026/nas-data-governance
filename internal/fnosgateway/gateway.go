@@ -1,4 +1,4 @@
-// Package fnosgateway is a bounded, read-only CGI adapter. It owns no source,
+// Package fnosgateway provides bounded, read-only fnOS adapters. They own no source,
 // database or Docker permissions. NAS cookies and proxy headers never reach core.
 package fnosgateway
 

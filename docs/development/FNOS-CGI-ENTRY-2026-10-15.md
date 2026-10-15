@@ -66,3 +66,17 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 临时 CGI 探针已恢复为上述原 Go 摘要。首次恢复记录因配置暂时缺失保留为 `recovery_incomplete`；随后独立只读核验确认原配置 SHA-256 为 `47e412618123ad51af9e46a7e18a0da340bd90951b3c84f21826f5d14a2774ef`，原配置及 Go 文件的 UID/GID/mode 与备份一致，HTTPS 健康，原有 15 个容器及 8 个网络逐项未变。实际 Chrome 刷新后管理桌面可用。未向新 master 发信号；**master 连续性未通过**。
 
 本次没有执行候选原位语法核验、代理 reload 或 12 项传输矩阵；不能把它们标成 PASS。NDG 产品仍返回安全拒绝。当前配置内容保持原值，不自动重试或覆盖厂商再生成文件。需要可持续的应用自身入口机制后才能实施可信代理适配器，fnOS 客户端支持仍为 BLOCKED。已公开 Docker Preview.1、Mac beta.11 及其资产均未改变。
+
+## 应用自身终止 TLS 的候选（尚未部署）
+
+厂商代理无法提供所需证明时，另行准备 `cmd/ndg-fnos-https`，在专用 HTTPS Origin 根路径提供同一只读 UI，转发到现有隔离核心。它核验真实 `Request.TLS`、Host 和 POST Origin；不从 Forwarded 或客户端自报 Header 构造 TLS 证明。CGI 的旧门禁不改变。该方案不复用 NAS 登录态：NDG 自身认证及 CSRF 仍由只读核心核验。
+
+候选要求专用于 NDG 的 DNS 名称、匹配证书和私钥，绑定明确私有 IPv4／回环及非特权端口；禁止通配监听地址、公网 IPv4、IP Origin、无 SNI、错误 SNI、证书过期／不匹配及弱密钥。新域名还须实际验证解析与浏览器信任，且不应落入 NAS Cookie 的 Domain 范围；不同端口本身不能隔离 Cookie。不复制 NAS 私钥，不自动签发证书，不添加 DNS、端口映射或系统信任，也不提供忽略证书选项。
+
+配置固定为 root-owned 元数据目录的 `https.json`，证书和密钥固定为同目录 `tls.crt`／`tls.key`。逐级 FD/openat2 拒绝符号链接、跨挂载及可写祖先；文件有大小界限，先检查打开的 FD 类型，FIFO 不会阻塞启动。私钥拒绝 world 权限、执行／特殊位、group 写权限和扩展访问 ACL。读取密钥的专属运行组仅应包含该应用账户。启动时仍要求全部线程的专属 UID/GID、零 capabilities 和不可撤销 NoNewPrivs；只能使用纯 Go Linux 构建。
+
+适配器仍无源、数据库或 Docker 权限。只允许既有只读 API 白名单，64 个连接、固定 API body/response 上限、读取／写出／空闲超时，SIGTERM 有限等待后关闭。错误及 TLS 日志不包含请求、源路径或密钥。域名证书不是用户数据授权；目录选择、文件语境和危险操作仍未实现或未认证。
+
+验证计划分层：本机 Go 测试使用新生成证书和真实 TLS socket，覆盖 Host／Origin／SNI、明文伪造 Header、危险路由、连接上限和关闭；原生 AMD64/ARM64 CI 另以专属非 root 账户运行实际候选二进制，检查 root-owned 配置／密钥、内核线程身份、真实 TLS 及五类启动拒绝。CI 脚本仅允许 GitHub-hosted 临时 runner，证书／私钥不进入发行或 CI 下载资产。这些不是实际 NAS、可信浏览器证书、核心端到端扫描或正式 FPK 生命周期验收。
+
+**目前仅开发实现，实际 NAS 未部署、未新增监听端口。** 需补齐专用域名／证书，独立复审、精确源码 CI 和候选摘要后，再按 A2 集中申请新增受限监听入口的部署授权。既有 Nginx 配置不得重试覆盖。fnOS 正式支持、手机、NAS 重启、升级及完整治理仍未通过。

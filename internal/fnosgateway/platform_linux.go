@@ -4,7 +4,6 @@ package fnosgateway
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"os"
 	"os/user"
@@ -20,44 +19,86 @@ import (
 // symlink ancestors. An ACL write grant would also set the POSIX group mask.
 func LoadConfig(path string) (Config, error) {
 	var c Config
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+	b, e := readTrustedFile(path, 4096, false)
+	if e != nil || decodeConfig(b, &c) != nil {
 		return c, ErrRejected
+	}
+	return c, nil
+}
+
+// readTrustedFile bounds reads before decoding and checks the opened descriptor.
+// O_NONBLOCK prevents a substituted FIFO from stalling before the type check.
+// Private key files also reject extended access ACLs and all world permissions.
+func readTrustedFile(path string, limit int64, private bool) ([]byte, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, ErrRejected
 	}
 	fd, e := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if e != nil {
-		return c, ErrRejected
+		return nil, ErrRejected
 	}
 	defer func() { _ = unix.Close(fd) }()
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for i, p := range parts {
 		var st unix.Stat_t
 		if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Mode&0022 != 0 {
-			return c, ErrRejected
+			return nil, ErrRejected
 		}
-		flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW
+		flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 		if i < len(parts)-1 {
 			flags |= unix.O_DIRECTORY
 		}
 		next, err := unix.Openat2(fd, p, &unix.OpenHow{Flags: uint64(flags), Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV})
 		if err != nil {
-			return c, ErrRejected
+			return nil, ErrRejected
 		}
 		_ = unix.Close(fd)
 		fd = next
 	}
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Mode&0022 != 0 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Size > 4096 {
-		return c, ErrRejected
+	if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Mode&0022 != 0 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Size > limit {
+		return nil, ErrRejected
 	}
-	f := os.NewFile(uintptr(fd), "gateway-config")
+	if private {
+		if st.Mode&07137 != 0 {
+			return nil, ErrRejected
+		}
+		if _, err := unix.Fgetxattr(fd, "system.posix_acl_access", nil); err != unix.ENODATA {
+			return nil, ErrRejected
+		}
+	}
+	f := os.NewFile(uintptr(fd), "gateway-material")
 	fd = -1
 	defer f.Close()
-	d := json.NewDecoder(io.LimitReader(f, 4097))
-	d.DisallowUnknownFields()
-	if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF {
+	b, e := io.ReadAll(io.LimitReader(f, limit+1))
+	if e != nil || int64(len(b)) > limit {
+		return nil, ErrRejected
+	}
+	return b, nil
+}
+
+func LoadHTTPSConfig(path string) (HTTPSConfig, error) {
+	var c HTTPSConfig
+	b, e := readTrustedFile(path, 4096, false)
+	if e != nil || decodeConfig(b, &c) != nil {
 		return c, ErrRejected
 	}
 	return c, nil
+}
+
+// TLS material is fixed beside the trusted configuration, never selected by a
+// client or environment variable. Deployment must use an NDG-specific key.
+func LoadTLSMaterial(configPath string) ([]byte, []byte, error) {
+	dir := filepath.Dir(configPath)
+	cert, e := readTrustedFile(filepath.Join(dir, "tls.crt"), 65536, false)
+	if e != nil {
+		return nil, nil, ErrRejected
+	}
+	key, e := readTrustedFile(filepath.Join(dir, "tls.key"), 65536, true)
+	if e != nil {
+		return nil, nil, ErrRejected
+	}
+	return cert, key, nil
 }
 
 // AllThreadsSyscall covers Go's existing OS threads under a stop-the-world

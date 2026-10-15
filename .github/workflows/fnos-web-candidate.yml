@@ -1,4 +1,4 @@
-name: fnOS CGI candidate
+name: fnOS Web candidate
 on:
   pull_request:
     branches: [main]
@@ -54,6 +54,8 @@ jobs:
           pathlib.Path('/tmp/ndg-cgi-candidate/generated-tracked-paths.json').write_text(json.dumps({'expected_generated_only':changed})+'\n')
           PY
           go build -trimpath -ldflags="-X github.com/FNB2026/nas-data-governance/internal/version.Commit=$(git rev-parse HEAD) -X github.com/FNB2026/nas-data-governance/internal/version.Channel=fnos-cgi-development" -o /tmp/ndg-cgi-candidate/ndg-fnos-cgi ./cmd/ndg-fnos-cgi
+          go build -trimpath -ldflags="-X github.com/FNB2026/nas-data-governance/internal/version.Commit=$(git rev-parse HEAD) -X github.com/FNB2026/nas-data-governance/internal/version.Channel=fnos-https-development" -o /tmp/ndg-cgi-candidate/ndg-fnos-https ./cmd/ndg-fnos-https
+          go version -m /tmp/ndg-cgi-candidate/ndg-fnos-https > /tmp/ndg-cgi-candidate/https-build-info.txt
           git rev-parse HEAD > /tmp/ndg-cgi-candidate/source-sha.txt
           go version > /tmp/ndg-cgi-candidate/toolchain.txt
           go version -m /tmp/ndg-cgi-candidate/ndg-fnos-cgi > /tmp/ndg-cgi-candidate/build-info.txt
@@ -64,7 +66,13 @@ jobs:
           pathlib.Path('/tmp/ndg-cgi-candidate/ui-inventory.json').write_text(json.dumps({'architecture':os.environ['GOARCH'],'files':inventory},indent=2)+'\n')
           PY
           cd /tmp/ndg-cgi-candidate
-          sha256sum ndg-fnos-cgi source-sha.txt toolchain.txt build-info.txt ui-inventory.json generated-tracked-paths.json > SHA256SUMS
+          sha256sum ndg-fnos-cgi ndg-fnos-https https-build-info.txt source-sha.txt toolchain.txt build-info.txt ui-inventory.json generated-tracked-paths.json > SHA256SUMS
+      - name: Isolated native TLS smoke (GitHub-hosted only, not NAS acceptance)
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-ci-smoke.py /tmp/ndg-cgi-candidate/ndg-fnos-https > /tmp/ndg-cgi-candidate/https-ci-smoke.json
+          cd /tmp/ndg-cgi-candidate
+          sha256sum -c SHA256SUMS
+          sha256sum https-ci-smoke.json >> SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ndg-cgi-candidate-${{ matrix.architecture }}
