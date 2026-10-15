@@ -32,6 +32,13 @@ Observed native Wails App, not a browser mock or installed historical beta.11:
   Private receipts are retained. Later research/documentation/test-only additions
   do not turn this dirty development binary into a frozen signed RC.
 
+Initial harness attempts failed: the direct Go link lacked the
+UniformTypeIdentifiers framework; a subsequent startup rejected the launcher's
+temporary parent because it differed from `os.TempDir()`. Both were corrected
+before the successful observed run, with original outputs retained. The static
+startup panic in the captured stderr belongs to that rejected harness attempt,
+not a successful source-verification attempt or an observed running-App crash.
+
 Before meaningful GUI actions, the live PID, 0700 fresh profile and exact private
 marker were verified. Only the marker existed before startup; startup's support
 directory and empty first-use GUI contained no adopted recent project. After
