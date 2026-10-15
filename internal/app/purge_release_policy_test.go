@@ -91,7 +91,7 @@ func TestPurgePolicyPreservesAmbiguousHistoricalRecovery(t *testing.T) {
 	}
 	for range 2 {
 		results, err := svc.RecoverPurges(ctx, q)
-		if err != nil || len(results) != 1 || results[0].ErrorType != "ambiguous_recovery_state" {
+		if err != nil || len(results) != 1 || results[0].ErrorType != "manual_reconciliation_required" {
 			t.Fatalf("historical recovery: %v %+v", err, results)
 		}
 		if err := requireNoRecovery(ctx, st); err == nil {

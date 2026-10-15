@@ -36,7 +36,7 @@ func NewPurgeService(st *store.SQLiteStore) *PurgeService {
 
 // PurgeReleaseAllowed is a compile-time, default-deny release policy.
 // No channel, UI argument, environment variable or service constructor enables it.
-// Historical listing and conservative recovery remain available.
+// Historical listing and read-only recovery inspection remain available.
 func PurgeReleaseAllowed() bool { return false }
 
 var ErrPurgeReleaseDisabled = errors.New("purge disabled by release policy")
@@ -120,7 +120,8 @@ type PurgeExecuteResult struct {
 // ExecutePurge runs a purge plan through the safe-operation pipeline.
 // In dry-run mode, the plan is validated without filesystem writes. In real
 // mode, the executor performs stale checks, verification, audit, and
-// rollback per AGENTS.md rule 7.
+// unresolved-state retention per AGENTS.md rule 7. Legacy journals do not
+// authorize automatic rollback; full execution safety is not release-certified.
 //
 // The digest is verified again at execution time to prevent replay attacks.
 // Purge is restricted to item-by-item permanent deletion within the managed
@@ -180,7 +181,8 @@ func (s *PurgeService) executePurge(ctx context.Context, in PurgeExecuteInput) (
 	return &PurgeExecuteResult{Result: result}, nil
 }
 
-// RecoverPurges reconciles non-terminal purge operations after a crash.
+// RecoverPurges inspects non-terminal legacy purge journals after a crash.
+// They remain locked until independently proven reconciliation is available.
 // Returns all results; the CLI is responsible for counting failures and
 // deciding whether to require manual review.
 func (s *PurgeService) RecoverPurges(ctx context.Context, quarantineRoot string) ([]executor.PurgeResult, error) {
