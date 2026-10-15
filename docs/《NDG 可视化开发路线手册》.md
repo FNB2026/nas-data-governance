@@ -2862,7 +2862,7 @@ NDG 当前并不缺扫描能力，也不缺治理概念。它真正缺的是一�
 [2]: https://wails.io/zh-Hans/docs/howdoesitwork/ "https://wails.io/zh-Hans/docs/howdoesitwork/"
 [3]: https://www2.sqlite.org/wal.html "https://www2.sqlite.org/wal.html"
 [4]: https://wails.io/docs/reference/runtime/events/ "https://wails.io/docs/reference/runtime/events/"
-[5]: https://tanstack.com/table/latest/docs/guide/virtualization "https://tanstack.com/table/latest/docs/guide/virtualization"
+[5]: https://tanstack.com/table/v8/docs/guide/virtualization "https://tanstack.com/table/v8/docs/guide/virtualization"
 [6]: https://wails.io/docs/gettingstarted/development/ "https://wails.io/docs/gettingstarted/development/"
 [7]: https://github.com/qarmin/czkawka/blob/master/instructions/Instruction.md "https://github.com/qarmin/czkawka/blob/master/instructions/Instruction.md"
 [8]: https://wails.io/docs/gettingstarted/building/ "https://wails.io/docs/gettingstarted/building/"

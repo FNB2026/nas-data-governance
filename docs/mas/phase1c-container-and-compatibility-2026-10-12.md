@@ -104,7 +104,7 @@ This is a source inventory and risk review, not a final binary/privacy-manifest 
 - [Privacy manifests](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)
 - [Register an App ID](https://developer.apple.com/help/account/identifiers/register-an-app-id)
 - [Create an App Store provisioning profile](https://developer.apple.com/help/account/provisioning-profiles/create-an-app-store-provisioning-profile)
-- [Create distribution-signed macOS code](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-mac)
+- [Create distribution-signed macOS code](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/)
 
 | Area | Current finding | Status / next action |
 |---|---|---|
