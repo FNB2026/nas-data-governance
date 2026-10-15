@@ -1,5 +1,20 @@
 # NDG 多渠道实时执行台账
 
+## 2026-10-15 Fast Release Track（当前优先级）
+
+按所有者最新指令，采用独立渠道最小发行：Docker Read-only Public Preview →
+fnOS Docker → Mac 后续 Beta。下方 2026-10-14 的 B→C→D 串行门禁已被本节取代，
+历史 FAIL / BLOCKED / NOT RUN 原样保留。#111、完整 25 项 UX、App Store、原生 FPK
+和非开发者全面走查不再阻挡独立 Docker 只读预览。
+
+当前基线 main `e55484ee6c95a73290a2182b66b977ddf4d61dd5`；Mac beta.11 资产不变。
+Docker 候选使用独立 `packaging/docker/PREVIEW_VERSION`；原生 CI 仅提供构建、
+SBOM 和漏洞证据，独立 Linux 主机 HTTP、断点、重启、持久化、备份恢复及源 SHA-256
+实测另记。公开镜像和 GitHub Release 仍须完成候选后集中取得一次对外授权。
+
+安装边界和证据清单见 [Docker 只读预览](DOCKER-READONLY-PREVIEW.md)。
+
+
 ## 2026-10-14 Phase B 收口顺序修订
 
 按所有者最新指令，Phase B 分为 B-1（Issue #109 原因分类和安全重新核验）、
