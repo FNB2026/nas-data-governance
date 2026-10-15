@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "scope": "Published immutable channel identities; development VERSION is separate",
+  "channels": {
+    "macos": {
+      "tag": "v0.5.0-beta.11",
+      "tag_object": {
+        "sha": "395623c9ff0154d8ba7d0c63a109e1f8df2dccec",
+        "type": "tag"
+      },
+      "source_commit": "791f19119542e69b62ee62dd358fed188000837e",
+      "release_id": 409512491,
+      "release_url": "https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11",
+      "prerelease": true,
+      "assets": {
+        "NDG-0.5.0-beta.11-macos.dmg": {
+          "id": 630131227,
+          "sha256": "sha256:aa3d9dada7bd1f670f70e4385e91e16a0927b5a8855656394d99a9e4f1fe5273"
+        },
+        "NDG-0.5.0-beta.11-macos.dmg.sha256": {
+          "id": 630131230,
+          "sha256": "sha256:1f4ae3f04d95e59307c95d8e7ede669f0e187af6204e923490798e7b49227e06"
+        },
+        "sbom.cyclonedx.json": {
+          "id": 630131233,
+          "sha256": "sha256:a545ffee13dc57f78123ca0b5634808b6d0b2ebd496347b1fcde1d3023b0c17d"
+        },
+        "sbom.spdx.json": {
+          "id": 630131231,
+          "sha256": "sha256:837c51e70f8212e3d2312b6922c699cc4a05f31510fbe70e3ffd5c30cf073778"
+        }
+      }
+    },
+    "docker": {
+      "tag": "v0.5.0-docker-preview.1",
+      "tag_object": {
+        "sha": "1db1e4ab9a1287d3f7f9b801b471b00bfc7c7d1e",
+        "type": "commit"
+      },
+      "source_commit": "1db1e4ab9a1287d3f7f9b801b471b00bfc7c7d1e",
+      "release_id": 413760377,
+      "release_url": "https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1",
+      "prerelease": true,
+      "assets": {
+        "ACCEPTANCE.md": {
+          "id": 643748091,
+          "sha256": "sha256:9dc0c65e72b51b7110c5260279965071becddd395412eb255963e29e96f0ba77"
+        },
+        "compose.fnos.yaml": {
+          "id": 643748097,
+          "sha256": "sha256:752abe4ac662caeab121eaada174d4a43f0f284a9d952a2bf1421bac3928291d"
+        },
+        "compose.yaml": {
+          "id": 643734354,
+          "sha256": "sha256:f02132c4c77ab335fa0f824a8a4cc2f07bc8d01d2f77dfecb0a5b5b06e83d11e"
+        },
+        "fnos-amd64-host.json": {
+          "id": 643748098,
+          "sha256": "sha256:42cb78135a8e93a3ad2611420dc96958eb0e9d48f15e05d5eb4ffa93e1d4bb50"
+        },
+        "INSTALL.md": {
+          "id": 643748094,
+          "sha256": "sha256:1be66801dff35a7a7d8005c24361e29fc5ed05fb1d683b1e3067615d7708643a"
+        },
+        "linux-arm64-host.json": {
+          "id": 643756976,
+          "sha256": "sha256:c5f127bb79486cb0675ab361f03bc77931323771d3dca4c815cf5ee296c0895e"
+        },
+        "ndg-0.5.0-docker-preview.1-linux-amd64.docker.tar.gz": {
+          "id": 643734442,
+          "sha256": "sha256:c0a3a1fd7aeabcec8c683593daac62f40f3f760fd038d07ecac7611ff5783a6f"
+        },
+        "ndg-0.5.0-docker-preview.1-linux-amd64.evidence.tar.gz": {
+          "id": 643734426,
+          "sha256": "sha256:559a27ed027ab923bc82248cc6062402340e0af058b6b2350882996c76e25f09"
+        },
+        "ndg-0.5.0-docker-preview.1-linux-arm64.docker.tar.gz": {
+          "id": 643734424,
+          "sha256": "sha256:3131153f07cb5476dac6f8f562b5e72c7ac23b059bd529af47c54fae62f9fad8"
+        },
+        "ndg-0.5.0-docker-preview.1-linux-arm64.evidence.tar.gz": {
+          "id": 643734507,
+          "sha256": "sha256:3a2485b6a6039ec80b50953da01ea0791ed3d0e9cb74cb11dec14f15c2d70dac"
+        },
+        "ndg-0.5.0-docker-preview.1-multiarch.oci.tar": {
+          "id": 643734517,
+          "sha256": "sha256:d4037a52ec3c03c4ee5cd5691bce48b9d737cdcfc41f0ee8bd43d610399d3dc3"
+        },
+        "readonly-web-actual-host.png": {
+          "id": 643734564,
+          "sha256": "sha256:5b527a1a82c4c813cb1e71ec264d4d9cb30d81dea715be1a7ed2f48d99736bfb"
+        },
+        "release-candidate.json": {
+          "id": 643781155,
+          "sha256": "sha256:cce60c0c0d1cb236fef33f2dfd0f430b0a1fb0c7cf637d6af458b4738ea5b7fb"
+        },
+        "server.example.json": {
+          "id": 643734565,
+          "sha256": "sha256:ff3a349414421daa48433e4ca5a6e16f82f1a8c3f9f79fd62a694e072de49041"
+        },
+        "SHA256SUMS": {
+          "id": 643781150,
+          "sha256": "sha256:1b82e833d34541c3d3ba9124e6be0fc8641ea665a9c687a7a84bc55043f9630a"
+        }
+      },
+      "image": "ghcr.io/fnb2026/ndg-readonly-preview",
+      "index_digest": "sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1",
+      "manifests": {
+        "amd64": "sha256:bb6db808bc5a17cf27b951b07406136c6bba3056c89d2aee0268042a683f5be4",
+        "arm64": "sha256:4e13ba64c9b85d8e293b7c544c1a877d73c1a09b56323699e1a84464ed8ed216"
+      }
+    }
+  }
+}

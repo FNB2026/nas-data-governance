@@ -1,15 +1,26 @@
 # 文档索引
 
-本目录按“规范基线—架构决策—实施方案—专题提案—历史材料”组织。发生冲突时，先遵守 `AGENTS.md` 与 ADR，再以标记为现行的实施主文档为准。
+当前公开版本：**[macOS beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11)**、**[Linux Docker 只读 Preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1)**。Docker 暂不支持隔离、恢复或永久删除，fnOS 客户端入口仍 BLOCKED。详情见 [仓库首页](../README.md)。
+
+文档按规范基线、架构决策、实施方案、专题提案及历史材料组织。遵守 `AGENTS.md` 与 ADR。旧文档内的 Draft/未发布状态属于当时的历史快照，不是当前发行裁定。
 
 ## 用户文档
 
 - [NDG 用户指南](user-guide/NDG-用户指南.md)：安装、扫描、重复结果、目录语境保护、执行计划与回滚、数据库管理、故障排查、隐私安全声明。
 
+## 多端产品和发行状态
+
+- [公开入口、品牌与自动检查核查](development/PUBLIC-ENTRY-AUDIT-2026-10-15.md)。
+
+- [Docker 预览版安装手册](multichannel/DOCKER-READONLY-PREVIEW.md) 与 [真实主机验收](multichannel/DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
+- [多渠道最新发布台账](multichannel/RELEASE-STATUS.md)、[能力矩阵](multichannel/CAPABILITY-MATRIX.md)及[UX v2 验收矩阵](ux/UX-V2-ACCEPTANCE.md)。
+- [工程多端主路线](multichannel/NDG-MULTICHANNEL-MASTER.md)。
+- [双端完整隔离／恢复／永久删除实施手册](development/NDG-DUAL-CHANNEL-FULL-GOVERNANCE-EXECUTION-2026-10-15.md)：新增的长期开发目标，目前**不是已发布功能**。
+
 ## 规范基线
 
 - [白皮书](whitepaper.md)：领域模型、安全边界与治理方法。
-- [NDG v0.5 Beta RC / Release Execution 执行操作手册](release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)：首个公开 Beta 发布前唯一执行基线；当前为 beta.4 Draft 与 Resume 修复验证收口，后续候选身份未定，实时进度、阻断原因和决策在此维护。
+- [NDG v0.5 Beta RC / Release Execution 执行操作手册](release/NDG-v0.5-Beta-RC-Release-Execution-Manual.md)：历史 RC 发行操作手册，不再作为实时进度或当前公开版本判断依据；真实发行身份以 GitHub Releases 和多渠道台账为准。
 - [桌面端前端架构与后端协同推进方案](desktop-frontend-architecture.md)：七域页面、Binding/DTO、执行安全接线、Phase 0—7、测试矩阵与 DoD；当前桌面实施主文档。
 - [桌面信息架构](ui/information-architecture.md)：七域导航与页面职责摘要。
 

@@ -1,5 +1,19 @@
 # NDG 多渠道能力矩阵
 
+## 2026-10-15 当前公开能力摘要（以下为历史快照）
+
+| 能力 | Mac beta.11 已公开 | Linux Docker preview.1 已公开 | fnOS | MAS / FPK |
+| --- | --- | --- | --- | --- |
+| 只读扫描和重复分析 | 有限定验收 | AMD64/ARM64 本地人工源已实测；Web 仅前 200 组聚合显示 | Docker 宿主合成源实测，客户端访问 BLOCKED | 未正式发行 |
+| Quarantine 隔离 | 经审批有条件支持 | 禁用 | 禁用 | 未发行 |
+| Restore 恢复 | 经审批有条件支持 | 禁用 | 禁用 | 未发行 |
+| Purge 永久清理 | 后端禁用 | 后端禁用 | 禁用 | 未发行 |
+| 新 UX v2 治理意图记录 | #111 Darwin 源证明 BLOCKED，尚未进入公开 beta.11 | 禁用 | 禁用 | 未发行 |
+| 发行身份 | [Mac beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11) | [Docker preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1) | 实验性宿主证据，无可用发布 | NO-GO/研究中 |
+
+**下一目标**：两个正式渠道均完成安全隔离、恢复和人工确认的永久清理。实施仍需独立平台根边界、最小权限、执行锁、恢复与审计证据；旧版本和旧快照不被追认。
+
+
 快照：2026-10-13，main `15328e0054c1c3e476dd756436ce52d6f3c50c1a`。状态必须绑定列对应发行身份，不将 main 新能力归入 beta.11。详见 [实时台账](RELEASE-STATUS.md)。
 
 | 能力 / 边界 | Developer ID beta.11 | MAS 当前开发层 | Docker / Web MVP | fnOS FPK |

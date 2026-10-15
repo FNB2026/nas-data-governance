@@ -1,0 +1,47 @@
+name: Public documentation
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      external:
+        description: Audit public HTTP links and live immutable release identities
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/docs/test-check-links.py
+      - run: python3 scripts/docs/check-links.py
+      - run: python3 scripts/docs/check-public-channels.py
+  external:
+    if: github.event_name == 'workflow_dispatch' && inputs.external
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify current public release and registry identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/docs/check-public-channels.py --online
+      - name: Audit external links without credentials or private network access
+        if: always()
+        run: python3 scripts/docs/check-links.py --external --report '${{ runner.temp }}/ndg-public-link-audit.json'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: public-link-audit
+          path: ${{ runner.temp }}/ndg-public-link-audit.json
+          if-no-files-found: error
+          retention-days: 30
