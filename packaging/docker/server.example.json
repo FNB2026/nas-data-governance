@@ -1,7 +1,9 @@
 {
   "listen": "0.0.0.0:8080",
-  "origin": "http://localhost:8080",
+  "origin": "http://127.0.0.1:18084",
   "state": "/data",
   "credential_file": "/config/credential",
-  "sources": { "source_a": "/sources/source_a" }
+  "sources": {
+    "source_a": "/sources/source_a"
+  }
 }

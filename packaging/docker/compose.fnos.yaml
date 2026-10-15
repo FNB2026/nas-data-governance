@@ -1,0 +1,29 @@
+# fnOS profile matching the real disposable Compose acceptance.
+# First create a new internal bridge and verify its ID and Internal=true.
+services:
+  ndg:
+    image: ${NDG_IMAGE:?Set the verified local image ID}
+    pull_policy: never
+    network_mode: ${NDG_INTERNAL_NETWORK:?Set the verified internal network ID}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 1
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ./private-config
+        target: /config
+        read_only: true
+      - type: bind
+        source: ./private-state
+        target: /data
+      - type: bind
+        source: ${NDG_DISPOSABLE_SOURCE:?Set an explicit local source; start with artificial data}
+        target: /sources/source_a
+        read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    stop_grace_period: 60s

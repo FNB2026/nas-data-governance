@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from types import SimpleNamespace
 from unittest import mock
 
@@ -483,7 +484,35 @@ class SmokeChecks(unittest.TestCase):
     def test_completed_with_inconsistent_counters_is_failure(self):
         self.runtime("coverage_incomplete")
 
-    def runtime(self, mode):
+    def test_internal_direct_keeps_no_published_ports(self):
+        self.runtime("PASS", access_mode="internal-direct")
+
+    def test_internal_direct_refuses_published_foreign_and_invalid_endpoints(self):
+        cases = [({"127.0.0.1": "1"}, "172.29.0.2", self.docker.network, "unexpected_published_port"),
+                 ({}, "127.0.0.1", self.docker.network, "invalid_internal_endpoint"),
+                 ({}, "8.8.8.8", self.docker.network, "invalid_internal_endpoint"),
+                 ({}, "172.30.0.2", self.docker.network, "invalid_internal_endpoint"),
+                 ({}, "172.29.0.2", "f" * 64, "active_network_binding_changed")]
+        for bindings, address, network_id, reason in cases:
+            with self.subTest(reason=reason, address=address), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); (root / "private").mkdir(mode=0o700)
+                settings, password, marker = smoke.fixture(root, 12345)
+                resources = mock.Mock(); resources.network = self.docker.network
+                own = {"HostConfig": {"PortBindings": bindings}, "NetworkSettings": {"Ports": {}, "Networks": {"own": {"NetworkID": network_id, "IPAddress": address}}}}
+                network = {"IPAM": {"Config": [{"Subnet": "172.29.0.0/16"}]}}
+                resources.own.side_effect = lambda kind, identifier: network if kind == "network" else own
+                with mock.patch.object(smoke.urllib.request, "build_opener") as opener:
+                    with self.assertRaisesRegex(smoke.Blocked, "^" + reason + "$"):
+                        smoke.exercise(resources, root, 12345, settings, password, marker, fixtures.SOURCE, access_mode="internal-direct")
+                    opener.return_value.open.assert_not_called()
+
+    def test_unknown_access_mode_refuses_before_resource_creation(self):
+        resources = mock.Mock()
+        with self.assertRaisesRegex(smoke.Blocked, "unknown_access_mode"):
+            smoke.exercise(resources, self.root, 12345, {}, "", "", {}, access_mode="default-network")
+        resources.create_container.assert_not_called()
+
+    def runtime(self, mode, access_mode="published-loopback"):
         settings, password, marker = smoke.fixture(self.root, 12345)
         own = {"State": {"Running": True, "OOMKilled": False}, "NetworkSettings": {"Ports": {"8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "12345"}]}, "Networks": {"synthetic-network": {"NetworkID": self.docker.network}}}}
         runtime = mock.Mock()
@@ -492,11 +521,20 @@ class SmokeChecks(unittest.TestCase):
         runtime.own.return_value = own
         runtime.create_container.side_effect = [self.docker.container, "3" * 64]
         runtime.docker.call.side_effect = lambda args, **kwargs: subprocess.CompletedProcess(args, 0, b"1" if args[:2] == ["container", "wait"] else b"safe synthetic", b"")
+        if access_mode == "internal-direct":
+            own["HostConfig"] = {"PortBindings": {}}
+            own["NetworkSettings"]["Ports"] = {"8080/tcp": None}
+            own["NetworkSettings"]["Networks"]["synthetic-network"]["IPAddress"] = "172.29.0.2"
+            private_network = {"Internal": True, "IPAM": {"Config": [{"Subnet": "172.29.0.0/16"}]}}
+            runtime.own.side_effect = lambda kind, identifier: private_network if kind == "network" else own
         source = fixtures.SOURCE
         status_calls = []
         requests = []
         def response(request, **kwargs):
-            path = request.full_url.split("12345", 1)[1]
+            path = urllib.parse.urlsplit(request.full_url).path
+            self.assertEqual(request.get_header("Host"), "127.0.0.1:12345")
+            if access_mode == "internal-direct":
+                self.assertTrue(request.full_url.startswith("http://172.29.0.2:8080/"))
             requests.append(path)
             if path == "/api/login":
                 value = {"csrf": "synthetic-session"}
@@ -522,13 +560,13 @@ class SmokeChecks(unittest.TestCase):
         client.open.side_effect = response
         with mock.patch.object(smoke.urllib.request, "build_opener", return_value=client), mock.patch.object(smoke.time, "sleep"):
             if mode == "PASS":
-                value = smoke.exercise(runtime, self.root, 12345, settings, password, marker, source)
+                value = smoke.exercise(runtime, self.root, 12345, settings, password, marker, source, access_mode=access_mode)
                 self.assertTrue(value["source_sha_unchanged"])
                 self.assertTrue(value["single_writer_refused"])
                 self.assertEqual(len([path for path in requests if any(path.startswith("/api/" + area + "/") for area in ["quarantine", "restore", "purge"])]), 12)
             else:
                 with self.assertRaisesRegex(smoke.Failed if mode == "coverage_incomplete" else smoke.Blocked, "^" + mode + "$"):
-                    smoke.exercise(runtime, self.root, 12345, settings, password, marker, source)
+                    smoke.exercise(runtime, self.root, 12345, settings, password, marker, source, access_mode=access_mode)
 
 
 if __name__ == "__main__":

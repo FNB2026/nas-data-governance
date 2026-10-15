@@ -12,7 +12,15 @@ Docker 候选使用独立 `packaging/docker/PREVIEW_VERSION`；原生 CI 仅提�
 SBOM 和漏洞证据，独立 Linux 主机 HTTP、断点、重启、持久化、备份恢复及源 SHA-256
 实测另记。公开镜像和 GitHub Release 仍须完成候选后集中取得一次对外授权。
 
-安装边界和证据清单见 [Docker 只读预览](DOCKER-READONLY-PREVIEW.md)。
+安装边界和证据清单见 [Docker 只读预览](DOCKER-READONLY-PREVIEW.md)。 
+
+本轮固定候选源码 `1db1e4ab9a1287d3f7f9b801b471b00bfc7c7d1e`：双架构构建、
+SBOM/漏洞扫描、独立 ARM64 Linux 4,000 文件生命周期/备份恢复、真实浏览器主流程，
+以及 fnOS AMD64 Docker/Compose 7 文件安装/重建/保留/卸载的限定实测已通过。
+[真实验收记录](DOCKER-PREVIEW-RESULTS-2026-10-15.md) 保留较早镜像撤换、驱动失败和
+favicon 401。当前只准备 Draft 候选，注册表/Release 未公开；Mac #111、#112 的独立复审
+与下一签名 Beta 仍按各自门禁处理，不成为此 Docker 候选的前置项。
+
 
 
 ## 2026-10-14 Phase B 收口顺序修订

@@ -10,7 +10,7 @@ services:
     security_opt: [no-new-privileges:true]
     pids_limit: 128
     mem_limit: 1g
-    cpus: 2
+    cpus: 1
     networks: [readonly]
     volumes:
       - type: bind

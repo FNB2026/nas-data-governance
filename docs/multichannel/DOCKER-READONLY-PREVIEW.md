@@ -9,14 +9,27 @@ Linux amd64 / arm64，本地受支持文件系统、单实例、人工明确配�
 Web 提供认证、源别名、只读扫描、取消/断点恢复和有限聚合结果；不提供文件路径、
 治理意图记录、Quarantine、Restore、Purge 或计划执行。不得称为完整治理产品。
 SMB/NFS/FUSE、公开互联网入口、反向代理、跨版本数据库迁移、FPK 和 App Store
-均不在此预览的已验证支持范围。fnOS 在独立设备验收前仍为实验性。
+均不在此预览的已验证支持范围。fnOS Docker 28.5.2 / Compose 5.0.2 的限定人工源隔离配置已真实验收；
+不认证生产 NAS 数据或其他版本。详见 [实测记录](DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
 
 ## 安装边界
 
-仅使用发布候选清单中对应架构的 OCI 归档、SHA-256、SBOM 和扫描回执；验证后用
-`skopeo copy oci-archive:image.oci.tar docker-daemon:ndg:0.5.0-docker-preview.1`
-导入。核对 `docker image inspect` 的 image ID、架构、source revision / tree / version
-与清单完全一致。不要自行重建后沿用发行镜像的验收结论。
+下载对应架构的 `.docker.tar.gz`、`SHA256SUMS`、`release-candidate.json` 和
+`.evidence.tar.gz`。先核对 SHA-256（例如 `sha256sum -c SHA256SUMS --ignore-missing`），
+然后导入固定字节的候选：
+
+```sh
+gzip -dc ndg-0.5.0-docker-preview.1-linux-arm64.docker.tar.gz | docker load
+# AMD64 主机将文件名中的 arm64 换为 amd64。
+docker image inspect ndg:0.5.0-docker-preview.1
+```
+
+核对架构和 source revision / tree / version。记录实际 inspect ID，作为 `NDG_IMAGE`。
+传统 image store 的 ID 是 config digest；本次 Docker 29/containerd 现场返回 manifest
+ID，因此不能只比较 inspect ID 与 config digest。发行前已对实际运行镜像执行
+`docker image save`，验证导出 config SHA-256 和每一层 diff ID 与 OCI 一致；相关值见
+清单。SHA256SUMS 将下载归档绑定到这次实测字节，不要自行转换/重建后沿用结论。
+多架构 OCI 归档保留原始每架构 manifest，作为后续注册表原样推广候选。
 
 复制 `packaging/docker/compose.yaml` 到全新私有部署目录。建立 `private-config`
 和 `private-state`，权限 0700、所有者 UID/GID 10001。生成至少 32 字节随机口令，
@@ -26,7 +39,7 @@ SMB/NFS/FUSE、公开互联网入口、反向代理、跨版本数据库迁移�
 ```json
 {
   "listen": "0.0.0.0:8080",
-  "origin": "http://127.0.0.1:18083",
+  "origin": "http://127.0.0.1:18084",
   "state": "/data",
   "credential_file": "/config/credential",
   "sources": {"source_a": "/sources/source_a"}
@@ -47,10 +60,17 @@ capabilities、no-new-privileges、三个挂载的读写属性及唯一 internal
 # 在 Docker 主机查询此 Compose 项目自己的容器 IP，记录并核对 ID/网络归属。
 docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q ndg)"
 # 在客户端替换下面的 HOST 和已核对的 IP；SSH 账号需已有授权。
-ssh -N -L 127.0.0.1:18083:CONTAINER_IP:8080 USER@HOST
+ssh -N -L 127.0.0.1:18084:CONTAINER_IP:8080 USER@HOST
 ```
 
-浏览器打开 `http://127.0.0.1:18083` 并输入口令。容器重建后 IP 可能变化，必须重新
+fnOS 使用 `compose.fnos.yaml`：先用 `docker network create --internal NAME`
+创建一个全新项目专用 bridge，记录返回的完整 ID，核对 `docker network inspect ID`
+中的 `Internal=true`、`Driver=bridge` 和无其他 endpoint，再将 ID 设置为
+`NDG_INTERNAL_NETWORK`。模板与实测相同，使用该 ID 作为 network_mode，无 published
+ports、无 Compose default 网络。卸载只删除本项目容器和该确切专用网络，保留 bind
+目录；不修改既有网络、daemon 或其他 Compose 项目。
+
+浏览器打开 `http://127.0.0.1:18084` 并输入口令。容器重建后 IP 可能变化，必须重新
 核对并建立转发。仅在受信任的主机与 SSH 隧道中使用 HTTP；不配置远程明文入口。
 此方案不修改 SSH/Docker daemon 配置，不提供宿主自动代理进程。
 
