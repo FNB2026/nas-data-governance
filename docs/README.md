@@ -13,6 +13,7 @@
 - [Docker 预览版安装手册](multichannel/DOCKER-READONLY-PREVIEW.md) 与 [真实主机验收](multichannel/DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
 - [多渠道最新发布台账](multichannel/RELEASE-STATUS.md)、[能力矩阵](multichannel/CAPABILITY-MATRIX.md)及[UX v2 验收矩阵](ux/UX-V2-ACCEPTANCE.md)。
 - [工程多端主路线](multichannel/NDG-MULTICHANNEL-MASTER.md)。
+- [双端完整隔离／恢复／永久删除实施手册](development/NDG-DUAL-CHANNEL-FULL-GOVERNANCE-EXECUTION-2026-10-15.md)：新增的长期开发目标，目前**不是已发布功能**。
 
 ## 规范基线
 
