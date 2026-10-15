@@ -120,6 +120,9 @@ jobs:
       - name: Check namespace probe constraint model (no kernel or Docker)
         run: make nas-namespace-model-test
 
+      - name: Check fixed Docker publication refusal gates offline
+        run: python3 scripts/packaging/test-publish-docker-preview-1.py
+
       - name: Run go vet
         run: go vet ./...
 

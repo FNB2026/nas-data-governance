@@ -1,0 +1,67 @@
+name: Publish frozen Docker Preview 1
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Fixed-version operation (no build; public visibility is a separate reviewed step)
+        required: true
+        type: choice
+        default: verify-public
+        options:
+          - verify-public
+          - promote-private
+permissions:
+  contents: read
+concurrency:
+  group: ndg-frozen-docker-preview-1
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: inputs.operation == 'promote-private' && github.actor == 'FNB2026' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install registry transport on disposable runner
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Verify pins and fixed tag; promote frozen OCI while private
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/packaging/publish-docker-preview-1.py promote-private
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: private-promotion-receipt
+          path: ${{ runner.temp }}/ndg-publication-promote-private.json
+          if-no-files-found: error
+          retention-days: 30
+  public-pull:
+    if: inputs.operation == 'verify-public' && github.actor == 'FNB2026' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Pull anonymously on native architecture and verify all bytes
+        run: python3 scripts/packaging/publish-docker-preview-1.py verify-public --architecture '${{ matrix.architecture }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: anonymous-pull-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/ndg-publication-verify-public-${{ matrix.architecture }}.json
+          if-no-files-found: error
+          retention-days: 30
