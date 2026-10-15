@@ -30,4 +30,27 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 当前代码单测、前端状态回归和构建均不替代实际设备验收。独立代码审查没有发现 P0/P1，发现入站时间上限 P2；已增加全 CGI 进程截止，修复复审另记。`fnOS CGI candidate` 在 AMD64/ARM64 原生 Linux 上执行全线程 NoNewPrivs 测试、Web 回归并生成带源码 SHA／摘要的候选二进制，**不发布**。
 
-仍待：精确候选审查、真实 Linux 线程测试、fnOS HTTPS CGI 参数、固定核心私网连接、真实 UI 登录／扫描／断点／重建、匿名拒绝、Cookie/CSRF、资源占用、安装升级卸载及现有服务前后保护对照。手机实体浏览器、NAS 整机重启和全部 Quarantine/Restore/Purge 均未通过；不得标成 PASS。Linux Worker 的路径绑定、竞态及执行恢复仍须单独关闭；#111 继续 OPEN/BLOCKED。
+## 2026-10-16 真实设备补充：入口仍然 BLOCKED
+
+候选源码 `f6e4097bcf9eca3459c9ab57d05716a86fbfb8d3` 已完成独立复审，未发现未关闭的 P0/P1/P2。该 SHA 的全部 11 项检查通过；外部链接检查按工作流条件跳过。原生 AMD64/ARM64 全线程测试及二进制构建见 [候选运行 38762218870](https://github.com/FNB2026/nas-data-governance/actions/runs/38762218870)。这些是代码／CI 证据，不是 fnOS 浏览器成功证据。
+
+实际安装的 AMD64 CGI SHA-256 为 `8150e5c2638bb35dda0fa3fedd5445310928a0c2670d48ab57d99c6f1ef9ab42`。包独立于只读核心，无 Docker resource。启动配置及祖先为 root-owned、不可包用户写入。原生包首次安装成功；开发包 0.0.2 卸载后重新安装成功，二进制保持同一摘要。桌面入口改为相对 CGI 路径后，实际单击可进入正确 URL，随后仍返回固定 `request_rejected`。
+
+真实 HTTPS 请求的有限诊断确认：CGI 环境没有 `HTTPS`、`REQUEST_SCHEME`、`X-Forwarded-Proto` 或 `X-Forwarded-Host`；`HTTP_HOST` 也不等于原始 HTTPS 入口 Host，`SERVER_PORT` 不是入口 HTTPS 端口。只读取了传输字段名称、枚举及布尔比较，未输出 NAS Cookie、凭据或全部环境内容。临时诊断文件已恢复为原始身份探针。**当前平台 CGI 转发不能满足候选要求的 HTTPS／Host 证明；拒绝是预期保护，不能删除门禁或把客户端自报 Header 当成可信证明。** 未修改 NAS Nginx、证书、SSH、Docker daemon、路由或防火墙。
+
+另一次 `install-fpk` 对已有身份探针报告 installed，但安装后的 manifest 和文件摘要仍为旧值，实际未升级；保留为升级失败，不以 CLI 成功文字判定 PASS。0.0.2 的成功证据只覆盖卸载／重新安装，不覆盖原位升级。
+
+### 独立只读核心的宿主侧验收
+
+仅在新建 NDG 专属受保护目录、内部 Docker 网络和 10 个合成源文件上运行。容器无宿主端口映射，以 UID/GID 10001 运行，rootfs 只读、capabilities 全部移除、NoNewPrivs 开启，配置与两个源只读，只有独立状态目录可写。镜像原样使用已公开 Preview.1：
+
+- OCI index：`sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1`。
+- 实际 AMD64 config：`sha256:2c38ca9493ccebc74cdf0cc84fb23e8a4c59babb1660d4892a2f9a50c12a96d4`；API 返回源码 `1db1e4ab9a1287d3f7f9b801b471b00bfc7c7d1e`。
+- 源 A：7 个文件、7 quick／6 full、3 组；源 B：3 个文件、3 quick／2 full、1 组；均 completed，missing／unavailable 为零。
+- 停止／启动容器后，两源快照保留；删除容器后状态目录完整保留，再创建容器后两源快照一致。
+- 停止核心后复制独立状态目录，验证文件摘要；保留原状态目录，再从备份恢复，新进程读取的两源快照一致。没有复制正在写入的 SQLite。
+- 前后 10 个源文件 SHA-256 全部相同；普通容器日志未出现本次凭据、合成文件名或源路径。
+- 核心预检验证匿名状态请求 401、缺失 CSRF 403、Quarantine/Restore/Purge 403、危险能力关闭；NDG Cookie 具有 Secure／HttpOnly／SameSite=Strict。这些请求由 NAS 宿主直接访问内部核心，**没有经过浏览器 CGI 链路**。
+- 前后原有 15 个容器的 ID、镜像、状态、启动时间、重启次数／策略、网络及挂载摘要逐项相同；仅本次 NDG 核心容器被重启／删除／重建。这不是全 NAS 文件系统审计。
+
+仍待：可证明 TLS／Host 的客户端入口、真实 UI 登录／扫描／断点／键盘交互、浏览器 Cookie/CSRF 及隐私／资源占用、原位升级。手机实体浏览器、NAS 整机重启和全部 Quarantine/Restore/Purge 均未通过；不得标成 PASS。Linux Worker 的路径绑定、竞态及执行恢复仍须单独关闭；#111 继续 OPEN/BLOCKED。公开 Preview.1 和 Mac beta.11 均未变更。
