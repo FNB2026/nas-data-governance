@@ -155,7 +155,7 @@ func (*stagedFailStore) ListRecoverablePurges(context.Context) ([]domain.PurgeJo
 	return nil, nil
 }
 
-func TestPurgeRollsBackWhenStagedJournalFails(t *testing.T) {
+func TestPurgeStagedJournalFailureRetainsUnresolvedBytes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "rollback.dat")
 	if err := os.WriteFile(path, []byte("rollback"), 0o600); err != nil {
@@ -176,11 +176,15 @@ func TestPurgeRollsBackWhenStagedJournalFails(t *testing.T) {
 	exec, _ := NewPurgeExecutor(root, fake)
 	exec.now = func() time.Time { return now }
 	result := exec.ExecutePurge(context.Background(), &plan, &item)
-	if result.ErrorType != "journal_staged_failed" || !fake.begin || !fake.rolledBack {
+	if result.ErrorType != "journal_staged_failed" || !fake.begin || fake.rolledBack || result.FinalState == domain.PurgeRolledBack {
 		t.Fatalf("unexpected result/store: %#v %#v", result, fake)
 	}
-	if got, err := os.ReadFile(path); err != nil || string(got) != "rollback" {
-		t.Fatalf("pre-commit rollback did not restore item: %q %v", got, err)
+	stage := filepath.Join(root, ".purge-staging", plan.ID+".stage")
+	if got, err := os.ReadFile(stage); err != nil || string(got) != "rollback" {
+		t.Fatalf("unconfirmed staged bytes were lost: %q %v", got, err)
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("unproven rollback mutated original path")
 	}
 }
 
@@ -249,7 +253,7 @@ func TestRestoreCompletionFailureRetainsUnconfirmedDestination(t *testing.T) {
 
 }
 
-func TestRecoverPurgeRollsStagedItemBack(t *testing.T) {
+func TestRecoverPurgePreservesStagedItemForReconciliation(t *testing.T) {
 	st, root, item, plan, now := seedPurgeExecution(t)
 	stageDir := filepath.Join(root, ".purge-staging")
 	if err := os.Mkdir(stageDir, 0o700); err != nil {
@@ -268,15 +272,22 @@ func TestRecoverPurgeRollsStagedItemBack(t *testing.T) {
 	exec, _ := NewPurgeExecutor(root, st)
 	exec.now = func() time.Time { return now }
 	results := exec.RecoverPurges(context.Background())
-	if len(results) != 1 || results[0].FinalState != domain.PurgeRolledBack {
+	if len(results) != 1 || results[0].ErrorType != "manual_reconciliation_required" || results[0].Status != StepFailed || results[0].Err == nil || results[0].FinalState != "" {
 		t.Fatalf("unexpected recovery results: %#v", results)
 	}
-	if _, err := os.Stat(item.QuarantinePath); err != nil {
-		t.Fatalf("staged item not returned to quarantine: %v", err)
+	if _, err := os.Lstat(item.QuarantinePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy recovery changed original path: %v", err)
+	}
+	if got, err := Snapshot(stagePath, true); err != nil || got.Hash != item.ContentSHA256 {
+		t.Fatal("unresolved staged content changed")
+	}
+	entries, err := st.ListRecoverablePurges(context.Background())
+	if err != nil || len(entries) != 1 || entries[0].Status != "staged" {
+		t.Fatal("unresolved staged journal was finalized")
 	}
 }
 
-func TestRecoverPurgeFinalizesCompletedUnlink(t *testing.T) {
+func TestRecoverPurgeDoesNotInferUnlinkFromMissingNames(t *testing.T) {
 	st, root, item, plan, now := seedPurgeExecution(t)
 	stageDir := filepath.Join(root, ".purge-staging")
 	if err := os.Mkdir(stageDir, 0o700); err != nil {
@@ -301,14 +312,18 @@ func TestRecoverPurgeFinalizesCompletedUnlink(t *testing.T) {
 	exec, _ := NewPurgeExecutor(root, st)
 	exec.now = func() time.Time { return now }
 	results := exec.RecoverPurges(context.Background())
-	if len(results) != 1 || results[0].FinalState != domain.PurgeCommitted {
+	if len(results) != 1 || results[0].ErrorType != "manual_reconciliation_required" || results[0].Status != StepFailed || results[0].Err == nil || results[0].FinalState != "" {
 		t.Fatalf("unexpected recovery results: %#v", results)
 	}
 	stored, err := st.GetQuarantineItem(context.Background(), item.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != domain.QuarantinePurged {
-		t.Fatalf("commit was not reconciled: %#v", stored)
+	if stored.Status != domain.QuarantinePurgeEligible || stored.PurgedAt != nil {
+		t.Fatalf("unproven unlink was finalized: %#v", stored)
+	}
+	entries, err := st.ListRecoverablePurges(context.Background())
+	if err != nil || len(entries) != 1 || entries[0].Status != "commit_pending" {
+		t.Fatal("missing paths cleared the recovery lock")
 	}
 }

@@ -18,7 +18,6 @@ type PurgeStore interface {
 	MarkPurgeStaged(context.Context, string) error
 	MarkPurgeCommitPending(context.Context, string) error
 	MarkPurgeCommitted(context.Context, string, string, time.Time) error
-	MarkPurgeRolledBack(context.Context, string, string, time.Time) error
 	ListRecoverablePurges(context.Context) ([]domain.PurgeJournalEntry, error)
 }
 
@@ -31,8 +30,9 @@ type PurgeResult struct {
 }
 
 // PurgeExecutor permanently removes only expired managed quarantine items.
-// Its commit point is SafeRemove(stagingPath). Before that point every failure
-// attempts to rename the staged item back.
+// Its commit point is SafeRemove(stagingPath). Any failure after BeginPurge
+// retains the active journal for manual reconciliation. Legacy path-only
+// records cannot prove the authority needed for automatic rollback or commit.
 type PurgeExecutor struct {
 	root  string
 	store PurgeStore
@@ -92,22 +92,25 @@ func (e *PurgeExecutor) ExecutePurge(ctx context.Context, plan *domain.PurgePlan
 		result.Err, result.ErrorType, result.Status = fmt.Errorf("purge executor: journal begin failed"), "journal_begin_failed", StepFailed
 		return result
 	}
+	if err := ctx.Err(); err != nil {
+		result.Err, result.ErrorType, result.Status = err, "cancelled", StepFailed
+		return result
+	}
 	if err := ensurePrivateRealDirectory(stageDir); err != nil {
-		_ = e.store.MarkPurgeRolledBack(ctx, plan.ID, item.ID, e.now().UTC())
 		result.Err, result.ErrorType, result.Status = errActionFailed, "staging_directory_failed", StepFailed
-		plan.State = domain.PurgeRolledBack
 		result.FinalState = plan.State
 		return result
 	}
+	if err := ctx.Err(); err != nil {
+		result.Err, result.ErrorType, result.Status = err, "cancelled", StepFailed
+		return result
+	}
 	if err := os.Rename(item.QuarantinePath, stagePath); err != nil {
-		_ = e.store.MarkPurgeRolledBack(ctx, plan.ID, item.ID, e.now().UTC())
 		result.Err, result.ErrorType, result.Status = errActionFailed, "stage_move_failed", StepFailed
-		plan.State = domain.PurgeRolledBack
 		result.FinalState = plan.State
 		return result
 	}
 	if err := e.store.MarkPurgeStaged(ctx, plan.ID); err != nil {
-		e.rollbackStaged(ctx, plan, item, stagePath)
 		result.Err, result.ErrorType, result.Status = fmt.Errorf("purge executor: journal staged failed"), "journal_staged_failed", StepFailed
 		result.FinalState = plan.State
 		return result
@@ -117,22 +120,24 @@ func (e *PurgeExecutor) ExecutePurge(ctx context.Context, plan *domain.PurgePlan
 
 	staged, err := Snapshot(stagePath, true)
 	if err != nil || staged.Size != item.FileSize || staged.Hash != item.ContentSHA256 {
-		e.rollbackStaged(ctx, plan, item, stagePath)
 		result.Err, result.ErrorType, result.Status = errStaleDetected, "staged_verification_failed", StepFailed
 		result.FinalState = plan.State
 		return result
 	}
 	if err := e.store.MarkPurgeCommitPending(ctx, plan.ID); err != nil {
-		e.rollbackStaged(ctx, plan, item, stagePath)
 		result.Err, result.ErrorType, result.Status = fmt.Errorf("purge executor: commit journal failed"), "journal_commit_pending_failed", StepFailed
 		result.FinalState = plan.State
 		return result
 	}
 
-	// Irreversible commit point. The file has already passed the second
-	// full-hash check while isolated in the same-volume staging directory.
+	// Legacy irreversible commit path, still disabled by release policy.
+	// A full hash does not bind the object/mount across these path operations;
+	// positive execution requires a separately proven descriptor-based design.
+	if err := ctx.Err(); err != nil {
+		result.Err, result.ErrorType, result.Status = err, "cancelled", StepFailed
+		return result
+	}
 	if err := SafeRemove(stagePath); err != nil {
-		e.rollbackStaged(ctx, plan, item, stagePath)
 		result.Err, result.ErrorType, result.Status = errActionFailed, "purge_remove_failed", StepFailed
 		result.FinalState = plan.State
 		return result
@@ -204,99 +209,24 @@ func ensurePrivateRealDirectory(path string) error {
 	return os.Chmod(path, 0o700)
 }
 
-func (e *PurgeExecutor) rollbackStaged(ctx context.Context, plan *domain.PurgePlan, item *domain.QuarantineItem, stagePath string) {
-	if _, err := os.Lstat(stagePath); err == nil {
-		if _, originalErr := os.Lstat(item.QuarantinePath); errors.Is(originalErr, os.ErrNotExist) {
-			_ = os.Rename(stagePath, item.QuarantinePath)
-		}
-	}
-	_ = e.store.MarkPurgeRolledBack(ctx, plan.ID, item.ID, e.now().UTC())
-	plan.State = domain.PurgeRolledBack
-}
-
-// RecoverPurges reconciles crashes around the irreversible commit point.
-// commit_pending + missing stage means unlink completed and is finalized;
-// every other recoverable state is rolled back to the quarantine path.
+// RecoverPurges reads unresolved legacy journals without changing files or
+// terminal state. These records contain paths and hashes, but no durable proof
+// binding the mount/root, staged object, rollback or irreversible unlink. Missing
+// names or matching bytes cannot supply that proof. Keep the recovery lock until
+// a separately reviewed reconciliation protocol can establish authority.
 func (e *PurgeExecutor) RecoverPurges(ctx context.Context) []PurgeResult {
 	entries, err := e.store.ListRecoverablePurges(ctx)
 	if err != nil {
-		return []PurgeResult{{Status: StepFailed, ErrorType: "journal_read_failed", Err: err}}
+		return []PurgeResult{{Status: StepFailed, ErrorType: "journal_read_failed", Err: errActionFailed}}
 	}
 	results := make([]PurgeResult, 0, len(entries))
 	for _, entry := range entries {
-		result := PurgeResult{PlanID: entry.PlanID, Status: StepFailed}
-		if _, ok := rootFor(entry.QuarantinePath, []string{e.root}); !ok {
-			result.ErrorType, result.Err = "scope_validation_failed", errOutOfScope
-			results = append(results, result)
-			continue
-		}
-		if _, ok := rootFor(entry.StagingPath, []string{e.root}); !ok {
-			result.ErrorType, result.Err = "scope_validation_failed", errOutOfScope
-			results = append(results, result)
-			continue
-		}
-		if err := notSymlinkBelowRoot(entry.StagingPath, e.root); err != nil {
-			result.ErrorType, result.Err = "scope_validation_failed", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		stageInfo, stageErr := os.Lstat(entry.StagingPath)
-		_, originalErr := os.Lstat(entry.QuarantinePath)
-		if stageErr != nil && !errors.Is(stageErr, os.ErrNotExist) {
-			result.ErrorType, result.Err = "recovery_inspection_failed", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		if originalErr != nil && !errors.Is(originalErr, os.ErrNotExist) {
-			result.ErrorType, result.Err = "recovery_inspection_failed", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		if stageErr == nil && stageInfo.Mode()&os.ModeSymlink != 0 {
-			result.ErrorType, result.Err = "scope_validation_failed", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		stageExists := stageErr == nil
-		originalMissing := errors.Is(originalErr, os.ErrNotExist)
-		if entry.Status == "commit_pending" && !stageExists && originalMissing {
-			now := e.now().UTC()
-			if err := e.store.MarkPurgeCommitted(ctx, entry.PlanID, entry.ItemID, now); err != nil {
-				result.ErrorType, result.Err = "journal_commit_failed", err
-			} else {
-				result.Status, result.FinalState = StepOK, domain.PurgeCommitted
-			}
-			results = append(results, result)
-			continue
-		}
-		if entry.Status == "commit_pending" && !originalMissing {
-			// The staged object reached the irreversible boundary, but a path
-			// now exists at the old quarantine name. It may have been recreated
-			// after the crash; never infer authority from matching content.
-			result.ErrorType, result.Err = "ambiguous_recovery_state", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		if stageExists && originalMissing {
-			if err := os.Rename(entry.StagingPath, entry.QuarantinePath); err != nil {
-				result.ErrorType, result.Err = "rollback_failed", errActionFailed
-				results = append(results, result)
-				continue
-			}
-		} else if !stageExists && !originalMissing {
-			// No filesystem mutation survived; only journal state needs reset.
-		} else {
-			result.ErrorType, result.Err = "ambiguous_recovery_state", errActionFailed
-			results = append(results, result)
-			continue
-		}
-		now := e.now().UTC()
-		if err := e.store.MarkPurgeRolledBack(ctx, entry.PlanID, entry.ItemID, now); err != nil {
-			result.ErrorType, result.Err = "journal_rollback_failed", err
-		} else {
-			result.Status, result.FinalState = StepOK, domain.PurgeRolledBack
-		}
-		results = append(results, result)
+		results = append(results, PurgeResult{
+			PlanID:    entry.PlanID,
+			Status:    StepFailed,
+			ErrorType: "manual_reconciliation_required",
+			Err:       errActionFailed,
+		})
 	}
 	return results
 }

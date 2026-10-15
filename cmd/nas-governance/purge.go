@@ -399,7 +399,7 @@ func runPurgeRecover(args []string) error {
 			failed++
 		}
 	}
-	fmt.Printf("purge recovery reconciled %d item(s), %d failed — paths omitted\n", len(results), failed)
+	fmt.Printf("purge recovery inspected %d item(s), %d unresolved — paths omitted\n", len(results), failed)
 	if failed > 0 {
 		return fmt.Errorf("purge recovery requires manual review")
 	}
