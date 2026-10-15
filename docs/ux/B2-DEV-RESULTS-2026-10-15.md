@@ -72,6 +72,10 @@ same banner. This is a confirmed copy duplication to triage (B2-F01); the guard
 and disabled save behavior were preserved. It is not silently repaired or
 represented as polished error-copy acceptance here.
 
+Follow-up: [2026-10-16 native observations](B2-DEV-RESULTS-2026-10-16.md)
+verify B2-F01's presentation fix and several focused keyboard operations in a
+new isolated development build. The original observations above remain intact.
+
 CUA intermittently rejected stale app focus and timed out; the connection was
 refreshed/reset before continuing. A sampled native main thread was in the
 normal AppKit event loop, which does not establish a product hang. Offscreen AX

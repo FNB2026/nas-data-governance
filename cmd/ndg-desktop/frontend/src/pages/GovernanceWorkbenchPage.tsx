@@ -55,7 +55,7 @@ export default function GovernanceWorkbenchPage({ onNavigate }: { onNavigate?: (
   return <div className="page gov-workbench">
     <header className="page-header gov-header"><div><h2>重复治理</h2><p className="muted">查看并决定 → 确认并处理；源文件操作仍有独立审批与执行门禁。</p></div><button type="button" className="secondary" disabled={locked || flow.loading} onClick={flow.refresh}>重新载入</button></header>
     <div className="gov-topline"><strong>{context.pathPrivacyMode ? "当前项目" : context.project?.name || "当前项目"}</strong><span>{flow.canRecord ? "可记录决定（非执行许可）" : "只读查看与预览"}</span></div>
-    {!flow.canRecord && <DisabledNotice reason={caps.reason_codes.map(reasonLabel).join(" ") || "当前不能记录决定。"} hint="历史记录、文件证据与审计仍可查看。" actionLabel={caps.recovery_lock_active && onNavigate ? "前往审计与恢复" : undefined} onAction={caps.recovery_lock_active && onNavigate ? () => onNavigate("audit-recovery") : undefined} />}
+    {!flow.canRecord && <DisabledNotice reason={Array.from(new Set(caps.reason_codes)).map(reasonLabel).join(" ") || "当前不能记录决定。"} hint="历史记录、文件证据与审计仍可查看。" actionLabel={caps.recovery_lock_active && onNavigate ? "前往审计与恢复" : undefined} onAction={caps.recovery_lock_active && onNavigate ? () => onNavigate("audit-recovery") : undefined} />}
     {context.activeJobId && <DisabledNotice reason="扫描正在更新结果；选择可能过期，提交前必须重新核对。" />}
     {context.connectionStatus !== "connected" && <DisabledNotice reason="连接尚未恢复，当前结果不是源文件仍可达的证明。" />}
     <div className="gov-stat-grid"><div className="card"><span>当前筛选总组数</span><strong>{flow.loading ? "核对中…" : page.total_count}</strong></div><div className="card"><span>当前页</span><strong>{page.page} / {totalPages}</strong></div><div className="card"><span>显式选择</span><strong>{selection.size} 组 · 跨 {pages} 页</strong></div></div>
