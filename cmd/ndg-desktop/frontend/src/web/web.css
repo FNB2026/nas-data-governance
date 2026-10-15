@@ -1,0 +1,18 @@
+.web-page { max-width: 960px; margin: 0 auto; padding: var(--space-xl); overflow-wrap: anywhere; }
+.web-page h1, .web-page h2, .web-page h3 { margin: var(--space-lg) 0; }
+.web-page .web-card { margin: var(--space-xl) 0; padding: var(--space-xl); border: 1px solid var(--border); border-radius: var(--radius); background: var(--card-bg); }
+.web-page .web-login { max-width: 460px; }
+.web-page label { display: block; margin-bottom: var(--space-sm); }
+.web-page input, .web-page select { max-width: 100%; min-height: 44px; margin-bottom: var(--space-lg); }
+.web-page input { width: 100%; box-sizing: border-box; }
+.web-page button { min-height: 44px; white-space: normal; }
+.web-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.web-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--space-lg); }
+.web-summary dt { color: var(--text-muted); }
+.web-summary dd { margin: var(--space-sm) 0; font-size: var(--font-size-xl); font-weight: 600; }
+.web-table { overflow-x: auto; }
+.web-table table { width: 100%; border-collapse: collapse; }
+.web-table th, .web-table td { padding: var(--space-md); border-bottom: 1px solid var(--border); text-align: left; }
+.web-table caption { text-align: left; color: var(--text-muted); margin-bottom: var(--space-md); }
+.web-error { color: var(--error); }
+@media (max-width: 480px) { .web-page { padding: var(--space-md); } .web-page .web-card { padding: var(--space-lg); } .web-actions button { flex: 1 1 40%; } }
