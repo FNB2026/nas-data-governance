@@ -1,4 +1,4 @@
-//go:build !mas
+//go:build !mas && !ndg_devprofile
 
 package main
 
