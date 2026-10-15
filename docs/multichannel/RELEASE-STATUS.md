@@ -12,7 +12,7 @@ Docker 候选使用独立 `packaging/docker/PREVIEW_VERSION`；原生 CI 仅提�
 SBOM 和漏洞证据，独立 Linux 主机 HTTP、断点、重启、持久化、备份恢复及源 SHA-256
 实测另记。公开镜像和 GitHub Release 仍须完成候选后集中取得一次对外授权。
 
-安装边界和证据清单见 [Docker 只读预览](DOCKER-READONLY-PREVIEW.md)。 
+安装边界和证据清单见 [Docker 只读预览](DOCKER-READONLY-PREVIEW.md)。
 
 本轮固定候选源码 `1db1e4ab9a1287d3f7f9b801b471b00bfc7c7d1e`：双架构构建、
 SBOM/漏洞扫描、独立 ARM64 Linux 4,000 文件生命周期/备份恢复、真实浏览器主流程，
