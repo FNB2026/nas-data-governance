@@ -28,7 +28,7 @@ export class HttpAdapter {
     try {
       const response = await fetch(path, {
         method: body === undefined ? "GET" : "POST", credentials: "same-origin",
-        cache: "no-store", signal: controller.signal,
+        cache: "no-store", redirect: "error", signal: controller.signal,
         headers: body === undefined ? {} : { "Content-Type": "application/json", "X-CSRF-Token": this.csrf },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
