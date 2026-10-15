@@ -53,4 +53,6 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 - 核心预检验证匿名状态请求 401、缺失 CSRF 403、Quarantine/Restore/Purge 403、危险能力关闭；NDG Cookie 具有 Secure／HttpOnly／SameSite=Strict。这些请求由 NAS 宿主直接访问内部核心，**没有经过浏览器 CGI 链路**。
 - 前后原有 15 个容器的 ID、镜像、状态、启动时间、重启次数／策略、网络及挂载摘要逐项相同；仅本次 NDG 核心容器被重启／删除／重建。这不是全 NAS 文件系统审计。
 
-仍待：可证明 TLS／Host 的客户端入口、真实 UI 登录／扫描／断点／键盘交互、浏览器 Cookie/CSRF 及隐私／资源占用、原位升级。手机实体浏览器、NAS 整机重启和全部 Quarantine/Restore/Purge 均未通过；不得标成 PASS。Linux Worker 的路径绑定、竞态及执行恢复仍须单独关闭；#111 继续 OPEN/BLOCKED。公开 Preview.1 和 Mac beta.11 均未变更。
+仍待：可证明 TLS／Host 的客户端入口、真实 UI 登录／扫描／断点／键盘交互、浏览器 Cookie/CSRF 及隐私／资源占用、原位升级。手机实体浏览器、NAS 整机重启和全部 Quarantine/Restore/Purge 均未通过；不得标成 PASS。Linux Worker 的路径绑定、竞态及执行恢复仍须单独关闭。
+
+在线刷新发现 [#111](https://github.com/FNB2026/nas-data-governance/issues/111) 已由 FNB2026 在 `2026-10-15T14:24:11Z` 关闭，未关联解决该证明缺口的新提交。保留所有者当前的 Issue 状态；当前源码仍拒绝 Darwin 新治理意图，安全能力保持 **BLOCKED**。Issue 关闭不等于正向核验 PASS。公开 Preview.1 和 Mac beta.11 均未变更。
