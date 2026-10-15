@@ -31,14 +31,30 @@ func TestAllThreadsNoNewPrivileges(t *testing.T) {
 	if e := LockPrivileges(); e != nil {
 		t.Fatal(e)
 	}
-	done := make(chan struct{})
-	go func() { runtime.LockOSThread(); defer runtime.UnlockOSThread(); close(done); <-release }()
-	<-done
+	before, e := os.ReadDir("/proc/self/task")
+	if e != nil || len(before) == 0 || len(before) > 128 {
+		t.Fatal("cannot establish bounded thread baseline")
+	}
+	baseline := make(map[string]bool, len(before))
+	for _, tid := range before {
+		baseline[tid.Name()] = true
+	}
+	// Each locked worker remains alive. More workers than existing threads
+	// forces at least one newly created OS thread rather than reusing an M.
+	ready.Add(len(before) + 1)
+	for range len(before) + 1 {
+		go func() { runtime.LockOSThread(); defer runtime.UnlockOSThread(); ready.Done(); <-release }()
+	}
+	ready.Wait()
 	tasks, e := os.ReadDir("/proc/self/task")
 	if e != nil || len(tasks) < 8 {
 		t.Fatal("thread setup failed")
 	}
+	newThread := false
 	for _, tid := range tasks {
+		if !baseline[tid.Name()] {
+			newThread = true
+		}
 		b, e := os.ReadFile("/proc/self/task/" + tid.Name() + "/status")
 		if e != nil {
 			t.Fatal(e)
@@ -52,5 +68,8 @@ func TestAllThreadsNoNewPrivileges(t *testing.T) {
 		if !found {
 			t.Fatal("thread did not inherit NoNewPrivs")
 		}
+	}
+	if !newThread {
+		t.Fatal("no new OS thread was observed after the privilege barrier")
 	}
 }
