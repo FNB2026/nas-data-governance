@@ -9,7 +9,8 @@ Linux amd64 / arm64，本地受支持文件系统、单实例、人工明确配�
 Web 提供认证、源别名、只读扫描、取消/断点恢复和有限聚合结果；不提供文件路径、
 治理意图记录、Quarantine、Restore、Purge 或计划执行。不得称为完整治理产品。
 SMB/NFS/FUSE、公开互联网入口、反向代理、跨版本数据库迁移、FPK 和 App Store
-均不在此预览的已验证支持范围。fnOS Docker 28.5.2 / Compose 5.0.2 的限定人工源隔离配置已真实验收；
+均不在此预览的已验证支持范围。fnOS Docker 28.5.2 / Compose 5.0.2 的宿主侧人工源隔离链路已测；但现有 SSH
+禁止 TCP 转发，客户端入口实际拒绝，因此平台仍为实验性 / 客户端入口 BLOCKED。
 不认证生产 NAS 数据或其他版本。详见 [实测记录](DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
 
 ## 安装边界
@@ -63,12 +64,13 @@ docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}
 ssh -N -L 127.0.0.1:18084:CONTAINER_IP:8080 USER@HOST
 ```
 
-fnOS 使用 `compose.fnos.yaml`：先用 `docker network create --internal NAME`
+fnOS 宿主侧实验使用 `compose.fnos.yaml`（本次设备禁止 SSH TCP 转发，尚无已验证客户端入口）：先用 `docker network create --internal NAME`
 创建一个全新项目专用 bridge，记录返回的完整 ID，核对 `docker network inspect ID`
 中的 `Internal=true`、`Driver=bridge` 和无其他 endpoint，再将 ID 设置为
 `NDG_INTERNAL_NETWORK`。模板与实测相同，使用该 ID 作为 network_mode，无 published
 ports、无 Compose default 网络。卸载只删除本项目容器和该确切专用网络，保留 bind
-目录；不修改既有网络、daemon 或其他 Compose 项目。
+目录；不修改既有网络、daemon 或其他 Compose 项目。此模板的宿主验收不代表客户端可用，
+不得据此更改现有 sshd 策略或建立绕过通道。
 
 浏览器打开 `http://127.0.0.1:18084` 并输入口令。容器重建后 IP 可能变化，必须重新
 核对并建立转发。仅在受信任的主机与 SSH 隧道中使用 HTTP；不配置远程明文入口。

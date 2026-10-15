@@ -1,4 +1,5 @@
-# fnOS profile matching the real disposable Compose acceptance.
+# Experimental fnOS host-side profile matching real disposable Compose tests.
+# Tested host denies SSH TCP forwarding; client ingress remains BLOCKED.
 # First create a new internal bridge and verify its ID and Internal=true.
 services:
   ndg:

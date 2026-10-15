@@ -14,7 +14,7 @@ tree `23affa62ffa2685e7bced588cf90676e7c6242c2`。
 | 安全 | 非 root UID 10001、只读 root/source/config、EROFS 实测、无 capabilities/no-new-privileges、唯一 internal 网络、无默认路由 | PASS |
 | HTTP | 认证、cookie、CSRF、Host/Origin/别名/任意路径拒绝、危险 API 拒绝、嵌入 Web 资产 | PASS |
 | 真实 Chromium | SSH 入口登录、扫描 202、自动刷新 4,000 文件结果、可见控件和键盘注销清空结果 | PASS，有限主流程 |
-| fnOS Docker | Linux x86_64 6.18.18.c1126-trim，Docker 28.5.2/overlay2、Compose 5.0.2；7 人工文件、3 组、6 full；安装、单写者拒绝、重启、Compose 删除后重建、保留状态及卸载 | PASS，限定配置 |
+| fnOS Docker | Linux x86_64 6.18.18.c1126-trim，Docker 28.5.2/overlay2、Compose 5.0.2；7 人工文件、3 组、6 full；安装、单写者拒绝、重启、Compose 删除后重建、保留状态及卸载 | 宿主链路 PASS；客户端入口 BLOCKED，平台仍实验性 |
 | fnOS 保护 | 15 个既有容器的限定状态字段前后相同；仅 nonce 自有容器/网络/镜像被移除；人工源与 state 保留 | PASS，非全系统审计 |
 
 Docker 29 此现场的 inspect ID 为 manifest descriptor；未将其强行等同于 OCI config。
@@ -26,6 +26,15 @@ Docker 29 此现场的 inspect ID 为 manifest descriptor；未将其强行等�
 `sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1`。
 AMD64 manifest：`sha256:bb6db808bc5a17cf27b951b07406136c6bba3056c89d2aee0268042a683f5be4`。
 ARM64 manifest：`sha256:4e13ba64c9b85d8e293b7c544c1a877d73c1a09b56323699e1a84464ed8ed216`。
+
+## fnOS 客户端入口阻断（最终裁定）
+
+宿主 HTTP 和 Compose 安装/重建/保留/卸载结果不变。随后检查实际 SSH 客户端入口：
+`sshd -T` 返回 `allowtcpforwarding no`，真实本地转发连接返回
+`administratively prohibited: open failed`。未改动 sshd/Docker daemon、防火墙或既有服务，
+不提供策略绕过。fnOS 平台仍为 **EXPERIMENTAL / CLIENT_INGRESS_BLOCKED**，不升级为
+已验证完整支持。此阻断不影响独立 Ubuntu Linux 的 SSH 浏览器链路和 Docker Preview。
+需要单独确定符合现有主机策略的客户端入口，或获得范围明确的配置变更授权后再验。
 
 ## 发现、修复与保留限制
 

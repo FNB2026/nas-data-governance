@@ -18,7 +18,8 @@ SBOM 和漏洞证据，独立 Linux 主机 HTTP、断点、重启、持久化、
 SBOM/漏洞扫描、独立 ARM64 Linux 4,000 文件生命周期/备份恢复、真实浏览器主流程，
 以及 fnOS AMD64 Docker/Compose 7 文件安装/重建/保留/卸载的限定实测已通过。
 [真实验收记录](DOCKER-PREVIEW-RESULTS-2026-10-15.md) 保留较早镜像撤换、驱动失败和
-favicon 401。当前只准备 Draft 候选，注册表/Release 未公开；Mac #111、#112 的独立复审
+favicon 401。fnOS 现有 sshd 禁止 TCP 转发且真实连接被拒，客户端入口 BLOCKED，
+平台仍为实验性，不将宿主 PASS 扩写为完整支持。当前只准备 Draft 候选，注册表/Release 未公开；Mac #111、#112 的独立复审
 与下一签名 Beta 仍按各自门禁处理，不成为此 Docker 候选的前置项。
 
 
