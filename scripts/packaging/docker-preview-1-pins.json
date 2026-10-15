@@ -1,0 +1,17 @@
+{
+  "ACCEPTANCE.md": "9dc0c65e72b51b7110c5260279965071becddd395412eb255963e29e96f0ba77",
+  "INSTALL.md": "1be66801dff35a7a7d8005c24361e29fc5ed05fb1d683b1e3067615d7708643a",
+  "SHA256SUMS": "1b82e833d34541c3d3ba9124e6be0fc8641ea665a9c687a7a84bc55043f9630a",
+  "compose.fnos.yaml": "752abe4ac662caeab121eaada174d4a43f0f284a9d952a2bf1421bac3928291d",
+  "compose.yaml": "f02132c4c77ab335fa0f824a8a4cc2f07bc8d01d2f77dfecb0a5b5b06e83d11e",
+  "fnos-amd64-host.json": "42cb78135a8e93a3ad2611420dc96958eb0e9d48f15e05d5eb4ffa93e1d4bb50",
+  "linux-arm64-host.json": "c5f127bb79486cb0675ab361f03bc77931323771d3dca4c815cf5ee296c0895e",
+  "ndg-0.5.0-docker-preview.1-linux-amd64.docker.tar.gz": "c0a3a1fd7aeabcec8c683593daac62f40f3f760fd038d07ecac7611ff5783a6f",
+  "ndg-0.5.0-docker-preview.1-linux-amd64.evidence.tar.gz": "559a27ed027ab923bc82248cc6062402340e0af058b6b2350882996c76e25f09",
+  "ndg-0.5.0-docker-preview.1-linux-arm64.docker.tar.gz": "3131153f07cb5476dac6f8f562b5e72c7ac23b059bd529af47c54fae62f9fad8",
+  "ndg-0.5.0-docker-preview.1-linux-arm64.evidence.tar.gz": "3a2485b6a6039ec80b50953da01ea0791ed3d0e9cb74cb11dec14f15c2d70dac",
+  "ndg-0.5.0-docker-preview.1-multiarch.oci.tar": "d4037a52ec3c03c4ee5cd5691bce48b9d737cdcfc41f0ee8bd43d610399d3dc3",
+  "readonly-web-actual-host.png": "5b527a1a82c4c813cb1e71ec264d4d9cb30d81dea715be1a7ed2f48d99736bfb",
+  "release-candidate.json": "cce60c0c0d1cb236fef33f2dfd0f430b0a1fb0c7cf637d6af458b4738ea5b7fb",
+  "server.example.json": "ff3a349414421daa48433e4ca5a6e16f82f1a8c3f9f79fd62a694e072de49041"
+}

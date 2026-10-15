@@ -8,6 +8,7 @@ import hashlib
 import http.cookiejar
 import importlib
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -404,7 +405,9 @@ def source_hashes(root):
     return values
 
 
-def exercise(resources, root, port, settings, password, marker, source):
+def exercise(resources, root, port, settings, password, marker, source, *, access_mode="published-loopback"):
+    require(access_mode in {"published-loopback", "internal-direct"}, "unknown_access_mode")
+    access_url = settings["origin"]
     before = source_hashes(root)
     private_write(root / "private" / "source-before.json", json.dumps(before, sort_keys=True).encode())
     jar = http.cookiejar.CookieJar()
@@ -415,10 +418,12 @@ def exercise(resources, root, port, settings, password, marker, source):
             output.write(raw + b"\n")
         require(len(raw) <= 1024 * 1024 and all(value.encode() not in raw for value in [marker, password, str(root), "/sources/source_a"]), "http_privacy_window_failed")
     def request(path, body=None):
-        headers = {} if body is None else {"Origin": settings["origin"], "Content-Type": "application/json", "X-CSRF-Token": csrf}
+        headers = {"Host": "127.0.0.1:" + str(port)}
+        if body is not None:
+            headers.update({"Origin": settings["origin"], "Content-Type": "application/json", "X-CSRF-Token": csrf})
         data = None if body is None else json.dumps(body).encode()
         try:
-            with client.open(urllib.request.Request(settings["origin"] + path, data=data, headers=headers), timeout=5) as response:
+            with client.open(urllib.request.Request(access_url + path, data=data, headers=headers), timeout=5) as response:
                 raw = response.read(1024 * 1024 + 1)
         except urllib.error.HTTPError as error:
             capture(error.read(1024 * 1024 + 1))
@@ -433,15 +438,28 @@ def exercise(resources, root, port, settings, password, marker, source):
             except (OSError, urllib.error.URLError):
                 time.sleep(0.5)
         raise Blocked("own_container_health_timeout")
-    identifier = resources.create_container(root, port)
+    identifier = resources.create_container(root, port if access_mode == "published-loopback" else None)
     resources.transition(identifier, "start")
     own = resources.own("container", identifier)
     network_settings = own.get("NetworkSettings")
     require(isinstance(network_settings, dict), "loopback_binding_changed")
     ports = network_settings.get("Ports")
-    require(isinstance(ports, dict) and isinstance(ports.get("8080/tcp"), list) and ports["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": str(port)}], "loopback_binding_changed")
+    if access_mode == "published-loopback":
+        require(isinstance(ports, dict) and isinstance(ports.get("8080/tcp"), list) and ports["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": str(port)}], "loopback_binding_changed")
+    else:
+        require(not own.get("HostConfig", {}).get("PortBindings") and isinstance(ports, dict) and all(not bindings for bindings in ports.values()), "unexpected_published_port")
     networks = network_settings.get("Networks", {})
     require(len(networks) == 1 and next(iter(networks.values())).get("NetworkID") == resources.network, "active_network_binding_changed")
+    if access_mode == "internal-direct":
+        address = next(iter(networks.values())).get("IPAddress", "")
+        try:
+            ip = ipaddress.IPv4Address(address)
+            private_network = resources.own("network", resources.network)
+            subnets = [ipaddress.IPv4Network(item["Subnet"]) for item in private_network.get("IPAM", {}).get("Config", []) if ":" not in item.get("Subnet", "")]
+            require(ip.is_private and not ip.is_loopback and not ip.is_link_local and any(ip in subnet for subnet in subnets), "invalid_internal_endpoint")
+        except (ValueError, KeyError):
+            raise Blocked("invalid_internal_endpoint") from None
+        access_url = "http://" + str(ip) + ":8080"
     ready()
     try:
         request("/api/scan", {"alias": "source_a"})
@@ -492,7 +510,7 @@ def exercise(resources, root, port, settings, password, marker, source):
         log = resources.docker.call(["container", "logs", owned])
         raw = log.stdout + log.stderr + json.dumps(result).encode()
         require(all(value.encode() not in raw for value in [marker, password, str(root), "/sources/source_a"]), "privacy_window_failed")
-    return {"source_files": 7, "quick": 7, "full": 6, "groups": 3, "checkpoint": "completed", "missing": 0, "unavailable": 0, "source_sha_unchanged": True, "single_writer_refused": True, "own_restart": True, "privacy_scope": "own_container_stdout_stderr_and_all_received_http_bodies_only"}
+    return {"access_mode": access_mode, "source_files": 7, "quick": 7, "full": 6, "groups": 3, "checkpoint": "completed", "missing": 0, "unavailable": 0, "source_sha_unchanged": True, "single_writer_refused": True, "own_restart": True, "privacy_scope": "own_container_stdout_stderr_and_all_received_http_bodies_only"}
 
 
 def main(argv=None):

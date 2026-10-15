@@ -99,7 +99,7 @@ def main():
         require(commit == os.environ["GITHUB_SHA"], "checkout_identity_mismatch")
         epoch = int(run(["git", "show", "-s", "--format=%ct", "HEAD"], private).stdout.strip())
         build_time = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        source = {"commit": commit, "tree": tree, "core_version": (ROOT / "VERSION").read_text().strip(), "build_time": build_time, "channel": "web-experimental"}
+        source = {"commit": commit, "tree": tree, "core_version": (ROOT / "packaging/docker/PREVIEW_VERSION").read_text().strip(), "build_time": build_time, "channel": "web-experimental"}
         require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.-]+)?", source["core_version"]), "invalid_core_version")
         lock = json.loads((ROOT / "packaging/docker/evidence-tools.lock.json").read_text())
         docker_config = private / "docker-config"
