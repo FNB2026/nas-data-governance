@@ -1,6 +1,7 @@
 # Docker Read-only Public Preview
 
-候选版本：`0.5.0-docker-preview.1`。当前为工程候选，尚未授权公开。
+公开版本：[v0.5.0-docker-preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1)，Public Technical Preview / Pre-release，非稳定版。
+原 15 个发行资产保持冻结；其中尚未授权/尚未推送文案属于候选时历史记录，当前状态以 Release 正文为准。
 Mac 的 `VERSION` / beta.11 资产不变；容器内部通道标识继续为 `web-experimental`。
 
 ## 最小支持范围
@@ -14,6 +15,14 @@ SMB/NFS/FUSE、公开互联网入口、反向代理、跨版本数据库迁移�
 不认证生产 NAS 数据或其他版本。详见 [实测记录](DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
 
 ## 安装边界
+
+可先匿名拉取已验证的不可变镜像；下方归档导入方式仍可使用。Compose 设置 `pull_policy: never`，因此必须先拉取，再按本节配置私有状态、凭据、人工源和 SSH 入口。
+
+```sh
+export NDG_IMAGE=ghcr.io/fnb2026/ndg-readonly-preview@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1
+docker pull "$NDG_IMAGE"
+```
+
 
 下载对应架构的 `.docker.tar.gz`、`SHA256SUMS`、`release-candidate.json` 和
 `.evidence.tar.gz`。先核对 SHA-256（例如 `sha256sum -c SHA256SUMS --ignore-missing`），
@@ -30,9 +39,9 @@ docker image inspect ndg:0.5.0-docker-preview.1
 ID，因此不能只比较 inspect ID 与 config digest。发行前已对实际运行镜像执行
 `docker image save`，验证导出 config SHA-256 和每一层 diff ID 与 OCI 一致；相关值见
 清单。SHA256SUMS 将下载归档绑定到这次实测字节，不要自行转换/重建后沿用结论。
-多架构 OCI 归档保留原始每架构 manifest，作为后续注册表原样推广候选。
+多架构 OCI 已原样推广，远端 index 和两架构 manifest 一致；[原生双架构匿名拉取和全部内容核对通过](https://github.com/FNB2026/nas-data-governance/actions/runs/38741189839)。推广过程的私有可见性断言失败保留在 Release 正文，不改写为 PASS。
 
-复制 `packaging/docker/compose.yaml` 到全新私有部署目录。建立 `private-config`
+将 Release 下载的 `compose.yaml`（仓库源文件为 `packaging/docker/compose.yaml`）复制到全新私有部署目录。建立 `private-config`
 和 `private-state`，权限 0700、所有者 UID/GID 10001。生成至少 32 字节随机口令，
 存入 `private-config/credential`（0600），不要放入命令行、Compose 环境或日志。
 从 `server.example.json` 建立 `private-config/server.json`（0600），配置：
@@ -96,7 +105,7 @@ ports、无 Compose default 网络。卸载只删除本项目容器和该确切�
 - 有限窗口日志隐私、源边界负例、资源保留与本项目清理回执。
 
 CI 的合成容器结果不替代独立主机结果。任何未运行项保留 NOT RUN，安全失败保持 BLOCKED。
-完成候选和上述最低证据后才集中申请对外授权；不覆写 beta.11 或已有发行资产。
+此固定只读版本已获一次性公开授权并发布；新治理写入版本需另行集中发行审批，不覆写 beta.11、Preview.1 或既有资产。
 
 网络依据：[Docker internal 网络](https://docs.docker.com/engine/network/drivers/bridge/)、
 [端口发布](https://docs.docker.com/engine/network/port-publishing/)、

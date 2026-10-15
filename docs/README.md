@@ -10,6 +10,8 @@
 
 ## 多端产品和发行状态
 
+- [公开入口、品牌与自动检查核查](development/PUBLIC-ENTRY-AUDIT-2026-10-15.md)。
+
 - [Docker 预览版安装手册](multichannel/DOCKER-READONLY-PREVIEW.md) 与 [真实主机验收](multichannel/DOCKER-PREVIEW-RESULTS-2026-10-15.md)。
 - [多渠道最新发布台账](multichannel/RELEASE-STATUS.md)、[能力矩阵](multichannel/CAPABILITY-MATRIX.md)及[UX v2 验收矩阵](ux/UX-V2-ACCEPTANCE.md)。
 - [工程多端主路线](multichannel/NDG-MULTICHANNEL-MASTER.md)。

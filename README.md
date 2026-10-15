@@ -65,7 +65,7 @@ Docker 的真实浏览器验收截图可在 [Docker 公开预览版 Release](htt
 
 支持 Linux AMD64/ARM64 的**本地、明确授权源目录**，不认证 SMB/NFS/FUSE 或直接公网访问。建议先使用人工创建的测试文件。
 
-从 [Docker Preview.1 发行页](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1) 获取 `INSTALL.md`、`compose.yaml`、`SHA256SUMS` 和已签发的版本归档。也可以匿名拉取固定 OCI digest：
+从 [Docker Preview.1 发行页](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1) 获取 `INSTALL.md`、`compose.yaml`、`SHA256SUMS` 和固定版本归档。也可以匿名拉取固定 OCI digest：
 
 ```sh
 docker pull ghcr.io/fnb2026/ndg-readonly-preview@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1
