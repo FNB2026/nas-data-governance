@@ -12,6 +12,22 @@ exact-HEAD receipts. The initial baseline does not certify those later changes.
 Scope: acceptance and confirmed-defect triage; no unrelated feature expansion.
 The owner now orders the work as Phase A → B → C → D → E.
 
+## 2026-10-15 dual-line follow-up
+
+The new [Darwin proof review](DARWIN-ROOTED-READER-PROOF.md) contains supported-API
+research, pinned Apple source, real primitive/symlink/root-replacement experiments
+and a disposable real-mount counterexample. It does not justify enabling the
+production reader; #111 and the positive Mac gate remain BLOCKED.
+
+The [B-2 plan](B2-DEV-TEST-PLAN.md) and [native development results](B2-DEV-RESULTS-2026-10-15.md)
+add actual isolated GUI browsing/selection/refusal/privacy observations, a normal
+20k-file scan, 10k-group pagination timings and main-process RSS. The separately
+tagged development support directory is validated before startup, with no default
+fallback. A different Bundle ID alone is still not isolation. This is dirty dev
+binary evidence, not independently reviewed isolation or signed RC certification.
+Historical matrix statuses below remain the full-case status; the new results
+qualify individual slices and do not replace their untested requirements.
+
 ## Owner's revised Phase B sequence
 
 ### B-1 — Issue #109: diagnosis before revalidation

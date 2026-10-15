@@ -243,3 +243,11 @@ jobs:
           go test -race -tags 'mas,production' ./internal/macaccess
           go test -race -tags mas -run 'TestSandbox|TestReauthorization|TestMASDefault|TestAllSandbox' ./internal/adapters/wails
           go vet -tags 'mas,production' ./internal/macaccess ./internal/adapters/wails
+
+      - name: Test isolated ordinary desktop acceptance composition and native research
+        run: |
+          go test -race -count=1 -tags ndg_devprofile ./internal/adapters/wails -run 'TestDevProfile|TestGovernance.*Darwin'
+          go vet -tags ndg_devprofile ./internal/adapters/wails
+          go test -race -count=1 -v ./scripts/research/darwin-root-probe
+          # The explicit disk-image experiment is local-only, never a CI mount.
+          # A missing SDK/kernel research primitive is an explicit SKIP, not proof.
