@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import DisabledNotice from "../components/DisabledNotice";
 import LoadingState from "../components/LoadingState";
 import { HttpAdapter, type Source, type Snapshot } from "./http";
+import "../styles/tokens.css";
 import "../styles.css";
 const api = new HttpAdapter();
 function WebApp() {

@@ -1,17 +1,17 @@
-# Experimental local-only template. No quarantine or host-wide source volume.
+# Read-only preview template. Load the verified fixed-version image first.
+# Access through an SSH local forward to the container IP; no published ports.
 services:
   ndg:
-    build:
-      context: ../..
-      dockerfile: packaging/docker/Dockerfile
+    image: ${NDG_IMAGE:?Set the verified local image ID or immutable digest}
+    pull_policy: never
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 128
     mem_limit: 1g
-    cpus: 2
-    ports: ["127.0.0.1:8080:8080"]
+    cpus: 1
+    networks: [readonly]
     volumes:
       - type: bind
         source: ./private-config
@@ -26,3 +26,6 @@ services:
         read_only: true
     tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
     stop_grace_period: 60s
+networks:
+  readonly:
+    internal: true
