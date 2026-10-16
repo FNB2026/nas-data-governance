@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,18 +21,34 @@ import (
 
 var testContext = context.Background()
 
-func initialized(t *testing.T) (string, RootProof) {
+func privateParent(t *testing.T) string {
 	t.Helper()
-	if os.Geteuid() == 0 || os.Getegid() == 0 {
-		t.Skip("non-root worker required")
-	}
 	// Go's numbered TempDir child uses 0777 filtered by the process umask;
 	// that is not the explicit private parent required by Initialize.
 	parent := filepath.Join(t.TempDir(), "worker")
 	if os.Mkdir(parent, 0700) != nil {
 		t.Fatal("private parent fixture failed")
 	}
-	path := filepath.Join(parent, "execution")
+	return parent
+}
+
+// One probe decides the whole test: every subtest shares this platform.
+func requireBootstrapKernel(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 || os.Getegid() == 0 {
+		t.Skip("non-root worker required")
+	}
+	if _, err := Initialize(testContext, filepath.Join(privateParent(t), "probe")); errors.Is(err, ErrUnsupported) && os.Getenv("NDG_REQUIRE_MANAGED_READER_KERNEL") != "1" {
+		t.Skip("unsupported execution filesystem/kernel")
+	}
+}
+
+func initialized(t *testing.T) (string, RootProof) {
+	t.Helper()
+	if os.Geteuid() == 0 || os.Getegid() == 0 {
+		t.Skip("non-root worker required")
+	}
+	path := filepath.Join(privateParent(t), "execution")
 	proof, err := Initialize(testContext, path)
 	if errors.Is(err, ErrUnsupported) && os.Getenv("NDG_REQUIRE_MANAGED_READER_KERNEL") != "1" {
 		t.Skip("unsupported execution filesystem/kernel")
@@ -417,6 +434,139 @@ func (p *pausedCopy) Read(buffer []byte) (int, error) {
 	<-p.release
 	p.finished = true
 	return copy(buffer, "synthetic concurrent input"), nil
+}
+
+// Ordered exactly as Initialize executes them. This list is the coverage
+// contract: a new bootstrap step that is missing here has no fault evidence.
+var bootstrapSteps = []string{
+	"parent.resolve", "parent.private", "parent.filesystem",
+	"root.mkdir", "root.open",
+	"partial.create", "partial.sync", "partial.close",
+	"root.private", "root.filesystem",
+	"objects.mkdir", "objects.open", "objects.private", "objects.sync", "objects.close",
+	"staging.mkdir", "staging.open", "staging.private", "staging.sync", "staging.close",
+	"rootjson.create", "rootjson.write", "rootjson.sync", "rootjson.close",
+	"lockfile.create", "lockfile.sync", "lockfile.close",
+	"dbfile.create", "dbfile.sync", "dbfile.close",
+	"lease.open", "lease.flock",
+	"root.predirsync", "parent.predirsync",
+	"catalog.open", "catalog.schema", "catalog.identity", "catalog.close",
+	"catalog.sidecars", "catalog.stat", "root.presync",
+	"control.lock", "control.children",
+	"control.create", "control.write", "control.sync", "control.close",
+	"root.dirsync", "parent.dirsync",
+	"partial.unlink", "partial.dirsync",
+}
+
+// Without this, a newly added bootstrap step silently has no fault evidence.
+func TestBootstrapStepListMatchesExecutedProtocol(t *testing.T) {
+	requireBootstrapKernel(t)
+	seen := []string{}
+	bootstrapFault = func(at string) error {
+		seen = append(seen, at)
+		return nil
+	}
+	defer func() { bootstrapFault = nil }()
+	if _, err := Initialize(testContext, filepath.Join(privateParent(t), "execution")); err != nil {
+		t.Fatal("clean bootstrap failed", err)
+	}
+	expected := []string{}
+	for _, label := range bootstrapSteps {
+		expected = append(expected, label+".before", label+".after")
+	}
+	if !reflect.DeepEqual(seen, expected) {
+		t.Fatalf("bootstrap step list is stale: executed %d, declared %d\n%v", len(seen), len(expected), seen)
+	}
+}
+
+// These are protocol fault cases, not a claim of physical power-loss behavior.
+// Nothing adopts, repairs or deletes the residual partial root.
+func TestInitializeEveryStepFailsClosed(t *testing.T) {
+	requireBootstrapKernel(t)
+	for _, label := range bootstrapSteps {
+		for _, edge := range []string{"before", "after"} {
+			t.Run(label+"."+edge, func(t *testing.T) {
+				// Only the removal of the marker and its final sync are allowed
+				// to leave a structurally complete root behind.
+				complete := label == "partial.unlink" && edge == "after" || label == "partial.dirsync"
+				parent := privateParent(t)
+				path := filepath.Join(parent, "execution")
+				reached := false
+				bootstrapFault = func(at string) error {
+					if at == label+"."+edge {
+						reached = true
+						return errors.New("synthetic fault")
+					}
+					return nil
+				}
+				defer func() { bootstrapFault = nil }()
+				proof, err := Initialize(testContext, path)
+				if !reached {
+					t.Fatal("fault point was never reached")
+				}
+				if err == nil || proof != (RootProof{}) {
+					t.Fatal("incomplete bootstrap succeeded")
+				}
+				bootstrapFault = nil
+				if _, err := os.Lstat(path); err != nil {
+					// A clean pre-operation state must not retain anything.
+					entries, e := os.ReadDir(parent)
+					if e != nil || len(entries) != 0 {
+						t.Fatal("bootstrap wrote outside the private root")
+					}
+					if _, e := Initialize(testContext, path); e != nil {
+						t.Fatal("clean pre-operation state was not reusable", e)
+					}
+					return
+				}
+				// A partial root is never adopted, migrated or clobbered.
+				if _, err := Initialize(testContext, path); err == nil {
+					t.Fatal("partial root was adopted or clobbered")
+				}
+				if complete {
+					return
+				}
+				entries, err := os.ReadDir(path)
+				if err != nil {
+					t.Fatal("residual root unreadable", err)
+				}
+				if len(entries) == 0 {
+					return // An empty private root carries no bootstrap state.
+				}
+				// Any root that received content must name itself incomplete.
+				if _, err := os.Lstat(filepath.Join(path, bootstrapPartialName)); err != nil {
+					t.Fatal("incomplete root is not self-identifying")
+				}
+			})
+		}
+	}
+}
+
+// Uses the real stored proof, so this cannot pass on a proof mismatch: only
+// the partial marker can make these refusals fire.
+func TestBootstrapPartialMarkerRefusesReaderAndWriter(t *testing.T) {
+	path, root := initialized(t)
+	marker := filepath.Join(path, bootstrapPartialName)
+	if os.WriteFile(marker, nil, 0600) != nil {
+		t.Fatal("partial marker fixture failed")
+	}
+	if r, err := OpenReader(path, root); r != nil || err == nil {
+		t.Fatal("partial root was readable")
+	}
+	if w, err := OpenWriter(testContext, path, root); w != nil || err == nil {
+		t.Fatal("partial root was writable")
+	}
+	// Positive control: the same root without the marker is complete.
+	if os.Remove(marker) != nil {
+		t.Fatal("positive control removal failed")
+	}
+	w, err := OpenWriter(testContext, path, root)
+	if err != nil {
+		t.Fatal("complete root was refused", err)
+	}
+	if w.Close() != nil {
+		t.Fatal("complete root close failed")
+	}
 }
 
 func TestWriterConcurrentCloseKeepsLeaseAndDescriptors(t *testing.T) {

@@ -194,6 +194,13 @@ func OpenReader(path string, proof RootProof) (Reader, error) {
 	if marker(fd, proof) != nil {
 		return nil, ErrRejected
 	}
+	// A root still carrying the bootstrap partial marker is incomplete by
+	// construction. The canonical marker alone cannot prove completion.
+	partial, err := rooted(fd, bootstrapPartialName, unix.O_RDONLY)
+	if err == nil {
+		_ = unix.Close(partial)
+		return nil, ErrRecoveryRequired
+	}
 	r.objects, err = rooted(fd, "objects", unix.O_RDONLY|unix.O_DIRECTORY)
 	if err != nil {
 		return nil, err

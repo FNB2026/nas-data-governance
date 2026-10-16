@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -179,9 +180,118 @@ func openCatalog(ctx context.Context, path string, initialize bool) (*catalog, e
 	return &catalog{Conn: conn, pool: db}, nil
 }
 
+const bootstrapPartialName = "ndg-bootstrap-partial"
+
+// Test-only, unexported. No environment, CLI or API fault or recovery switch.
+var bootstrapFault func(string) error
+
+// Kernel and descriptor failures are fixed categories, never raw errno. The
+// unsupported-platform/kernel refusal and the uncertain-catalog refusal must
+// survive so callers can still skip or require recovery.
+func classify(err error) error {
+	if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrCancelled) || errors.Is(err, ErrRecoveryRequired) {
+		return err
+	}
+	return ErrRejected
+}
+
+func bootstrapStep(ctx context.Context, label string, action func() error) error {
+	if ctx.Err() != nil {
+		return ErrCancelled
+	}
+	if bootstrapFault != nil && bootstrapFault(label+".before") != nil {
+		return ErrRejected
+	}
+	if err := action(); err != nil {
+		return classify(err)
+	}
+	if bootstrapFault != nil && bootstrapFault(label+".after") != nil {
+		return ErrRejected
+	}
+	return nil
+}
+
+// Every descriptor is released exactly once, including when the injected fault
+// fires on the edge that would otherwise have released it.
+func bootstrapFile(ctx context.Context, parent int, label, name string, content []byte) error {
+	fd := -1
+	released := false
+	defer func() {
+		if !released && fd >= 0 {
+			_ = unix.Close(fd)
+		}
+	}()
+	if err := bootstrapStep(ctx, label+".create", func() error {
+		var e error
+		fd, e = createAt(parent, name)
+		return e
+	}); err != nil {
+		return err
+	}
+	if len(content) > 0 {
+		if err := bootstrapStep(ctx, label+".write", func() error {
+			n, e := unix.Write(fd, content)
+			if e != nil || n != len(content) {
+				return ErrRejected
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := bootstrapStep(ctx, label+".sync", func() error { return unix.Fsync(fd) }); err != nil {
+		return err
+	}
+	return bootstrapStep(ctx, label+".close", func() error {
+		released = true
+		return unix.Close(fd)
+	})
+}
+
+func bootstrapDirectory(ctx context.Context, parent int, name string) error {
+	fd := -1
+	released := false
+	defer func() {
+		if !released && fd >= 0 {
+			_ = unix.Close(fd)
+		}
+	}()
+	if err := bootstrapStep(ctx, name+".mkdir", func() error {
+		return unix.Mkdirat(parent, name, 0700)
+	}); err != nil {
+		return err
+	}
+	if err := bootstrapStep(ctx, name+".open", func() error {
+		var e error
+		fd, e = rooted(parent, name, unix.O_RDONLY|unix.O_DIRECTORY)
+		return e
+	}); err != nil {
+		return err
+	}
+	if err := bootstrapStep(ctx, name+".private", func() error {
+		_, e := directory(fd, true)
+		return e
+	}); err != nil {
+		return err
+	}
+	if err := bootstrapStep(ctx, name+".sync", func() error { return unix.Fsync(fd) }); err != nil {
+		return err
+	}
+	return bootstrapStep(ctx, name+".close", func() error {
+		released = true
+		return unix.Close(fd)
+	})
+}
+
 // Initialize is the only bootstrap operation. It creates exactly one NEW root
 // under a private existing parent. Existing or partial roots are never adopted,
 // chmodded, migrated, repaired or deleted. No source paths are accepted.
+//
+// The partial marker names every incomplete root before any other root content
+// exists. It is removed only after the whole protocol is durable, so a crash
+// can leave a usable root or a marked one, never a silent partial that the
+// Reader would otherwise accept. Nothing clears it on failure: a failed
+// bootstrap never becomes adoptable, and it never self-heals.
 func Initialize(ctx context.Context, path string) (RootProof, error) {
 	var empty RootProof
 	if ctx.Err() != nil {
@@ -190,15 +300,25 @@ func Initialize(ctx context.Context, path string) (RootProof, error) {
 	if os.Geteuid() == 0 || os.Getegid() == 0 || !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" || strings.ContainsAny(path, "?#%") {
 		return empty, ErrRejected
 	}
-	parent, err := absolute(filepath.Dir(path))
-	if err != nil {
+	parent := -1
+	if err := bootstrapStep(ctx, "parent.resolve", func() error {
+		var e error
+		parent, e = absolute(filepath.Dir(path))
+		return e
+	}); err != nil {
 		return empty, err
 	}
 	defer unix.Close(parent)
-	if _, err = directory(parent, true); err != nil {
+	if err := bootstrapStep(ctx, "parent.private", func() error {
+		_, e := directory(parent, true)
+		return e
+	}); err != nil {
 		return empty, err
 	}
-	if _, err = writerFilesystem(parent); err != nil {
+	if err := bootstrapStep(ctx, "parent.filesystem", func() error {
+		_, e := writerFilesystem(parent)
+		return e
+	}); err != nil {
 		return empty, err
 	}
 	rootID, err := randomID()
@@ -206,131 +326,198 @@ func Initialize(ctx context.Context, path string) (RootProof, error) {
 		return empty, err
 	}
 	storeID, err := randomID()
-	if err != nil || unix.Mkdirat(parent, filepath.Base(path), 0700) != nil {
-		return empty, ErrRejected
-	}
-	fd, err := rooted(parent, filepath.Base(path), unix.O_RDONLY|unix.O_DIRECTORY)
 	if err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "root.mkdir", func() error {
+		return unix.Mkdirat(parent, filepath.Base(path), 0700)
+	}); err != nil {
+		return empty, err
+	}
+	fd := -1
+	if err := bootstrapStep(ctx, "root.open", func() error {
+		var e error
+		fd, e = rooted(parent, filepath.Base(path), unix.O_RDONLY|unix.O_DIRECTORY)
+		return e
+	}); err != nil {
+		if fd >= 0 {
+			_ = unix.Close(fd)
+		}
 		return empty, err
 	}
 	defer unix.Close(fd)
-	id, err := directory(fd, true)
-	if err != nil {
+	if err := bootstrapFile(ctx, fd, "partial", bootstrapPartialName, nil); err != nil {
 		return empty, err
 	}
-	if _, err = writerFilesystem(fd); err != nil {
-		return empty, ErrUnsupported
+	id := directoryIdentity{}
+	if err := bootstrapStep(ctx, "root.private", func() error {
+		var e error
+		id, e = directory(fd, true)
+		return e
+	}); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "root.filesystem", func() error {
+		_, e := writerFilesystem(fd)
+		return e
+	}); err != nil {
+		return empty, err
 	}
 	proof := RootProof{rootID, storeID, id.device, id.inode}
 	for _, name := range []string{"objects", "staging"} {
-		if unix.Mkdirat(fd, name, 0700) != nil {
-			return empty, ErrRejected
-		}
-		child, err := rooted(fd, name, unix.O_RDONLY|unix.O_DIRECTORY)
-		if err != nil {
+		if err := bootstrapDirectory(ctx, fd, name); err != nil {
 			return empty, err
 		}
-		_, check := directory(child, true)
-		syncErr := unix.Fsync(child)
-		_ = unix.Close(child)
-		if check != nil || syncErr != nil {
-			return empty, ErrRejected
-		}
 	}
-	for _, name := range []string{"root.json", "writer.lock", "catalog.sqlite"} {
-		n, err := createAt(fd, name)
-		if err != nil {
-			return empty, err
-		}
-		f := os.NewFile(uintptr(n), "bootstrap private file")
-		if name == "root.json" {
-			raw := encoded(struct {
-				Version int    `json:"version"`
-				RootID  string `json:"root_id"`
-				StoreID string `json:"store_id"`
-			}{1, rootID, storeID})
-			if count, err := f.Write(raw); err != nil || count != len(raw) {
-				_ = f.Close()
-				return empty, ErrRejected
-			}
-		}
-		syncErr := f.Sync()
-		closeErr := f.Close()
-		if syncErr != nil || closeErr != nil {
-			return empty, ErrRejected
-		}
+	raw := encoded(struct {
+		Version int    `json:"version"`
+		RootID  string `json:"root_id"`
+		StoreID string `json:"store_id"`
+	}{1, rootID, storeID})
+	if err := bootstrapFile(ctx, fd, "rootjson", "root.json", raw); err != nil {
+		return empty, err
 	}
-	lock, err := rooted(fd, "writer.lock", unix.O_RDWR)
-	if err != nil {
+	if err := bootstrapFile(ctx, fd, "lockfile", "writer.lock", nil); err != nil {
+		return empty, err
+	}
+	if err := bootstrapFile(ctx, fd, "dbfile", "catalog.sqlite", nil); err != nil {
+		return empty, err
+	}
+	lock := -1
+	if err := bootstrapStep(ctx, "lease.open", func() error {
+		var e error
+		lock, e = rooted(fd, "writer.lock", unix.O_RDWR)
+		return e
+	}); err != nil {
+		if lock >= 0 {
+			_ = unix.Close(lock)
+		}
 		return empty, err
 	}
 	defer unix.Close(lock)
-	if unix.Flock(lock, unix.LOCK_EX|unix.LOCK_NB) != nil || unix.Fsync(fd) != nil || unix.Fsync(parent) != nil {
-		return empty, ErrRejected
-	}
-	db, err := openCatalog(ctx, path, true)
-	if err != nil {
+	if err := bootstrapStep(ctx, "lease.flock", func() error {
+		return unix.Flock(lock, unix.LOCK_EX|unix.LOCK_NB)
+	}); err != nil {
 		return empty, err
 	}
-	closed := false
+	if err := bootstrapStep(ctx, "root.predirsync", func() error { return unix.Fsync(fd) }); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "parent.predirsync", func() error { return unix.Fsync(parent) }); err != nil {
+		return empty, err
+	}
+	db := (*catalog)(nil)
+	dbOpen := false
+	if err := bootstrapStep(ctx, "catalog.open", func() error {
+		var e error
+		db, e = openCatalog(ctx, path, true)
+		if e == nil {
+			dbOpen = true
+		}
+		return e
+	}); err != nil {
+		return empty, err
+	}
 	defer func() {
-		if !closed {
+		if dbOpen {
 			_ = db.Close()
+			dbOpen = false
 		}
 	}()
-	if _, err = db.ExecContext(ctx, catalogSchema); err != nil {
-		return empty, ErrRejected
-	}
-	if _, err = db.ExecContext(ctx, "INSERT INTO identity(id,root_id,store_id,epoch,pending) VALUES(1,?,?,0,'')", proof.RootID, proof.StoreID); err != nil {
-		return empty, ErrRejected
-	}
-	closeDBErr := db.Close()
-	closed = true
-	if closeDBErr != nil {
-		return empty, ErrRecoveryRequired
-	}
-	for _, name := range []string{"catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm"} {
-		if _, err := checkRegularAt(fd, name); err != nil {
-			return empty, ErrRejected
+	if err := bootstrapStep(ctx, "catalog.schema", func() error {
+		_, e := db.ExecContext(ctx, catalogSchema)
+		if e != nil {
+			return ErrRejected
 		}
-	}
-	n, err := rooted(fd, "catalog.sqlite", unix.O_RDONLY)
-	if err != nil {
+		return nil
+	}); err != nil {
 		return empty, err
 	}
-	st, check := regular(n)
-	_ = unix.Close(n)
-	if check != nil || unix.Fsync(fd) != nil {
-		return empty, ErrRejected
+	if err := bootstrapStep(ctx, "catalog.identity", func() error {
+		_, e := db.ExecContext(ctx, "INSERT INTO identity(id,root_id,store_id,epoch,pending) VALUES(1,?,?,0,'')", proof.RootID, proof.StoreID)
+		if e != nil {
+			return ErrRejected
+		}
+		return nil
+	}); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "catalog.close", func() error {
+		dbOpen = false
+		return db.Close()
+	}); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "catalog.sidecars", func() error {
+		for _, name := range []string{"catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm"} {
+			if _, e := checkRegularAt(fd, name); e != nil {
+				return e
+			}
+		}
+		return nil
+	}); err != nil {
+		return empty, err
+	}
+	var st unix.Statx_t
+	if err := bootstrapStep(ctx, "catalog.stat", func() error {
+		n, e := rooted(fd, "catalog.sqlite", unix.O_RDONLY)
+		if e != nil {
+			return e
+		}
+		st, e = regular(n)
+		_ = unix.Close(n)
+		return e
+	}); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "root.presync", func() error { return unix.Fsync(fd) }); err != nil {
+		return empty, err
 	}
 	c := control{Version: 1, Root: proof, Catalog: identityOf(st)}
-	c.Lock, err = checkRegularAt(fd, "writer.lock")
-	if err != nil {
+	if err := bootstrapStep(ctx, "control.lock", func() error {
+		var e error
+		c.Lock, e = checkRegularAt(fd, "writer.lock")
+		return e
+	}); err != nil {
 		return empty, err
 	}
-	for name, target := range map[string]*fileIdentity{"objects": &c.Objects, "staging": &c.Staging} {
-		child, e := rooted(fd, name, unix.O_RDONLY|unix.O_DIRECTORY)
-		if e != nil {
-			return empty, e
+	if err := bootstrapStep(ctx, "control.children", func() error {
+		for _, name := range []string{"objects", "staging"} {
+			child, e := rooted(fd, name, unix.O_RDONLY|unix.O_DIRECTORY)
+			if e != nil {
+				return e
+			}
+			identity, e := directory(child, true)
+			_ = unix.Close(child)
+			if e != nil {
+				return e
+			}
+			target := &c.Objects
+			if name == "staging" {
+				target = &c.Staging
+			}
+			*target = fileIdentity{identity.device, identity.inode}
 		}
-		identity, check := directory(child, true)
-		_ = unix.Close(child)
-		if check != nil {
-			return empty, check
-		}
-		*target = fileIdentity{identity.device, identity.inode}
-	}
-	n, err = createAt(fd, "control.json")
-	if err != nil {
+		return nil
+	}); err != nil {
 		return empty, err
 	}
-	f := os.NewFile(uintptr(n), "bootstrap private control")
-	raw := encoded(c)
-	count, writeErr := f.Write(raw)
-	syncErr := f.Sync()
-	closeErr := f.Close()
-	if writeErr != nil || count != len(raw) || syncErr != nil || closeErr != nil || unix.Fsync(fd) != nil || unix.Fsync(parent) != nil {
-		return empty, ErrRejected
+	if err := bootstrapFile(ctx, fd, "control", "control.json", encoded(c)); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "root.dirsync", func() error { return unix.Fsync(fd) }); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "parent.dirsync", func() error { return unix.Fsync(parent) }); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "partial.unlink", func() error {
+		return unix.Unlinkat(fd, bootstrapPartialName, 0)
+	}); err != nil {
+		return empty, err
+	}
+	if err := bootstrapStep(ctx, "partial.dirsync", func() error { return unix.Fsync(fd) }); err != nil {
+		return empty, err
 	}
 	return proof, nil
 }

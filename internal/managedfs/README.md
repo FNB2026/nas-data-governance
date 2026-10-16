@@ -103,6 +103,26 @@ check approval, retention, keeper/protection rules, Dry Run or high-risk user
 confirmation; product integration must independently enforce all of them.
 No public command/API exposes this primitive or its unexported test fault hook.
 
+## Bootstrap partial roots
+
+`Initialize` creates `ndg-bootstrap-partial` immediately after the private root
+and removes it only after the whole protocol is durable. It is the sole reason
+an incomplete root is identifiable: a root carrying it is refused by
+`OpenReader`, and a completed root never carries it.
+
+Every bootstrap step has a fault point, and every fault leaves a state this
+package can positively refuse. A failure before the root exists leaves the
+private parent untouched and reusable; a later failure leaves a marked partial
+root that is never adopted, migrated, clobbered or self-cleared. Only the two
+final removal steps may leave a structurally complete root.
+
+These are protocol fault cases, not physical power-loss behavior. They do not
+cover a privileged concurrent remount, a foreign-UID writer inside the private
+namespace, other filesystems, or a real crash while the SQLite catalog is being
+written. Partial-root removal stays a deliberate, separately authorized act:
+no API or command deletes a bootstrap residual, so a failed bootstrap leaves
+its path permanently unusable rather than silently reusable.
+
 Writer tests cover fixed-store binding, stored child identity, same-inode stale
 catalog rollback, real SQLite read-only transaction failure, every persistence
 fault/acknowledgement boundary, cancellation, callback reentry and concurrent
