@@ -183,12 +183,16 @@ func TestAcquireLeaseRefusesForeignWritableDirectory(t *testing.T) {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal("chmod failed", err)
 	}
-	// Reachable is intentional; writable by others is not.
-	if lease, err := AcquireLease(dir, want); lease != nil || err != nil {
+	// Reachable is intentional, so this layout must be accepted.
+	lease, err := AcquireLease(dir, want)
+	if err != nil || lease == nil {
 		if lease != nil {
 			_ = lease.Release()
 		}
 		t.Fatal("traversable lease directory refused", err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal("lease release failed", err)
 	}
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal("chmod failed", err)
