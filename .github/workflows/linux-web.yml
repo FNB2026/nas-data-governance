@@ -30,15 +30,27 @@ jobs:
         run: test "$(uname -m)" = "${{ matrix.machine }}"
       - run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store ./internal/managedfs
       - name: Build private reader kernel probe without product integration
-        run: CGO_ENABLED=0 go test -c -o /tmp/ndg-managedfs-native.test ./internal/managedfs
+        shell: bash
+        run: |
+          mkdir -m 755 /tmp/ndg-managed-reader-evidence
+          CGO_ENABLED=0 go test -c -o /tmp/ndg-managed-reader-evidence/probe.test ./internal/managedfs
+          chmod 755 /tmp/ndg-managed-reader-evidence/probe.test
+          git rev-parse HEAD > /tmp/ndg-managed-reader-evidence/source-sha.txt
+          uname -srm > /tmp/ndg-managed-reader-evidence/kernel.txt
+          go version -m /tmp/ndg-managed-reader-evidence/probe.test > /tmp/ndg-managed-reader-evidence/build-info.txt
+          cd /tmp/ndg-managed-reader-evidence
+          sha256sum probe.test > probe-before.sha256
       - name: Real same-inode mounts and cached descriptor counterexamples (not a writer or NAS test)
         shell: bash
         run: |
-          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-reader-kernel.py /tmp/ndg-managedfs-native.test | tee /tmp/ndg-managed-reader-proof.json
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-reader-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/proof.json
+          cd /tmp/ndg-managed-reader-evidence
+          sha256sum -c probe-before.sha256
+          sha256sum probe.test probe-before.sha256 source-sha.txt kernel.txt build-info.txt proof.json > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: private-managed-reader-proof-${{ matrix.architecture }}
-          path: /tmp/ndg-managed-reader-proof.json
+          path: /tmp/ndg-managed-reader-evidence/
           if-no-files-found: error
       - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/ndg-server-amd64 ./cmd/ndg-server
