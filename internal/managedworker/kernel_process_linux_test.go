@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,6 +32,7 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		Run       string `json:"run"`
 		State     string `json:"state"`
 		Root      string `json:"root"`
+		Socket    string `json:"socket"`
 		Bootstrap bool   `json:"bootstrap"`
 		WorkerUID uint32 `json:"worker_uid"`
 		WorkerGID uint32 `json:"worker_gid"`
@@ -63,6 +65,15 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 			t.Fatal("worker accepted a process that can regain privileges", err)
 		}
 		emit(map[string]any{"state": "PASS", "category": "no_new_privs_required"})
+	case "dial":
+		// The driver runs this under a specific UID, because a peer identity
+		// is only meaningful when the connecting process actually has it.
+		conn, err := net.Dial("unix", input.Socket)
+		if err != nil {
+			t.Fatal("dial failed", err)
+		}
+		_ = conn.Close()
+		emit(map[string]any{"state": "PASS", "category": "dialed", "uid": os.Geteuid()})
 	case "hold":
 		// Holds the lease while the driver tries to start a second worker.
 		if err := RequireSubject(subject); err != nil {

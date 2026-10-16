@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 import pwd
-import socket
+import select
 import subprocess
 import sys
 import uuid
@@ -58,13 +58,28 @@ def main():
     os.chown(base, worker, worker)
     results = []
 
-    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, launcher=None):
+    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path=''):
         path = base / (name + '.json')
         payload = {'mode': mode, 'run': str(run_dir), 'state': str(state_dir), 'root': root,
-                   'bootstrap': bootstrap, 'worker_uid': worker, 'worker_gid': worker,
+                   'socket': socket_path, 'bootstrap': bootstrap,
+                   'worker_uid': worker, 'worker_gid': worker,
                    'caller_uid': caller, 'caller_gid': caller}
         private(path, json.dumps(payload).encode(), worker)
         return path
+
+    def handshake(process, label):
+        """Read one probe line, surfacing the child's own stderr when it fails
+        so a refusal is never mistaken for a lost handshake."""
+        if not select.select([process.stdout], [], [], 20)[0]:
+            settle(process)
+            raise AssertionError(label + ': probe handshake timeout')
+        raw = process.stdout.readline(8193)
+        if not raw:
+            errors = process.stderr.read().decode('utf-8', 'replace') if process.stderr else ''
+            settle(process)
+            raise AssertionError(label + ': no probe output; child stderr=' + errors[-800:])
+        assert len(raw) <= 8192 and raw.endswith(b'\n'), label + ': probe output bound'
+        return json.loads(raw)
 
     def launch(config, as_uid, privileged_safe=True):
         env = {**os.environ, 'NDG_MANAGED_WORKER_PROBE': str(config)}
@@ -98,22 +113,27 @@ def main():
     run_dir, state_dir = layout('serve')
     process = launch(probe_config('serve', 'serve', run_dir, state_dir), worker)
     try:
-        ready = line(process)
+        ready = handshake(process, 'serve')
         assert ready['state'] == 'READY', 'worker did not reach READY'
         socket_path = ready['socket']
         assert Path(socket_path).parent == run_dir.resolve(), 'socket escaped the private run directory'
         identity(ready['pid'], worker)
 
-        # An outsider UID connects first: SO_PEERCRED must refuse it.
-        outside = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        outside.connect(socket_path)
-        outside.close()
-        # Then the authorized Web identity, which must be admitted.
-        inside = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        inside.connect(socket_path)
-        inside.close()
+        # The peer identity only means something when the connecting process
+        # really carries it, so each dial runs under its own UID: an outsider
+        # first, which SO_PEERCRED must refuse, then the authorized Web UID.
+        for label, uid in (('outsider', outsider), ('caller', caller)):
+            dialer = launch(probe_config('dial-' + label, 'dial', run_dir, state_dir,
+                                         socket_path=socket_path), uid)
+            try:
+                outcome = handshake(dialer, 'dial-' + label)
+                remaining, errors = dialer.communicate(timeout=20)
+                assert dialer.returncode == 0 and errors == b'', 'dial ' + label + ' failed'
+                assert outcome['uid'] == uid, 'dial ran under the wrong identity'
+            finally:
+                settle(dialer)
 
-        outcome = line(process)
+        outcome = handshake(process, 'serve-outcome')
         assert outcome['state'] == 'PASS', 'peer authorization case failed'
         assert outcome['category'] == 'peer_authorization', outcome.get('category')
         assert outcome['outcomes'] == ['unauthorized', 'authorized'], outcome.get('outcomes')
@@ -128,12 +148,12 @@ def main():
     hold_dir, hold_state = layout('hold')
     holder = launch(probe_config('hold', 'hold', hold_dir, hold_state), worker)
     try:
-        ready = line(holder)
+        ready = handshake(holder, 'hold')
         assert ready['state'] == 'READY', 'lease holder did not start'
         identity(ready['pid'], worker)
         duplicate = launch(probe_config('dup', 'duplicate', hold_dir, hold_state), worker)
         try:
-            outcome = line(duplicate)
+            outcome = handshake(duplicate, 'duplicate')
             remaining, errors = duplicate.communicate(timeout=15)
             assert duplicate.returncode == 0 and errors == b'', 'duplicate child failed'
             record('worker_refuses_duplicate_lease',
@@ -142,7 +162,7 @@ def main():
             settle(duplicate)
         holder.stdin.write(b'release\n')
         holder.stdin.flush()
-        outcome = line(holder)
+        outcome = handshake(holder, 'hold-release')
         record('worker_releases_lease_cleanly', outcome.get('category') == 'lease_released', str(outcome.get('category')))
     finally:
         settle(holder)
@@ -151,7 +171,7 @@ def main():
     nnp_dir, nnp_state = layout('nnp')
     process = launch(probe_config('nnp', 'no_new_privs', nnp_dir, nnp_state), worker, privileged_safe=False)
     try:
-        outcome = line(process)
+        outcome = handshake(process, 'no-new-privs')
         remaining, errors = process.communicate(timeout=15)
         assert process.returncode == 0 and errors == b'', 'no-new-privs child failed'
         record('worker_requires_no_new_privs',
@@ -164,7 +184,7 @@ def main():
     root = root_state / 'managed'
     process = launch(probe_config('boot', 'root', root_dir, root_state, root=str(root), bootstrap=True), worker)
     try:
-        outcome = line(process)
+        outcome = handshake(process, 'bootstrap')
         assert outcome['state'] == 'PASS', 'bootstrap failed'
         assert outcome['category'] == 'bootstrap', outcome.get('category')
         remaining, errors = process.communicate(timeout=15)
@@ -175,7 +195,7 @@ def main():
 
     reopen = launch(probe_config('ready', 'root', root_dir, root_state, root=str(root)), worker)
     try:
-        outcome = line(reopen)
+        outcome = handshake(reopen, 'ready-root')
         remaining, errors = reopen.communicate(timeout=15)
         assert reopen.returncode == 0 and errors == b'', 'ready child failed'
         record('worker_reopens_ready_root', outcome.get('category') == 'ready_root', str(outcome.get('category')))
@@ -187,7 +207,7 @@ def main():
     os.rename(root / 'control.json', base / 'control-moved-away')
     partial = launch(probe_config('partial', 'root', root_dir, root_state, root=str(root)), worker)
     try:
-        outcome = line(partial)
+        outcome = handshake(partial, 'partial-root')
         remaining, errors = partial.communicate(timeout=15)
         assert partial.returncode == 0 and errors == b'', 'partial child failed'
         record('worker_refuses_incomplete_root',
