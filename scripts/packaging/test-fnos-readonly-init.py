@@ -105,7 +105,18 @@ def main():
     assert core['image'].endswith('@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1')
     mounts = {v['target']: v for v in core['volumes']}
     assert set(mounts) == {'/data', '/config', '/sources/source_a', '/sources/source_b'}
-    assert all(v['type'] == 'bind' and v['bind']['create_host_path'] is False for v in mounts.values())
+    # compose-go serializes CreateHostPath with omitempty: false is absent.
+    # Require all four explicit false inputs, then prove the parser preserves true.
+    assert (root / 'compose.yaml').read_text().count('create_host_path: false') == 4
+    assert all(v['type'] == 'bind' and v['bind'].get('create_host_path', False) is False for v in mounts.values())
+    control = fixture / 'create-path-control.yaml'
+    control.write_text((root / 'compose.yaml').read_text().replace('create_host_path: false', 'create_host_path: true'))
+    control_command = list(command); control_command[control_command.index('--file') + 1] = str(control)
+    control_run = subprocess.run(control_command, capture_output=True, timeout=30)
+    assert control_run.returncode == 0
+    control_mounts = json.loads(control_run.stdout)['services']['core']['volumes']
+    assert all(v['bind']['create_host_path'] is True for v in control_mounts)
+    checks.append('real_compose_parser_true_control')
     assert all(mounts[key]['read_only'] for key in ('/config', '/sources/source_a', '/sources/source_b'))
     assert not mounts['/data'].get('read_only', False)
     assert compose['networks']['core']['external'] and compose['networks']['core']['name'] == 'a' * 64
