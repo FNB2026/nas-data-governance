@@ -198,6 +198,9 @@ func Initialize(ctx context.Context, path string) (RootProof, error) {
 	if _, err = directory(parent, true); err != nil {
 		return empty, err
 	}
+	if _, err = writerFilesystem(parent); err != nil {
+		return empty, err
+	}
 	rootID, err := randomID()
 	if err != nil {
 		return empty, err
@@ -215,8 +218,7 @@ func Initialize(ctx context.Context, path string) (RootProof, error) {
 	if err != nil {
 		return empty, err
 	}
-	var fs unix.Statfs_t
-	if unix.Fstatfs(fd, &fs) != nil || !(uint64(fs.Type) == 0xef53 || uint64(fs.Type) == 0x9123683e || uint64(fs.Type) == 0x58465342) {
+	if _, err = writerFilesystem(fd); err != nil {
 		return empty, ErrUnsupported
 	}
 	proof := RootProof{rootID, storeID, id.device, id.inode}

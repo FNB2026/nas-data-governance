@@ -71,6 +71,15 @@ approved backup-import protocol. [SQLite WAL](https://www.sqlite.org/wal.html)
 and [file controls](https://www.sqlite.org/c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal)
 define those engine settings; they do not certify device power-loss behavior.
 
+Writer admission additionally matches the root FD's current STATX_MNT_ID and
+device to the unique record in bounded, verified procfs mountinfo, requiring
+the exact ext4/btrfs/xfs type to agree with fstatfs magic. The ext-family magic
+alone also identifies ext2/ext3 and is insufficient for Writer admission.
+Missing, truncated, ambiguous or mismatched kernel metadata refuses; the
+Reader's broader read-only ext-family profile is unchanged. The native proof
+reports actual filesystem types exercised. This is type admission, not
+per-filesystem or mount-option durability certification.
+
 Every mutator first marks its session blocked and durably writes root Pending
 at epoch N+1, then commits SQLite's matching intent before object mutation.
 SealCopy uses fresh staging, bounded full hash, file/directory fsync and

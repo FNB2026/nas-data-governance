@@ -24,6 +24,7 @@ type writer struct {
 	lockID          fileIdentity
 	control         control
 	db              *catalog
+	filesystem      string
 	// Test-only, unexported. No environment/CLI/API fault or recovery switch.
 	fault func(string) error
 }
@@ -175,6 +176,10 @@ func OpenWriter(ctx context.Context, path string, proof RootProof) (Writer, erro
 			_ = w.Close()
 		}
 	}()
+	w.filesystem, err = writerFilesystem(w.r.root)
+	if err != nil {
+		return nil, err
+	}
 	w.control, err = readControl(w.r.root, proof)
 	if err != nil {
 		return nil, err

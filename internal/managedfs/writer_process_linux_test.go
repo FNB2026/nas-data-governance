@@ -61,7 +61,7 @@ func TestManagedWriterKernelProcess(t *testing.T) {
 		if err != nil || w.Close() != nil {
 			t.Fatal("probe keeper/close failed", err)
 		}
-		emit(map[string]any{"state": "PASS", "root": root, "target": target, "keeper": keeper})
+		emit(map[string]any{"state": "PASS", "root": root, "target": target, "keeper": keeper, "filesystem": w.(*writer).filesystem})
 		return
 	}
 	opened, err := OpenWriter(ctx, rootPath, cfg.Root)

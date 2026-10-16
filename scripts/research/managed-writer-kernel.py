@@ -65,6 +65,7 @@ def main():
     base = Path('/var/lib') / ('ndg-managed-writer-' + uuid.uuid4().hex)
     base.mkdir(mode=0o700); os.chown(base, uid, uid)
     results = []
+    filesystems = set()
 
     def launch(cfg):
         config = Path(cfg['area']) / ('config-' + uuid.uuid4().hex + '.json')
@@ -88,6 +89,8 @@ def main():
             assert result.pop('state') == 'PASS'
             assert opaque(result['target']['object_id']) and opaque(result['keeper']['object_id'])
             assert opaque(result['root']['root_id']) and opaque(result['root']['store_id'])
+            assert result['filesystem'] in ('ext4', 'btrfs', 'xfs')
+            filesystems.add(result['filesystem'])
             cfg.update(result)
             finish(process)
         finally:
@@ -277,7 +280,7 @@ def main():
                 results.append({'case': mode + '-sigkill-' + stop, 'result': 'PASS',
                                 'fresh_process': 'ready_complete' if complete else 'recovery_refused', 'state': current})
     print(json.dumps({'result': 'PASS', 'scope': 'DISPOSABLE_NATIVE_PRIVATE_WRITER_NOT_PRODUCT_OR_NAS_OR_POWER_LOSS_ACCEPTANCE',
-                      'checks': results, 'fixtures_retained_until_runner_disposal': True}, sort_keys=True))
+                      'checks': results, 'filesystems': sorted(filesystems), 'fixtures_retained_until_runner_disposal': True}, sort_keys=True))
 
 
 if __name__ == '__main__':

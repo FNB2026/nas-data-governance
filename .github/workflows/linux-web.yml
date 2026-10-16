@@ -33,6 +33,9 @@ jobs:
         shell: bash
         run: |
           mkdir -m 755 /tmp/ndg-managed-reader-evidence
+          git diff --quiet
+          git diff --cached --quiet
+          git ls-files -z -- internal/managedfs scripts/research/managed-reader-kernel.py scripts/research/managed-writer-kernel.py .github/workflows/linux-web.yml go.mod go.sum | xargs -0 sha256sum > /tmp/ndg-managed-reader-evidence/source-inputs.sha256
           CGO_ENABLED=0 go test -c -o /tmp/ndg-managed-reader-evidence/probe.test ./internal/managedfs
           chmod 755 /tmp/ndg-managed-reader-evidence/probe.test
           git rev-parse HEAD > /tmp/ndg-managed-reader-evidence/source-sha.txt
@@ -44,16 +47,18 @@ jobs:
         shell: bash
         run: |
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-reader-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/proof.json
+          sha256sum -c /tmp/ndg-managed-reader-evidence/source-inputs.sha256
           cd /tmp/ndg-managed-reader-evidence
           sha256sum -c probe-before.sha256
-          sha256sum probe.test probe-before.sha256 source-sha.txt kernel.txt build-info.txt proof.json > SHA256SUMS
+          sha256sum probe.test probe-before.sha256 source-sha.txt source-inputs.sha256 kernel.txt build-info.txt proof.json > SHA256SUMS
       - name: Private Writer process-kill and mount counterexamples (not product or NAS acceptance)
         shell: bash
         run: |
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-writer-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/writer-proof.json
+          sha256sum -c /tmp/ndg-managed-reader-evidence/source-inputs.sha256
           cd /tmp/ndg-managed-reader-evidence
           sha256sum -c probe-before.sha256
-          sha256sum probe.test probe-before.sha256 source-sha.txt kernel.txt build-info.txt proof.json writer-proof.json > SHA256SUMS
+          sha256sum probe.test probe-before.sha256 source-sha.txt source-inputs.sha256 kernel.txt build-info.txt proof.json writer-proof.json > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: private-managed-object-proof-${{ matrix.architecture }}
