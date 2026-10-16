@@ -79,7 +79,7 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 验证计划分层：本机 Go 测试使用新生成证书和真实 TLS socket，覆盖 Host／Origin／SNI、明文伪造 Header、危险路由、连接上限和关闭；原生 AMD64/ARM64 CI 另以专属非 root 账户运行实际候选二进制，检查 root-owned 配置／密钥、内核线程身份、真实 TLS 及五类启动拒绝。CI 脚本仅允许 GitHub-hosted 临时 runner，证书／私钥不进入发行或 CI 下载资产。这些不是实际 NAS、可信浏览器证书、核心端到端扫描或正式 FPK 生命周期验收。
 
-**当前没有运行中的新 HTTPS 服务。** 以下补充保留真实尝试、拒绝原因和回滚结果，不能再把状态概括为“从未部署”。既有 Nginx 配置不得重试覆盖。fnOS 正式支持、手机、NAS 重启、升级及完整治理仍未通过。
+原 unit 尝试结束时没有运行中的新 HTTPS 服务；下文保留当时的拒绝与回滚，随后记录修订策略的实际结果。既有 Nginx 配置不得重试覆盖。fnOS 正式支持、手机、NAS 整机重启、升级及完整治理仍未通过。
 
 ## 2026-10-16 已授权的原生 HTTPS 尝试：启动拒绝，完整回滚
 
@@ -99,4 +99,22 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 该证明在精确 HEAD `daf92497d6439795cef5bf06a3d44df2227f660d` 的 [原生运行 38877496884](https://github.com/FNB2026/nas-data-governance/actions/runs/38877496884) 双架构通过；26 份下载文件的摘要、journal 和回执已经独立审定。两端都先建立真实反例，再得到修订策略的 EACCES／EROFS／EPERM 拒绝和对象守恒；冻结二进制实际 TLS／线程身份、同设备同 inode 挂载拒绝及完整清理均通过。意外继承的只读 regular／memfd 也实际拒绝，失败日志独立于 fixture 保留。通过范围仅为 **GitHub-hosted native systemd proof**，不是 NAS、浏览器或发行验收。
 
-新策略尚未部署到 NAS。后续仍须在 fnOS 的 systemd 252 下验证精确策略，完成实际 TLS／权限与真实 GUI 门禁，并处理修订主机策略所需的授权；任一不支持、反例不能建立、映射错误或保护缺失均保留失败。公开 Docker Preview.1、Mac beta.11 和历史 RED 证据保持不变。
+原生证明完成当时尚未部署新策略；后续在所有者已授权的相同局域网、冻结二进制及自有隔离核心范围内继续兼容修复和现场验收，没有扩大永久服务、网络入口、数据访问或治理写入。公开 Docker Preview.1、Mac beta.11 和历史 RED 证据保持不变。
+
+## 2026-10-16 修订策略实机与 Chrome：有限只读验收通过
+
+现场保持原 `cde4c01` AMD64 二进制和专用证书不变，unit SHA-256 为 `fc4a6b5b0df855d375fcccaeb4ac6af1a68ef29d252fb22e92b11929f16a00d2`。r5 因 stderr 非空、r6 因诊断差异在静态核验阶段停止，均完整回滚，未运行探针或切换核心。核对原文后确认：无关系统 target 的 44 行厂商诊断之外，候选 Docker 依赖展开新增了 rc-local 的旧选项及 docker.service 可执行位两行厂商诊断；它们并非基线相同行的重复。原误述及更正保留。r7 同时固定两份完整 stderr 摘要并要求退出码零，任何变化拒绝；没有忽略 NDG 的未知属性／系统调用或修改厂商文件。
+
+实际 fnOS systemd 252 下先运行无 TCP 监听的短命自有探针，仅持有新人工对象。普通 owner 的真实修改基线成功，精确策略随后拒绝 `/proc/root/cwd/fd` 路径、SCM_RIGHTS 入口、文件创建／截断／改权限、memfd、io_uring、ptrace 及新 namespace；字节／模式／inode 守恒，探针完整清理后才允许切换核心 Origin。实际网关全部线程以专属 UID/GID、零 capabilities、NoNewPrivs、seccomp 和独立用户 namespace 运行，根、临时目录及私有 dev 只读，没有普通文件／目录的遗留打开 FD。
+
+真实客户端直连验证公有证书链、名称及 HTTPS 200。认证与会话失效、缺失／错误 CSRF、Host／Origin／跨站请求、编码越界、伪造转发头、明文及危险三路由均按预期拒绝。错误 SNI 收到明确的服务端 `TLSV1_ALERT_INTERNAL_ERROR`；客户端自行拒绝错主机名不计作服务端证明。Cookie 采用应用专属名称、Host-only、Secure／HttpOnly／SameSite=Strict；Chrome 首次访问前父域数据过滤为零，NAS IP Cookie 不匹配此 DNS Origin。
+
+实际 Chrome 显示“连接是安全的”，未绕过警告；错误登录有明确文案，正常登录后拒绝密码保存提示。来源 A 实际经历扫描中到完成，7 文件／3 组；键盘切换来源 B 并实际扫描，3 文件／1 组。完成 checkpoint 的继续请求明确拒绝，**不认证扫描中途断点恢复**。重启自身 HTTPS 服务后会话和结果仍可用；重启隔离核心后旧会话安全失效，重新登录后两源快照保留。退出并完整刷新后仍未登录。UI 继续明确只读、最多 200 组且不显示文件名／路径。
+
+该 Mac 的既有出站代理会让此局域网域名连接失败：直连 TLS 200，经代理 CONNECT 200 后 TLS 超时，Chrome 最初显示 ERR_CONNECTION_CLOSED。所有者另行明确授权仅临时追加该域名的 Wi-Fi 代理绕过项，验收后已核对并恢复原 8 项列表。**当前原代理仍不兼容此域名，后续客户端须具备获准的局域网直连路径；没有永久修改客户端或 NAS 网络。**
+
+前后 10 个源文件 SHA-256 相同，原有 15 个容器和 8 个网络基线未变。当前核心 stdout／stderr 及本次网关进程应用日志为零字节；不补认证已删除旧容器的完整历史日志。小人工数据下网关 memory.current 约 11 MB、memory.peak 约 13.3 MB，核心约 6.1 MiB；不代表大规模负载、长期泄漏或 GUI 延迟认证。
+
+最低权限、证书、Cookie、认证／CSRF、真实 GUI 和守恒门禁经独立审定无剩余安全阻断后，按原授权仅对同一服务执行 enable；前后 unit／二进制身份不变，实际 active／enabled，仍仅绑定原显式局域网 IP／端口。这只证明启用配置，不代表完成 NAS 整机重启测试。
+
+当前仅为自有隔离环境中的只读开发候选。完整安装／原位升级、扫描中途断点恢复、手机、NAS 整机重启、完整 25 项 UX、长期性能及完整治理仍未认证，证书没有自动续期。保持实验性平台状态，不重写公开 Preview.1 的原验收与支持范围，也不开放 Quarantine／Restore／Purge。一次性 frozen systemd CI 仅在此候选分支或手动运行；其他分支跳过即为 NOT_RUN，不能沿用旧 PASS，也不能替代后续 unit／loader 变化所需的新证明。

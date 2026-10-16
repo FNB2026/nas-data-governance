@@ -1,10 +1,10 @@
 # NDG 多渠道实时执行台账
 
-## 2026-10-15 公开发行及下一目标（当前有效）
+## 2026-10-16 公开发行及下一目标（当前有效）
 
 - **macOS**：[v0.5.0-beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11) 已公开；具有经审批的有限 Quarantine/Restore，Purge 当前禁用。新 Governance UX v2 正向源核验仍 [#111 BLOCKED](https://github.com/FNB2026/nas-data-governance/issues/111)，[#112](https://github.com/FNB2026/nas-data-governance/pull/112) 经独立限定复审和八项 CI 后已合并为 `65b49a8`；开发 profile 与研究记录不认证完整 B-2 或 #111。
 - **Linux Docker**：[v0.5.0-docker-preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1) 已公开；GHCR 固定 OCI index `sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1`。仅本地文件只读扫描/断点/有限聚合 Web，不含 Quarantine/Restore/Purge。
-- **fnOS**：宿主 Docker/Compose 限定真实测试 PASS，但 `AllowTcpForwarding=no` 导致客户端入口 BLOCKED；尚无已认证的完整 fnOS 发行。
+- **fnOS**：独立只读 HTTPS 开发候选已在 AMD64 实机完成有限 Chrome 登录／扫描／退出、服务及核心重启、权限与 TLS／Cookie／CSRF 验收，详见 [真实记录](../development/FNOS-CGI-ENTRY-2026-10-15.md)。仍为实验性，完整安装／升级、中途断点恢复、手机及 NAS 整机重启未认证；代理客户端需为局域网域名设置直连。公开 Preview.1 原 SSH 入口的 BLOCKED 证据及发行资产保留，尚无完整 fnOS 发行。
 - **当前执行顺序**：fnOS 正常浏览器安装/访问优先，统一治理核心与 Docker 完整版、Mac 后续候选分渠道推进；FPK 不阻挡 Compose。新写入能力的公开发行需另行集中批准。
 - **用户当前下一目标**：桌面与 Docker 均实现有完整权限和审计保障的 Quarantine → Restore → 经单独高风险授权的 Purge；同时更新 README、链接、图标和 GitHub 仓库 metadata。两个端的写入验收分别完成；不得将开发中能力宣传为已发布。
 - 历史发行/安全 FAIL、INCONCLUSIVE 和旧快照保留在下文；此节代表当前产品入口状态。GitHub 正式 Tag、资产和已发布镜像均不可原地改写。

@@ -80,6 +80,9 @@ jobs:
           path: /tmp/ndg-cgi-candidate/
           retention-days: 30
   frozen-systemd-proof:
+    # One-time frozen-candidate evidence, not a permanent dependency on an
+    # expiring Actions artifact. Future skips mean NOT_RUN for this proof.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'codex/fnos-web-entry'
     permissions:
       contents: read
       actions: read

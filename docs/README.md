@@ -1,6 +1,6 @@
 # 文档索引
 
-当前公开版本：**[macOS beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11)**、**[Linux Docker 只读 Preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1)**。Docker 暂不支持隔离、恢复或永久删除，fnOS 客户端入口仍 BLOCKED。详情见 [仓库首页](../README.md)。
+当前公开版本：**[macOS beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11)**、**[Linux Docker 只读 Preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1)**。Docker 暂不支持隔离、恢复或永久删除。fnOS 的 [独立只读 HTTPS 开发候选](development/FNOS-CGI-ENTRY-2026-10-15.md) 已完成有限真实浏览器验收，仍非已发布安装版或完整平台认证；公开 Preview.1 原有入口限制保留。详情见 [仓库首页](../README.md)。
 
 文档按规范基线、架构决策、实施方案、专题提案及历史材料组织。遵守 `AGENTS.md` 与 ADR。旧文档内的 Draft/未发布状态属于当时的历史快照，不是当前发行裁定。
 
