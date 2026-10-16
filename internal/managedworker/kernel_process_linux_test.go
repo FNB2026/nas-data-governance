@@ -5,11 +5,16 @@ package managedworker
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/FNB2026/nas-data-governance/internal/managedfs"
@@ -74,6 +79,11 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		}
 		_ = conn.Close()
 		emit(map[string]any{"state": "PASS", "category": "dialed", "uid": os.Geteuid()})
+	case "pending":
+		// Begins a real SealCopy, announces readiness from inside the copy,
+		// then waits: the driver SIGKILLs this process at that exact point so
+		// the next worker meets a root with a durable pending intent.
+		pendingMode(t, layout, subject, input.Root, input.State, input.Bootstrap)
 	case "hold":
 		// Holds the lease while the driver tries to start a second worker.
 		if err := RequireSubject(subject); err != nil {
@@ -195,6 +205,81 @@ func rootMode(t *testing.T, root, state string, bootstrap bool) {
 		t.Fatal("writer close failed", err)
 	}
 	emit(map[string]any{"state": "PASS", "category": "ready_root"})
+}
+
+// blockedCopy announces entry from inside SealCopy's read loop and then never
+// returns. Entry happens after the root Pending marker and the catalog intent
+// are durable, so a kill at that point genuinely leaves the root uncertain.
+type blockedCopy struct {
+	entered chan struct{}
+	once    sync.Once
+	block   chan struct{}
+}
+
+func (b *blockedCopy) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.block
+	return 0, io.EOF
+}
+
+func pendingMode(t *testing.T, layout Layout, subject Subject, root, state string, bootstrap bool) {
+	t.Helper()
+	ctx := context.Background()
+	if err := RequireSubject(subject); err != nil {
+		t.Fatal("subject refused", err)
+	}
+	if err := RequireLayout(layout, subject); err != nil {
+		t.Fatal("layout refused", err)
+	}
+	lease, err := AcquireLease(layout.Run, subject)
+	if err != nil {
+		t.Fatal("lease refused", err)
+	}
+	defer func() { _ = lease.Release() }()
+	proofPath := filepath.Join(state, "root-proof.json")
+	if bootstrap {
+		proof, err := managedfs.Initialize(ctx, root)
+		if err != nil {
+			t.Fatal("bootstrap refused", err)
+		}
+		raw, err := json.Marshal(proof)
+		if err != nil {
+			t.Fatal("proof encoding failed", err)
+		}
+		if err := os.WriteFile(proofPath, raw, 0o600); err != nil {
+			t.Fatal("proof persistence failed", err)
+		}
+		if err := os.Chmod(proofPath, 0o600); err != nil {
+			t.Fatal("proof ownership failed", err)
+		}
+	}
+	raw, err := os.ReadFile(proofPath)
+	if err != nil {
+		t.Fatal("persisted proof unavailable", err)
+	}
+	var proof managedfs.RootProof
+	if json.Unmarshal(raw, &proof) != nil {
+		t.Fatal("persisted proof malformed")
+	}
+	w, err := managedfs.OpenWriter(ctx, root, proof)
+	if err != nil {
+		t.Fatal("writer refused", err)
+	}
+	source := &blockedCopy{entered: make(chan struct{}), block: make(chan struct{})}
+	auth := strings.Repeat("b", 64)
+	digest := sha256.Sum256([]byte("synthetic pending input"))
+	spec := managedfs.CopySpec{
+		Size:                int64(len("synthetic pending input")),
+		SHA256:              hex.EncodeToString(digest[:]),
+		AuthorizationSHA256: auth,
+	}
+	go func() {
+		_, _ = w.SealCopy(ctx, source, spec)
+	}()
+	<-source.entered
+	emit(map[string]any{"state": "READY", "pid": os.Getpid()})
+	// Stay alive with the lease and the pending root until the driver kills us.
+	<-source.block
 }
 
 func emit(value map[string]any) {

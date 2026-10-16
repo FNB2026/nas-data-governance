@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import pwd
 import select
+import shutil
+import signal
 import subprocess
 import sys
 import uuid
@@ -58,13 +60,15 @@ def main():
     os.chown(base, worker, worker)
     results = []
 
-    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path=''):
+    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None):
+        """owner defaults to the worker, but a dialer must be able to read its
+        own config, so each probe file is owned by the identity that runs it."""
         path = base / (name + '.json')
         payload = {'mode': mode, 'run': str(run_dir), 'state': str(state_dir), 'root': root,
                    'socket': socket_path, 'bootstrap': bootstrap,
                    'worker_uid': worker, 'worker_gid': worker,
                    'caller_uid': caller, 'caller_gid': caller}
-        private(path, json.dumps(payload).encode(), worker)
+        private(path, json.dumps(payload).encode(), worker if owner is None else owner)
         return path
 
     def handshake(process, label):
@@ -94,16 +98,20 @@ def main():
             process.kill()
             process.communicate(timeout=10)
 
-    def layout(name, shared=False):
+    def layout(name, foreign_writable=False):
+        # The run directory is traversable on purpose: a peer must be able to
+        # reach the socket before its credentials can be examined. It stays
+        # unwritable by anyone but the worker. State is strictly private.
         area = base / name
         area.mkdir(mode=0o700)
         run_dir, state_dir = area / 'run', area / 'state'
+        run_dir.mkdir(mode=0o755)
+        state_dir.mkdir(mode=0o700)
         for directory in (run_dir, state_dir):
-            directory.mkdir(mode=0o700)
             os.chown(directory, worker, worker)
         os.chown(area, worker, worker)
-        if shared:
-            os.chmod(run_dir, 0o755)
+        if foreign_writable:
+            os.chmod(run_dir, 0o777)
         return run_dir, state_dir
 
     def record(case, ok, note=''):
@@ -124,7 +132,7 @@ def main():
         # first, which SO_PEERCRED must refuse, then the authorized Web UID.
         for label, uid in (('outsider', outsider), ('caller', caller)):
             dialer = launch(probe_config('dial-' + label, 'dial', run_dir, state_dir,
-                                         socket_path=socket_path), uid)
+                                         socket_path=socket_path, owner=uid), uid)
             try:
                 outcome = handshake(dialer, 'dial-' + label)
                 remaining, errors = dialer.communicate(timeout=20)
@@ -215,8 +223,103 @@ def main():
     finally:
         settle(partial)
 
-    # --- 7: a shared directory is not a worker layout ---
-    shared_run, shared_state = layout('shared', shared=True)
+    # --- 8: SIGKILL mid-operation leaves a root the next worker must refuse ---
+    crash_run, crash_state = layout('crash')
+    crash_root = crash_state / 'managed'
+    boot = launch(probe_config('crash-boot', 'root', crash_run, crash_state,
+                               root=str(crash_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'crash-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'crash bootstrap failed'
+        assert outcome['category'] == 'bootstrap', outcome.get('category')
+    finally:
+        settle(boot)
+
+    # Start a real SealCopy and kill the worker from inside the copy, after the
+    # root Pending marker and the catalog intent are already durable.
+    victim = launch(probe_config('crash-victim', 'pending', crash_run, crash_state,
+                                 root=str(crash_root)), worker)
+    try:
+        ready = handshake(victim, 'crash-victim')
+        assert ready['state'] == 'READY', 'pending worker did not start'
+        identity(ready['pid'], worker)
+        os.kill(ready['pid'], signal.SIGKILL)
+        victim.wait(timeout=20)
+        assert victim.returncode == -signal.SIGKILL or victim.returncode < 0, 'victim was not killed'
+        record('worker_killed_mid_operation', True, 'SIGKILL delivered inside SealCopy')
+    finally:
+        settle(victim)
+
+    # The lease is released by the kernel on death, so a new worker can take
+    # it; what must not happen is that new worker opening the pending root.
+    after = launch(probe_config('crash-after', 'root', crash_run, crash_state,
+                                root=str(crash_root)), worker)
+    try:
+        outcome = handshake(after, 'crash-after')
+        remaining, errors = after.communicate(timeout=20)
+        assert after.returncode == 0 and errors == b'', 'post-crash child failed'
+        record('worker_refuses_pending_root_after_crash',
+               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+    finally:
+        settle(after)
+
+    # --- 9: a replaced managed-root directory is not the recorded one ---
+    swap_run, swap_state = layout('swap')
+    swap_root = swap_state / 'managed'
+    boot = launch(probe_config('swap-boot', 'root', swap_run, swap_state,
+                               root=str(swap_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'swap-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'swap bootstrap failed'
+    finally:
+        settle(boot)
+    # Replace the objects directory with a fresh one: the stored child identity
+    # in control.json no longer describes what is on disk.
+    shutil.rmtree(swap_root / 'objects')
+    (swap_root / 'objects').mkdir(mode=0o700)
+    os.chown(swap_root / 'objects', worker, worker)
+    swapped = launch(probe_config('swap-after', 'root', swap_run, swap_state,
+                                  root=str(swap_root)), worker)
+    try:
+        outcome = handshake(swapped, 'swap-after')
+        remaining, errors = swapped.communicate(timeout=20)
+        assert swapped.returncode == 0 and errors == b'', 'post-swap child failed'
+        record('worker_refuses_replaced_root',
+               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+    finally:
+        settle(swapped)
+
+    # --- 10: a mount change over the root is detected, not followed ---
+    mount_run, mount_state = layout('mount')
+    mount_root = mount_state / 'managed'
+    boot = launch(probe_config('mount-boot', 'root', mount_run, mount_state,
+                               root=str(mount_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'mount-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'mount bootstrap failed'
+    finally:
+        settle(boot)
+    decoy = mount_state / 'decoy'
+    decoy.mkdir(mode=0o700)
+    os.chown(decoy, worker, worker)
+    run('mount', '--bind', str(decoy), str(mount_root))
+    remounted = launch(probe_config('mount-after', 'root', mount_run, mount_state,
+                                    root=str(mount_root)), worker)
+    try:
+        outcome = handshake(remounted, 'mount-after')
+        remaining, errors = remounted.communicate(timeout=20)
+        assert remounted.returncode == 0 and errors == b'', 'post-mount child failed'
+        record('worker_refuses_changed_mount',
+               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+    finally:
+        settle(remounted)
+        run('umount', str(mount_root))
+
+    # --- 11: a foreign-writable run directory is not a worker layout ---
+    shared_run, shared_state = layout('shared', foreign_writable=True)
     process = launch(probe_config('shared', 'serve', shared_run, shared_state), worker)
     try:
         remaining, errors = process.communicate(timeout=30)

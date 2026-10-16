@@ -43,7 +43,10 @@ func Listen(layout Layout, want Subject, callers []Subject) (*Listener, error) {
 	if err != nil {
 		return nil, ErrIsolation
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	// Any local process may reach the socket; admission is decided only by the
+	// kernel-attested peer credentials. A restrictive mode here would stop an
+	// outsider at the filesystem and make the credential check untestable.
+	if err := os.Chmod(path, 0o666); err != nil {
 		_ = ln.Close()
 		return nil, ErrIsolation
 	}

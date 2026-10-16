@@ -96,22 +96,43 @@ func TestRequireLayoutRefusesSharedOrMissingDirectories(t *testing.T) {
 	}
 }
 
-// A directory another account could traverse is not a private worker layout,
-// even though this process owns it.
-func TestRequireLayoutRefusesGroupOrWorldAccessibleDirectory(t *testing.T) {
+// The managed-root directory stays strictly private. The run directory is
+// deliberately traversable, so only State is checked here.
+func TestRequireLayoutKeepsStateStrictlyPrivate(t *testing.T) {
 	want := workerSubject(t)
 	path := privateDir(t)
-	if err := os.Chmod(path, 0o750); err != nil {
+	for _, mode := range []os.FileMode{0o750, 0o755, 0o700} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal("chmod failed", err)
+		}
+		got := RequireLayout(Layout{Run: privateDir(t), State: path}, want)
+		if mode == 0o700 && got != nil {
+			t.Fatal("private state refused", got)
+		}
+		if mode != 0o700 && !errors.Is(got, ErrIsolation) {
+			t.Fatal("accessible state accepted", mode, got)
+		}
+	}
+}
+
+// The run directory is reachable on purpose, but it must never be writable by
+// anyone else, or a foreign process could plant a socket or a lease there.
+func TestRequireLayoutRefusesGroupOrWorldWritableRunDirectory(t *testing.T) {
+	want := workerSubject(t)
+	path := privateDir(t)
+	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal("chmod failed", err)
 	}
-	if got := RequireLayout(Layout{Run: path, State: privateDir(t)}, want); !errors.Is(got, ErrIsolation) {
-		t.Fatal("group-readable directory accepted", got)
-	}
-	if err := os.Chmod(path, 0o700); err != nil {
-		t.Fatal("chmod restore failed", err)
-	}
 	if got := RequireLayout(Layout{Run: path, State: privateDir(t)}, want); got != nil {
-		t.Fatal("restored directory refused", got)
+		t.Fatal("traversable run directory refused", got)
+	}
+	for _, mode := range []os.FileMode{0o775, 0o757, 0o777} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal("chmod failed", err)
+		}
+		if got := RequireLayout(Layout{Run: path, State: privateDir(t)}, want); !errors.Is(got, ErrIsolation) {
+			t.Fatal("foreign-writable run directory accepted", mode, got)
+		}
 	}
 }
 
@@ -156,17 +177,27 @@ func TestAcquireLeaseIsSingleInstance(t *testing.T) {
 	}
 }
 
-func TestAcquireLeaseRefusesForeignDirectory(t *testing.T) {
+func TestAcquireLeaseRefusesForeignWritableDirectory(t *testing.T) {
 	want := workerSubject(t)
 	dir := privateDir(t)
 	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal("chmod failed", err)
+	}
+	// Reachable is intentional; writable by others is not.
+	if lease, err := AcquireLease(dir, want); lease != nil || err != nil {
+		if lease != nil {
+			_ = lease.Release()
+		}
+		t.Fatal("traversable lease directory refused", err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal("chmod failed", err)
 	}
 	if lease, err := AcquireLease(dir, want); lease != nil || !errors.Is(err, ErrIsolation) {
 		if lease != nil {
 			_ = lease.Release()
 		}
-		t.Fatal("lease taken in a shared directory", err)
+		t.Fatal("lease taken in a foreign-writable directory", err)
 	}
 }
 
@@ -228,9 +259,10 @@ func TestListenAcceptsAuthorizedPeerAndReportsIdentity(t *testing.T) {
 	if ln.Addr() != filepath.Join(layout.Run, SocketName) {
 		t.Fatal("socket path mismatch", ln.Addr())
 	}
+	// Reachable by any local process: admission is the peer credential alone.
 	info, err := os.Lstat(ln.Addr())
-	if err != nil || info.Mode()&0o7777 != 0o600 {
-		t.Fatal("socket is not owner-only", err)
+	if err != nil || info.Mode()&0o7777 != 0o666 {
+		t.Fatal("socket is not reachable by a peer", err)
 	}
 	done := make(chan error, 1)
 	go func() {

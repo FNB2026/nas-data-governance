@@ -32,6 +32,12 @@ var (
 	ErrBusy = errors.New("managed worker already running")
 	// ErrProtocol covers malformed, oversized or unauthorized request shapes.
 	ErrProtocol = errors.New("managed worker protocol violation")
+	// ErrAuthorization is returned for every operation that would create,
+	// inspect or destroy a managed object. Admission to the socket is not
+	// approval of a business action: they are deliberately separate gates, so
+	// an authorized caller still cannot delete anything until the approval,
+	// retention and keeper contracts exist and are checked here.
+	ErrAuthorization = errors.New("managed worker operation not authorized")
 )
 
 // Subject is a fixed process identity. UID and GID must both be non-zero: the

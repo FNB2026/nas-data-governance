@@ -23,7 +23,7 @@ func AcquireLease(dir string, want Subject) (*Lease, error) {
 	if err := RequireSubject(want); err != nil {
 		return nil, err
 	}
-	if err := privateDirectory(dir, want); err != nil {
+	if err := ipcDirectory(dir, want); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, LeaseName)
