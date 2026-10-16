@@ -32,6 +32,13 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def stamp(path):
+    st = path.lstat()
+    return {'device': st.st_dev, 'inode': st.st_ino, 'mode': st.st_mode, 'uid': st.st_uid,
+            'gid': st.st_gid, 'links': st.st_nlink, 'size': st.st_size,
+            'mtime_ns': st.st_mtime_ns, 'ctime_ns': st.st_ctime_ns, 'sha256': sha(path)}
+
+
 def opaque(value):
     return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
 
@@ -74,7 +81,7 @@ def main():
         area = base / uuid.uuid4().hex
         area.mkdir(mode=0o700); os.chown(area, uid, uid)
         private(area / 'source', SOURCE, uid)
-        cfg = {'area': str(area), 'mode': 'prepare'}
+        cfg = {'area': str(area), 'mode': 'prepare', 'source_identity': stamp(area / 'source')}
         process = launch(cfg)
         try:
             result = line(process)
@@ -100,10 +107,18 @@ def main():
     def protected(area, cfg, selected=None):
         root = selected or area / 'root'
         assert (area / 'source').read_bytes() == SOURCE
-        assert (root / 'objects' / cfg['keeper']['object_id']).read_bytes() == KEEPER
+        assert stamp(area / 'source') == cfg['source_identity']
+        keeper = root / 'objects' / cfg['keeper']['object_id']
+        assert keeper.read_bytes() == KEEPER
+        st = keeper.lstat()
+        proof = cfg['keeper']
+        assert (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_nlink,
+                st.st_uid, st.st_gid, st.st_mode) == (proof['device'], proof['inode'], proof['size'],
+                proof['mtime_sec'] * 10**9 + proof['mtime_nsec'], proof['ctime_sec'] * 10**9 + proof['ctime_nsec'],
+                1, uid, uid, 0o100600)
 
-    def state(area):
-        root = area / 'root'
+    def state(area, selected=None):
+        root = selected or area / 'root'
         control = json.loads((root / 'control.json').read_bytes())
         db = sqlite3.connect('file:' + str(root / 'catalog.sqlite') + '?mode=ro', uri=True)
         try:
@@ -153,21 +168,43 @@ def main():
     # descriptors are open. This tests admission refusal, not immunity to
     # privileged remounts during an excluded final mutation window.
     for case in ('late-objects-bind', 'late-staging-bind', 'late-file-bind', 'late-lock-bind',
-                 'late-catalog-bind', 'late-wal-bind', 'late-shm-bind', 'late-root-bind', 'late-root-replacement'):
+                 'late-catalog-bind', 'late-wal-bind', 'late-shm-bind', 'late-root-bind', 'late-root-replacement',
+                 'late-dirty-wal-root-replacement'):
         area, cfg = prepared()
-        process = launch({**cfg, 'mode': 'purge', 'expected': 'refused'})
+        dirty = case == 'late-dirty-wal-root-replacement'
+        process = launch({**cfg, 'mode': 'purge', 'expected': 'refused',
+                          'stop_at': 'catalog.begin.after' if dirty else ''})
         mount = None
         guards = {}
         try:
             assert line(process) == {'state': 'READY'}
             identity(process.pid, uid)
             root = area / 'root'
-            if case == 'late-root-replacement':
+            main_before = None
+            wal_before = None
+            if dirty:
+                process.stdin.write(b'execute\n'); process.stdin.flush()
+                assert line(process) == {'state': 'BOUNDARY', 'at': 'catalog.begin.after'}
+                wal_before = (root / 'catalog.sqlite-wal').stat().st_size
+                assert wal_before > 0, 'dirty WAL was not exercised'
+                assert state(area) == {'root_epoch': 3, 'root_pending': True, 'catalog_epoch': 3,
+                                       'catalog_pending': True, 'operations': {'COMPLETE': 2, 'PENDING': 1}}
+                # The worker is paused after commit, with no other writer or
+                # auto-checkpoint. This diagnostic view deliberately ignores
+                # WAL to prove that the committed intent is not in main yet.
+                main_only = sqlite3.connect('file:' + str(root / 'catalog.sqlite') + '?mode=ro&immutable=1', uri=True)
+                try:
+                    assert main_only.execute('SELECT epoch,pending FROM identity WHERE id=1').fetchone() == (2, '')
+                    assert main_only.execute('SELECT status,count(*) FROM operations GROUP BY status').fetchall() == [('COMPLETE', 2)]
+                finally:
+                    main_only.close()
+                main_before = sha(root / 'catalog.sqlite')
+            if case in ('late-root-replacement', 'late-dirty-wal-root-replacement'):
                 root.rename(area / 'original-root')
                 root.mkdir(mode=0o700); os.chown(root, uid, uid)
                 for name in ('catalog.sqlite', 'catalog.sqlite-wal', 'catalog.sqlite-shm', 'control.json', 'writer.lock'):
                     private(root / name, b'synthetic replacement keeper must stay unchanged', uid)
-                    guards[root / name] = sha(root / name)
+                    guards[root / name] = stamp(root / name)
             else:
                 target = {'late-objects-bind': root / 'objects', 'late-staging-bind': root / 'staging',
                           'late-file-bind': root / 'objects' / cfg['target']['object_id'],
@@ -177,15 +214,26 @@ def main():
                 before = target.stat()
                 run('mount', '--bind', str(target), str(target)); mount = target
                 assert (target.stat().st_dev, target.stat().st_ino) == (before.st_dev, before.st_ino)
-            process.stdin.write(b'execute\n'); process.stdin.flush()
+            process.stdin.write(b'continue\n' if dirty else b'execute\n'); process.stdin.flush()
             assert line(process) == {'state': 'PASS', 'category': 'refused'}
             finish(process)
-            assert all(sha(path) == expected for path, expected in guards.items()), 'Close touched replacement keepers'
+            assert all(stamp(path) == expected for path, expected in guards.items()), 'Close touched replacement keepers'
             selected = area / 'original-root' if guards else root
             protected(area, cfg, selected)
             assert (selected / 'objects' / cfg['target']['object_id']).read_bytes() == TARGET
-            results.append({'case': case, 'result': 'PASS', 'source_keeper_target_unchanged': True,
-                            'replacement_close_guards_unchanged': bool(guards)})
+            result = {'case': case, 'result': 'PASS', 'source_keeper_target_unchanged': True,
+                      'replacement_close_guards_unchanged': bool(guards)}
+            if guards:
+                assert set(root.iterdir()) == set(guards), 'Close changed replacement namespace'
+            if dirty:
+                current = state(area, selected)
+                assert current == {'root_epoch': 3, 'root_pending': True, 'catalog_epoch': 3,
+                                   'catalog_pending': True, 'operations': {'COMPLETE': 2, 'PENDING': 1}}
+                result.update({'state': current, 'pre_close_wal_epoch': 3, 'pre_close_main_epoch': 2,
+                               'wal_bytes_before_close': wal_before,
+                               'wal_bytes_after_close': (selected / 'catalog.sqlite-wal').stat().st_size,
+                               'original_catalog_checkpoint_observed': sha(selected / 'catalog.sqlite') != main_before})
+            results.append(result)
         finally:
             if process.poll() is None:
                 process.kill(); process.communicate(timeout=5)

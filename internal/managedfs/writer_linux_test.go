@@ -25,7 +25,13 @@ func initialized(t *testing.T) (string, RootProof) {
 	if os.Geteuid() == 0 || os.Getegid() == 0 {
 		t.Skip("non-root worker required")
 	}
-	path := filepath.Join(t.TempDir(), "execution")
+	// Go's numbered TempDir child uses 0777 filtered by the process umask;
+	// that is not the explicit private parent required by Initialize.
+	parent := filepath.Join(t.TempDir(), "worker")
+	if os.Mkdir(parent, 0700) != nil {
+		t.Fatal("private parent fixture failed")
+	}
+	path := filepath.Join(parent, "execution")
 	proof, err := Initialize(testContext, path)
 	if errors.Is(err, ErrUnsupported) && os.Getenv("NDG_REQUIRE_MANAGED_READER_KERNEL") != "1" {
 		t.Skip("unsupported execution filesystem/kernel")
@@ -96,8 +102,26 @@ func TestWriterSealPurgeReopenAndKeeper(t *testing.T) {
 	if w.control.Epoch != 2 || w.catalogReady(testContext) != nil {
 		t.Fatal("durable completed epoch missing")
 	}
-	if w.Close() != nil || w.Close() != nil || !errors.Is(w.Inspect(testContext, proof), ErrClosed) {
+	firstClose, secondClose := w.Close(), w.Close()
+	if firstClose != nil || secondClose != nil || !errors.Is(w.Inspect(testContext, proof), ErrClosed) {
 		t.Fatal("closed lifetime mismatch")
+	}
+}
+
+func TestInitializeRejectsNonPrivateParent(t *testing.T) {
+	if os.Geteuid() == 0 || os.Getegid() == 0 {
+		t.Skip("non-root worker required")
+	}
+	parent := filepath.Join(t.TempDir(), "public-parent")
+	if os.Mkdir(parent, 0700) != nil || os.Chmod(parent, 0755) != nil {
+		t.Fatal("non-private fixture failed")
+	}
+	path := filepath.Join(parent, "execution")
+	if proof, err := Initialize(testContext, path); proof != (RootProof{}) || !errors.Is(err, ErrRejected) {
+		t.Fatal("non-private parent accepted")
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatal("non-private parent refusal wrote a root")
 	}
 }
 
