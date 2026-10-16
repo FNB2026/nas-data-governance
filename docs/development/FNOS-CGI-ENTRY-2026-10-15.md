@@ -67,7 +67,7 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 本次没有执行候选原位语法核验、代理 reload 或 12 项传输矩阵；不能把它们标成 PASS。NDG 产品仍返回安全拒绝。当前配置内容保持原值，不自动重试或覆盖厂商再生成文件。需要可持续的应用自身入口机制后才能实施可信代理适配器，fnOS 客户端支持仍为 BLOCKED。已公开 Docker Preview.1、Mac beta.11 及其资产均未改变。
 
-## 应用自身终止 TLS 的候选（尚未部署）
+## 应用自身终止 TLS 的候选
 
 厂商代理无法提供所需证明时，另行准备 `cmd/ndg-fnos-https`，在专用 HTTPS Origin 根路径提供同一只读 UI，转发到现有隔离核心。它核验真实 `Request.TLS`、Host 和 POST Origin；不从 Forwarded 或客户端自报 Header 构造 TLS 证明。CGI 的旧门禁不改变。该方案不复用 NAS 登录态：NDG 自身认证及 CSRF 仍由只读核心核验。
 
@@ -79,4 +79,22 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 验证计划分层：本机 Go 测试使用新生成证书和真实 TLS socket，覆盖 Host／Origin／SNI、明文伪造 Header、危险路由、连接上限和关闭；原生 AMD64/ARM64 CI 另以专属非 root 账户运行实际候选二进制，检查 root-owned 配置／密钥、内核线程身份、真实 TLS 及五类启动拒绝。CI 脚本仅允许 GitHub-hosted 临时 runner，证书／私钥不进入发行或 CI 下载资产。这些不是实际 NAS、可信浏览器证书、核心端到端扫描或正式 FPK 生命周期验收。
 
-**目前仅开发实现，实际 NAS 未部署、未新增监听端口。** 需补齐专用域名／证书，独立复审、精确源码 CI 和候选摘要后，再按 A2 集中申请新增受限监听入口的部署授权。既有 Nginx 配置不得重试覆盖。fnOS 正式支持、手机、NAS 重启、升级及完整治理仍未通过。
+**当前没有运行中的新 HTTPS 服务。** 以下补充保留真实尝试、拒绝原因和回滚结果，不能再把状态概括为“从未部署”。既有 Nginx 配置不得重试覆盖。fnOS 正式支持、手机、NAS 重启、升级及完整治理仍未通过。
+
+## 2026-10-16 已授权的原生 HTTPS 尝试：启动拒绝，完整回滚
+
+所有者授权新增专用局域网 HTTPS 服务、安装专用证书和固定 `cde4c012393f6b58787aeed821101319680d7763` 候选，只切换隔离核心的 Origin；安全和实际 GUI 门禁通过前不启用开机启动。域名仍解析到私有局域网地址、Cloudflare 代理关闭。独立签发的专用证书有效期至 `2027-01-14T02:12:38Z`；没有自动续期。当前 Chrome 配置中父域没有网站数据或 Cookie，NAS IP Cookie 不匹配新 DNS Origin。这些不等于实际 NDG TLS 链路已通过。
+
+实际 AMD64 二进制 SHA-256 为 `f73963c9e8381654654963f08f3622530dfda33dd4e05a6033b9215a3f37fbe8`，原部署 unit SHA-256 为 `1ce4d57316875e8de9b58fe7baadaafb3733e81a4df310f49550ff726cfd171d`。执行与回滚脚本独立复审发现并修复了部分安装、服务冲突、核心停止后恢复及清理并发问题，再进行受限真实尝试。**该 unit 启动退出，不是 GUI 验收 PASS。**
+
+对自身候选进程的有界诊断定位到：全部线程 NoNewPrivs 设置成功后，第一个 `openat2` 返回 `ENOSYS`，尚未读取配置内容或创建监听。普通降权进程及无监听阶段探针在同一主机可以完成这些读取。systemd 252 的 [seccomp 实现](https://raw.githubusercontent.com/systemd/systemd/v252/src/shared/seccomp-util.c) 明确在 `RestrictSUIDSGID` 下拒绝 `openat2`，因为无法检查其间接结构中的 mode。原生 `setpriv` CI 没有运行这项 systemd 策略，不能替代服务沙箱验收。
+
+每次尝试都完成守卫回滚：新增文件和监听移除，原 Origin 恢复、核心健康，10 个源文件 SHA-256 不变，原有 15 个容器和 8 个网络基线不变。没有启用开机启动、重启 NAS、修改厂商 Nginx 或开放治理写入。私有完整回执保留，诊断导出不含密钥或源内容；特权会话已退出。真实 NDG 浏览器登录、扫描、退出和重启验收均为 **NOT_RUN**。
+
+### 替代沙箱仅进入封闭证明阶段
+
+[候选 unit](../../packaging/fnos/readonly-https-candidate.service) 不是安装建议或已认证替代物。它研究用不可写的普通文件系统、独立用户 namespace、禁用运行中 FD 接收及匿名文件／namespace 入口来替代不兼容的 SUID 创建过滤；不允许回退到普通路径读取，也不裸删保护后标记成功。
+
+独立审查指出两个必须真实覆盖的反例：同凭据 namespace 外进程的 `/proc/root/cwd/fd` 路径，以及 AF_UNIX／SCM_RIGHTS 传入的可写文件或 memfd。新的 [一次性 systemd 证明脚本](../../scripts/research/fnos-https-systemd-proof.py) 先要求这些反例实际修改人工对象，再验证新精确 profile 的拒绝、字节／模式／inode 守恒、真实线程身份、冻结 `cde` 二进制的 TLS 以及同设备同 inode 自绑定挂载拒绝。脚本只能在一次性 GitHub-hosted Linux 运行，明确拒绝 fnOS；它不会认证 NAS 或浏览器。
+
+该新增证明尚未运行通过。任一不支持、反例不能建立、映射错误或保护缺失均保留失败；新策略不得据此部署到 NAS。后续须完成精确源码检查和独立复审，再形成具体部署更新并处理必要的授权。公开 Docker Preview.1、Mac beta.11 和历史 RED 证据保持不变。

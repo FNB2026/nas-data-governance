@@ -1,0 +1,47 @@
+[Unit]
+Description=NDG isolated read-only HTTPS gateway
+After=network-online.target docker.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ndgreadonlyweb
+Group=ndgreadonlyweb
+SupplementaryGroups=
+ExecStart=/var/apps/ndg-readonly-web/cmd/ndg-fnos-https
+WorkingDirectory=/
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+TemporaryFileSystem=/tmp:ro,nosuid,nodev,noexec /var/tmp:ro,nosuid,nodev,noexec
+ReadOnlyPaths=/dev
+InaccessiblePaths=/dev/shm /dev/mqueue
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+PrivateUsers=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+SystemCallFilter=~memfd_create memfd_secret io_uring_setup io_uring_enter io_uring_register recvmsg recvmmsg pidfd_getfd process_vm_readv process_vm_writev ptrace
+SystemCallErrorNumber=EPERM
+LockPersonality=true
+RestrictAddressFamilies=AF_INET
+UMask=0077
+LimitCORE=0
+LimitNOFILE=256
+MemoryMax=128M
+TasksMax=64
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=8
+KillMode=control-group
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

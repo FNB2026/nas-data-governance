@@ -79,3 +79,44 @@ jobs:
           name: ndg-cgi-candidate-${{ matrix.architecture }}
           path: /tmp/ndg-cgi-candidate/
           retention-days: 30
+  frozen-systemd-proof:
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            architecture: amd64
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require native disposable runner
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+      - name: Download immutable previously verified cde application without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 38842292321 --repo FNB2026/nas-data-governance --name ndg-cgi-candidate-${{ matrix.architecture }} --dir /tmp/ndg-frozen-cde
+          cd /tmp/ndg-frozen-cde
+          sha256sum -c SHA256SUMS
+      - name: Actual systemd counterexamples, readonly namespace, frozen TLS and same-inode bind
+        shell: bash
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-systemd-proof.py packaging/fnos/readonly-https-candidate.service /tmp/ndg-frozen-cde/ndg-fnos-https /tmp/ndg-systemd-evidence | tee /tmp/ndg-systemd-proof.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: ndg-frozen-systemd-proof-${{ matrix.architecture }}
+          path: |
+            /tmp/ndg-systemd-proof.json
+            /tmp/ndg-systemd-evidence/
+          retention-days: 30
