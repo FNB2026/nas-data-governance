@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -20,7 +21,7 @@ import (
 	"time"
 )
 
-func httpsFixture(t *testing.T, name string, expired bool) (HTTPSConfig, []byte, []byte) {
+func httpsFixture(t *testing.T, name string, expired bool, customize ...func(*x509.Certificate)) (HTTPSConfig, []byte, []byte) {
 	t.Helper()
 	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if e != nil {
@@ -31,6 +32,9 @@ func httpsFixture(t *testing.T, name string, expired bool) (HTTPSConfig, []byte,
 		until = time.Now().Add(-time.Minute)
 	}
 	cert := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name}, DNSNames: []string{name}, NotBefore: time.Now().Add(-time.Hour), NotAfter: until, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	for _, change := range customize {
+		change(cert)
+	}
 	der, e := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if e != nil {
 		t.Fatal(e)
@@ -41,6 +45,47 @@ func httpsFixture(t *testing.T, name string, expired bool) (HTTPSConfig, []byte,
 	}
 	cfg := HTTPSConfig{Gateway: Config{AppName: "ndg-test", Origin: "https://ndg.invalid:24483", Upstream: "http://10.98.45.2:8080", PackageUser: "ndgtest", PackageGroup: "ndgtest"}, Listen: "127.0.0.1:24483"}
 	return cfg, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private})
+}
+
+func TestHTTPSCertificateServerUsage(t *testing.T) {
+	unknown := []asn1.ObjectIdentifier{{1, 3, 6, 1, 4, 1, 55555, 1}}
+	for _, tc := range []struct {
+		name    string
+		known   []x509.ExtKeyUsage
+		unknown []asn1.ObjectIdentifier
+		accept  bool
+	}{
+		{"unrestricted", nil, nil, true},
+		{"server", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, nil, true},
+		{"any", []x509.ExtKeyUsage{x509.ExtKeyUsageAny}, nil, true},
+		{"client_only", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, nil, false},
+		{"unknown_only", nil, unknown, false},
+		{"client_and_unknown", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, unknown, false},
+		{"server_and_unknown", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, unknown, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, cert, key := httpsFixture(t, "ndg.invalid", false, func(c *x509.Certificate) {
+				c.ExtKeyUsage, c.UnknownExtKeyUsage = tc.known, tc.unknown
+			})
+			block, _ := pem.Decode(cert)
+			leaf, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			roots := x509.NewCertPool()
+			roots.AddCert(leaf)
+			// Check the independently implemented standard client verifier too:
+			// an unsupported EKU is not an unrestricted certificate.
+			_, clientErr := leaf.Verify(x509.VerifyOptions{DNSName: "ndg.invalid", Roots: roots})
+			if (clientErr == nil) != tc.accept {
+				t.Fatalf("unexpected client certificate validation: %v", clientErr)
+			}
+			_, serverErr := NewHTTPSServer(cfg, cert, key)
+			if (serverErr == nil) != tc.accept {
+				t.Fatalf("startup certificate policy differs from server usage: %v", serverErr)
+			}
+		})
+	}
 }
 
 func TestHTTPSNativeBoundaryOnRealTLSConnection(t *testing.T) {

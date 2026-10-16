@@ -74,7 +74,7 @@ func NewHTTPSServer(c HTTPSConfig, certPEM, keyPEM []byte) (*http.Server, error)
 	if e != nil || leaf.VerifyHostname(name) != nil || time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
 		return nil, ErrRejected
 	}
-	serverUsage := len(leaf.ExtKeyUsage) == 0
+	serverUsage := len(leaf.ExtKeyUsage) == 0 && len(leaf.UnknownExtKeyUsage) == 0
 	for _, usage := range leaf.ExtKeyUsage {
 		serverUsage = serverUsage || usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny
 	}
