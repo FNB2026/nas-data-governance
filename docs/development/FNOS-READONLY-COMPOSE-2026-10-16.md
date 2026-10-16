@@ -102,9 +102,36 @@ installation.env、prepared.json、config/ 与空 state/。
 不带 `-v`，不使用 prune 或默认删除数据，不能按名称前缀批量删除；专属网络仅在无
 任何端点且独立确认归属后才考虑删除。本轮未删除网络或卸载入口，不据此认证整套平台卸载。
 
+## 新准备工具的独立实测结果
+
+源码 `7a841ac84b147af64e9a2802ba1a8621e3ead0e7` 的
+[原生 CI38906780118](https://github.com/FNB2026/nas-data-governance/actions/runs/38906780118)
+在独立 mount namespace 实际建立两种同设备、同 inode bind 别名，初始化均在首次
+写入前拒绝。连同12种输入/权限拒绝、新私有根与口令权限、真实 Compose 解析/true
+对照和来源 inode/SHA 守恒共18项通过。源码文件及下载的全部 artifact 摘要已核对。
+准备证明限 amd64；ARM64 网关回归通过，但准备证明按合同跳过，不能称 ARM fnOS 安装通过。
+
+首轮 `e7b036a` 的 CI38906158531 在解析断言处 KeyError：compose-go 的 bool
+`omitempty` 会省略 false。失败保留；修正要求原四处显式 false、canonical 不能为
+true，并把独立 control 改成 true 经同一真实解析器证明确有 true；未改安全配置或
+弱化为忽略未知字段。此 JSON 格式差异不是运行中缺少路径拒绝的实测，后者仍待独立测试。
+
+原生门禁通过后，在实际 fnOS 的既有授权人工隔离区仅创建一个新私有准备根，
+实测错误 network 名、state 位于 source 内、HTTP Origin 三种请求在写前拒绝；
+正常请求生成 root0700、config/state0700/10001、口令0600/10001且未输出。
+同机 Compose 5.0.2 离线解析固定 image、四 bind、只读来源、无端口、完整 external
+network ID 和新预留 IP。原核心、网关 PID、十个来源及其他容器/网络不变。
+当前核心与该网关 PID 的应用日志仍0字节，不补认证已删除容器历史。
+
+现场回执 SHA-256 `46275e7bb18014e5657e79f09681aa8433c6e63319c8428d5c1572d2c4a013b0`；
+helper SHA-256 `cd1cf60004067579b1b17daf3cc50a55df6de89cd14dfdbd79155fa3a30cee0e`，
+模板 SHA-256 `42d9b7707340f66d63dcb963f6e0ce270f6a0698fa8eb3eacdc6bfd897807366`。
+真实结论为 **PREPARED_NOT_STARTED**，network_verified/image_verified/gateway_installed
+仍为 false；没有借用旧核心的安装 PASS，没有启动新容器/网络/服务。新的随机口令仅
+保留在 NAS 私有准备目录，不在证据导出、仓库或日志中；特权验收会话已显式退出。
+
 ## 仍待验收
 
-新准备工具的真实内核/Compose CI 与现场准备结果将在实际运行后补记；当前没有
-借用上面旧 Compose 的运行 PASS。下一步是完成准备工具验证、可审查的首次引导和
-授权服务安装链路，之后再认证原位升级、完整卸载、手机与整机重启。Quarantine、
-Restore、Purge 继续关闭，完整 fnOS Governance 未交付。
+下一步是可审查的首次引导和授权服务安装链路，之后再认证缺少绑定路径的实际启动
+拒绝、原位升级、完整卸载、手机与整机重启。Quarantine、Restore、Purge 继续关闭，
+完整 fnOS Governance 未交付。
