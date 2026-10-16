@@ -97,4 +97,6 @@ NAS 当前证书是自签名，Chrome 已有用户保留的站点例外。本轮
 
 独立审查指出两个必须真实覆盖的反例：同凭据 namespace 外进程的 `/proc/root/cwd/fd` 路径，以及 AF_UNIX／SCM_RIGHTS 传入的可写文件或 memfd。新的 [一次性 systemd 证明脚本](../../scripts/research/fnos-https-systemd-proof.py) 先要求这些反例实际修改人工对象，再验证新精确 profile 的拒绝、字节／模式／inode 守恒、真实线程身份、冻结 `cde` 二进制的 TLS 以及同设备同 inode 自绑定挂载拒绝。脚本只能在一次性 GitHub-hosted Linux 运行，明确拒绝 fnOS；它不会认证 NAS 或浏览器。
 
-该新增证明尚未运行通过。任一不支持、反例不能建立、映射错误或保护缺失均保留失败；新策略不得据此部署到 NAS。后续须完成精确源码检查和独立复审，再形成具体部署更新并处理必要的授权。公开 Docker Preview.1、Mac beta.11 和历史 RED 证据保持不变。
+该证明在精确 HEAD `daf92497d6439795cef5bf06a3d44df2227f660d` 的 [原生运行 38877496884](https://github.com/FNB2026/nas-data-governance/actions/runs/38877496884) 双架构通过；26 份下载文件的摘要、journal 和回执已经独立审定。两端都先建立真实反例，再得到修订策略的 EACCES／EROFS／EPERM 拒绝和对象守恒；冻结二进制实际 TLS／线程身份、同设备同 inode 挂载拒绝及完整清理均通过。意外继承的只读 regular／memfd 也实际拒绝，失败日志独立于 fixture 保留。通过范围仅为 **GitHub-hosted native systemd proof**，不是 NAS、浏览器或发行验收。
+
+新策略尚未部署到 NAS。后续仍须在 fnOS 的 systemd 252 下验证精确策略，完成实际 TLS／权限与真实 GUI 门禁，并处理修订主机策略所需的授权；任一不支持、反例不能建立、映射错误或保护缺失均保留失败。公开 Docker Preview.1、Mac beta.11 和历史 RED 证据保持不变。
