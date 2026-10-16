@@ -1,0 +1,48 @@
+# Development profile for the separately reviewed native HTTPS gateway.
+# NOT part of the immutable Docker Preview.1 release or an FPK installer.
+# Verify/create a dedicated internal bridge first; this file creates no network.
+services:
+  core:
+    image: ghcr.io/fnb2026/ndg-readonly-preview@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1
+    platform: linux/amd64
+    pull_policy: never
+    container_name: ${NDG_CORE_CONTAINER:?Set an unused installation-specific container name}
+    labels:
+      com.ndg.role: frozen-readonly-core
+      com.ndg.test.nonce: ${NDG_INSTALLATION_ID:?Set the private installation identity}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    restart: unless-stopped
+    networks:
+      core:
+        ipv4_address: ${NDG_CORE_IPV4:?Set the reserved IP in this installation's internal bridge}
+    volumes:
+      - type: bind
+        source: ${NDG_INSTALL_ROOT:?Set the new private installation directory}/config
+        target: /config
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_INSTALL_ROOT:?Set the new private installation directory}/state
+        target: /data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_SOURCE_A:?Set the explicitly authorized first local source}
+        target: /sources/source_a
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_SOURCE_B:?Set the explicitly authorized second local source}
+        target: /sources/source_b
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    stop_grace_period: 60s
+networks:
+  core:
+    external: true
+    name: ${NDG_INTERNAL_NETWORK_ID:?Set the full verified installation-only internal network ID}

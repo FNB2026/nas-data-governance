@@ -1,4 +1,17 @@
-# fnOS packaging research — not installable
+# fnOS development packaging
+
+当前受限只读入口已在一台 fnOS amd64 上通过真实 HTTPS/Chrome 验收。
+核心仍是冻结的公开 Preview.1，网关是独立 cde4c01 开发候选；完整 FPK、
+自动安装、治理写入和整机重启尚未验收。已验证的容器重建和冷备份恢复见
+[Compose 生命周期记录](../../docs/development/FNOS-READONLY-COMPOSE-2026-10-16.md)。
+
+`compose.lan-readonly.yaml` 和 `scripts/packaging/init-fnos-readonly.py` 为独立的
+开发准备工具：仅生成全新私有核心配置，固定镜像、只读来源、无端口、外部专属
+internal 网络。准备状态 `PREPARED_NOT_STARTED` 不证明网络、镜像、网关已部署。
+工具要求可信管理员维护单个配置根的稳定挂载视图，拒绝该根内的嵌套挂载/别名。
+不得把任意 Web 输入直接传给管理员请求文件。通用安装链路仍未交付。
+
+## G5 FPK scaffold — not installable
 
 This separate G5 scaffold uses the structure and fields verified against official
 fnpack 1.2.3 on 2026-10-12. It does not package a working NDG service, create an
