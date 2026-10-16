@@ -9,7 +9,9 @@ import (
 //go:embed webdist
 var webFiles embed.FS
 
-func serveUI(w http.ResponseWriter, r *http.Request) {
+// ServeReadOnlyUI serves only the embedded public read-only UI. API callers
+// must enforce their own routing and authentication boundary.
+func ServeReadOnlyUI(w http.ResponseWriter, r *http.Request) {
 	assets, _ := fs.Sub(webFiles, "webdist")
 	http.FileServer(http.FS(assets)).ServeHTTP(w, r)
 }

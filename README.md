@@ -16,10 +16,12 @@ NDG（NAS Data Governance）面向个人、家庭与组织的数字资产管理�
 | --- | --- | --- | --- |
 | **macOS 桌面** | [v0.5.0-beta.11](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-beta.11) · Public Beta | 扫描、重复候选分析、治理计划、经审批的 Quarantine / Restore | 仅 macOS 13+ / Apple Silicon；Purge 后端禁用；新 Governance UX v2 的 Mac 安全源核验仍在研究 |
 | **Linux Docker** | [v0.5.0-docker-preview.1](https://github.com/FNB2026/nas-data-governance/releases/tag/v0.5.0-docker-preview.1) · Public Technical Preview | 本地源只读扫描、取消/断点恢复、持久化、认证 Web 聚合查看 | AMD64/ARM64；Web 最多展示 200 组；不可执行隔离、恢复、永久删除或治理意图记录 |
-| **fnOS** | 尚无独立公开正式支持版本 | Docker Preview 在 fnOS AMD64 宿主上完成有限隔离测试 | 客户端访问入口仍 BLOCKED；仅为实验性兼容性证据，不代表可直接安装使用 |
+| **fnOS** | 尚无独立公开正式支持版本 | 独立只读 HTTPS 开发候选在 AMD64 主机完成有限 Chrome 实测 | 仍为实验性；不是已发布安装包，升级、手机、NAS 整机重启和完整治理尚未认证；代理客户端需让局域网域名直连 |
 | **Mac App Store / 原生 FPK** | 未发布 | 平台适配研究中 | 不得将工程样例或开发构建视为可安装正式版 |
 
 [全部 GitHub Releases](https://github.com/FNB2026/nas-data-governance/releases) · [Docker 安装与限制](docs/multichannel/DOCKER-READONLY-PREVIEW.md) · [多渠道最新状态](docs/multichannel/RELEASE-STATUS.md) · [能力矩阵](docs/multichannel/CAPABILITY-MATRIX.md)
+
+fnOS 开发候选的 [真实 HTTPS／浏览器验收记录](docs/development/FNOS-CGI-ENTRY-2026-10-15.md) 不改变公开 Preview.1 的资产或原 SSH 入口限制，也不代表完整 fnOS 平台支持。
 
 ## 产品界面
 

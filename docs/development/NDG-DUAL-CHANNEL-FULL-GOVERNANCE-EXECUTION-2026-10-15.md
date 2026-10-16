@@ -7,7 +7,7 @@
 
 **让 Mac 桌面端及 Linux Docker 端均可安全执行：发现重复 → 用户人工决定 → 审批 → Dry Run → Quarantine 隔离 → Restore 恢复 → 满足保留期与单独授权后 Purge 永久清理。**
 
-**当前真实现状：** Mac 公共 beta.11 具有有限 Quarantine/Restore；`internal/app/purge_service.go` 的 `PurgeReleaseAllowed()` 目前恒为 false。新 Governance UX v2 在 Mac 的源正向核验 [#111](https://github.com/FNB2026/nas-data-governance/issues/111) BLOCKED。Docker `0.5.0-docker-preview.1` 为只读服务，Compose 的源目录 `read_only: true` 且 Web 明确禁用治理意图、隔离、恢复和 Purge。fnOS 客户端因现有 SSH 配置禁止 TCP 转发而 BLOCKED。
+**当前真实现状（更新至 2026-10-16）：** Mac 公共 beta.11 具有有限 Quarantine/Restore；`internal/app/purge_service.go` 的 `PurgeReleaseAllowed()` 目前恒为 false。新 Governance UX v2 在 Mac 的源正向核验 [#111](https://github.com/FNB2026/nas-data-governance/issues/111) BLOCKED。Docker `0.5.0-docker-preview.1` 为只读服务，Compose 的源目录 `read_only: true` 且 Web 明确禁用治理意图、隔离、恢复和 Purge。fnOS 公开 Preview.1 的原 SSH 路径仍被主机禁止 TCP 转发；另行开发的 [独立只读 HTTPS 入口](FNOS-CGI-ENTRY-2026-10-15.md) 已完成有限真实 Chrome 验收，尚非完整安装发行或平台认证。
 
 **不要**直接翻转 `PurgeReleaseAllowed()` 或将 Docker 源卷改成 RW 作为“功能完成”。旧公共镜像、Tag、DMG 和验收回执保持不变。
 

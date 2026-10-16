@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Only CI/local disposable containers with fresh owned state; never existing services."""
-import hashlib, http.cookiejar, json, os, pathlib, platform, re, secrets, subprocess, tempfile, time, urllib.request, urllib.error
+import hashlib, http.cookiejar, json, os, pathlib, platform, re, secrets, subprocess, tempfile, time, urllib.request, urllib.error, urllib.parse
 
 def run(*args, check=True):
     return subprocess.run(args, check=check, capture_output=True, text=True, timeout=90)
@@ -47,11 +47,19 @@ with tempfile.TemporaryDirectory(prefix="ndg-disposable-") as temp:
         with client.open(settings["origin"] + "/", timeout=5) as response:
             html = response.read().decode()
             assert response.headers["Content-Security-Policy"] and 'id="root"' in html and "assets not built" not in html
-        assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', html)
+        assets = re.findall(r'(?:src|href)="((?:/|\./)assets/[^\"]+)"', html)
         assert any(asset.endswith(".js") for asset in assets)
+        assert any(asset.endswith(".png") for asset in assets)
         for asset in assets:
-            with client.open(settings["origin"] + asset, timeout=5) as response:
-                assert response.status == 200 and len(response.read()) > 0
+            asset_url = urllib.parse.urljoin(settings["origin"] + "/", asset)
+            parsed = urllib.parse.urlsplit(asset_url)
+            assert asset_url.startswith(settings["origin"] + "/assets/") and not parsed.query and not parsed.fragment
+            with client.open(asset_url, timeout=5) as response:
+                data = response.read()
+                assert response.status == 200 and len(data) > 0
+                if asset.endswith(".png"):
+                    assert response.headers["Content-Type"].startswith("image/png")
+                    assert hashlib.sha256(data).digest() == hashlib.sha256(pathlib.Path("packaging/fnos/ndg-readonly-test/ICON.PNG").read_bytes()).digest()
         try: request("/api/scan", {"alias": "source_a"}); raise AssertionError("unauthenticated scan accepted")
         except urllib.error.HTTPError as e: assert e.code == 401
         csrf = request("/api/login", {"password": password})["csrf"]

@@ -134,7 +134,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" && (r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/assets/")) {
-		serveUI(w, r)
+		ServeReadOnlyUI(w, r)
 		return
 	}
 	if r.Method != "GET" && r.Method != "POST" {

@@ -1,0 +1,125 @@
+name: fnOS Web candidate
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-gateway:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            architecture: amd64
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Require native architecture
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+      - name: Native process privilege tests including all-thread NoNewPrivs
+        run: CGO_ENABLED=0 go test -v -count=1 ./internal/fnosgateway
+      - name: Read-only frontend regression and clean UI bundle
+        working-directory: cmd/ndg-desktop/frontend
+        run: |
+          npm ci
+          npm test -- src/web
+          npm run build:web
+      - name: Build candidate without publishing
+        env:
+          CGO_ENABLED: '0'
+          GOARCH: ${{ matrix.architecture }}
+        run: |
+          mkdir -p /tmp/ndg-cgi-candidate
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          changed=subprocess.check_output(['git','diff','--name-only','-z','HEAD']).decode().split('\0')
+          changed=sorted(x for x in changed if x)
+          assert changed==['internal/apihttp/webdist/index.html'], changed
+          assert not subprocess.check_output(['git','ls-files','--others','--exclude-standard']).strip()
+          pathlib.Path('/tmp/ndg-cgi-candidate/generated-tracked-paths.json').write_text(json.dumps({'expected_generated_only':changed})+'\n')
+          PY
+          go build -trimpath -ldflags="-X github.com/FNB2026/nas-data-governance/internal/version.Commit=$(git rev-parse HEAD) -X github.com/FNB2026/nas-data-governance/internal/version.Channel=fnos-cgi-development" -o /tmp/ndg-cgi-candidate/ndg-fnos-cgi ./cmd/ndg-fnos-cgi
+          go build -trimpath -ldflags="-X github.com/FNB2026/nas-data-governance/internal/version.Commit=$(git rev-parse HEAD) -X github.com/FNB2026/nas-data-governance/internal/version.Channel=fnos-https-development" -o /tmp/ndg-cgi-candidate/ndg-fnos-https ./cmd/ndg-fnos-https
+          go version -m /tmp/ndg-cgi-candidate/ndg-fnos-https > /tmp/ndg-cgi-candidate/https-build-info.txt
+          git rev-parse HEAD > /tmp/ndg-cgi-candidate/source-sha.txt
+          go version > /tmp/ndg-cgi-candidate/toolchain.txt
+          go version -m /tmp/ndg-cgi-candidate/ndg-fnos-cgi > /tmp/ndg-cgi-candidate/build-info.txt
+          python3 - <<'PY'
+          import hashlib,json,pathlib,os
+          root=pathlib.Path('internal/apihttp/webdist')
+          inventory={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          pathlib.Path('/tmp/ndg-cgi-candidate/ui-inventory.json').write_text(json.dumps({'architecture':os.environ['GOARCH'],'files':inventory},indent=2)+'\n')
+          PY
+          cd /tmp/ndg-cgi-candidate
+          sha256sum ndg-fnos-cgi ndg-fnos-https https-build-info.txt source-sha.txt toolchain.txt build-info.txt ui-inventory.json generated-tracked-paths.json > SHA256SUMS
+      - name: Isolated native TLS smoke (GitHub-hosted only, not NAS acceptance)
+        shell: bash
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-ci-smoke.py /tmp/ndg-cgi-candidate/ndg-fnos-https | tee /tmp/ndg-cgi-candidate/https-ci-smoke.json
+          cd /tmp/ndg-cgi-candidate
+          sha256sum -c SHA256SUMS
+          sha256sum https-ci-smoke.json >> SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ndg-cgi-candidate-${{ matrix.architecture }}
+          path: /tmp/ndg-cgi-candidate/
+          retention-days: 30
+  frozen-systemd-proof:
+    # One-time frozen-candidate evidence, not a permanent dependency on an
+    # expiring Actions artifact. Future skips mean NOT_RUN for this proof.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'codex/fnos-web-entry'
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            architecture: amd64
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require native disposable runner
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+      - name: Download immutable previously verified cde application without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 38842292321 --repo FNB2026/nas-data-governance --name ndg-cgi-candidate-${{ matrix.architecture }} --dir /tmp/ndg-frozen-cde
+          cd /tmp/ndg-frozen-cde
+          sha256sum -c SHA256SUMS
+      - name: Actual systemd counterexamples, readonly namespace, frozen TLS and same-inode bind
+        shell: bash
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-systemd-proof.py packaging/fnos/readonly-https-candidate.service /tmp/ndg-frozen-cde/ndg-fnos-https /tmp/ndg-systemd-evidence | tee /tmp/ndg-systemd-proof.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: ndg-frozen-systemd-proof-${{ matrix.architecture }}
+          path: |
+            /tmp/ndg-systemd-proof.json
+            /tmp/ndg-systemd-evidence/
+          retention-days: 30
