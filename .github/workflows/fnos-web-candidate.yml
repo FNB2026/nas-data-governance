@@ -68,8 +68,9 @@ jobs:
           cd /tmp/ndg-cgi-candidate
           sha256sum ndg-fnos-cgi ndg-fnos-https https-build-info.txt source-sha.txt toolchain.txt build-info.txt ui-inventory.json generated-tracked-paths.json > SHA256SUMS
       - name: Isolated native TLS smoke (GitHub-hosted only, not NAS acceptance)
+        shell: bash
         run: |
-          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-ci-smoke.py /tmp/ndg-cgi-candidate/ndg-fnos-https > /tmp/ndg-cgi-candidate/https-ci-smoke.json
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 scripts/research/fnos-https-ci-smoke.py /tmp/ndg-cgi-candidate/ndg-fnos-https | tee /tmp/ndg-cgi-candidate/https-ci-smoke.json
           cd /tmp/ndg-cgi-candidate
           sha256sum -c SHA256SUMS
           sha256sum https-ci-smoke.json >> SHA256SUMS
