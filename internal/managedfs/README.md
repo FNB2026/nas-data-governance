@@ -130,7 +130,14 @@ Close/FD pressure. The new private GitHub-hosted driver covers process lease,
 foreign-UID denial, same-inode bind mounts after cached Writer/SQLite FDs,
 replacement-root Close keepers, and actual SIGKILL/fresh-process reopen around
 root, SQLite commit, rename/unlink/fsync boundaries for SealCopy and Purge.
-These Writer/native cases are NOT RUN for this revision until exact-source CI
-evidence exists. Bootstrap crash/fault completeness, per-filesystem durability,
-deployment isolation, backup import, source unlink/Restore, NAS, GUI, full Q/R/P
-and new release acceptance remain uncompleted independent obligations.
+These Writer/native cases ran on both native architectures at
+`4facce4d220c5f9441c2a36ca7386ddabb759969`: 7 Reader and 114 Writer on the
+actual ext4 execution filesystem. The bootstrap fault coverage above was
+verified at that head by two mutations, one removing the marker and one
+removing the Reader refusal.
+
+A new revision still needs its own exact-head evidence: no earlier green is
+borrowed. Per-filesystem durability, deployment isolation, backup import,
+source unlink/Restore, NAS, GUI, full Q/R/P and new release acceptance remain
+uncompleted independent obligations. The bootstrap figures above are protocol
+fault counts, not a measure of those gates.
