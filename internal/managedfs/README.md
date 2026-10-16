@@ -1,12 +1,13 @@
-# Private managed-object reader — unintegrated prototype
+# Private managed objects — unintegrated execution prototype
 
-This package currently provides **read-only inspection only**. It is not imported
-by the app, Web API or legacy executor. It cannot create a root, seal/copy an
-object, acquire execution authority, quarantine, restore, purge, clear recovery
-state or mint a governance preview token. `PurgeReleaseAllowed()` stays false.
-The root/catalog initialization and durable Writer protocol are not implemented.
+This package is not imported by the app, Web API or legacy executor. Its Reader
+is read-only; its separate explicit Initialize/Writer prototype creates a NEW
+private root, copies bytes into managed objects and purges registered private
+objects. It cannot authorize source removal, restore a source pathname, clear
+recovery state or mint a governance preview token. `PurgeReleaseAllowed()` stays
+false. No existing application/source/database is adopted or migrated.
 
-The caller must already possess a persisted root/object proof from a trusted
+The Reader caller must already possess a persisted root/object proof from a trusted
 catalog and independently enforce catalog epoch/pending/recovery gates. A fresh
 observation is not a replacement for approved stored evidence. Test fixtures
 construct artificial proofs; they are not approval or production-store evidence.
@@ -17,7 +18,7 @@ object FDs, trusted ancestors and trusted administrators without concurrent
 privileged remounts. The library verifies owner/mode/ACL/link/FD metadata but
 cannot infer that global ownership contract from POSIX modes alone. Whole-root
 backup rebind, source deletion, network filesystems and Darwin proof are outside
-this prototype. A later Writer must enforce its own privilege and store binding.
+this prototype. Deployment/account isolation remains a separate uncompleted gate.
 
 `OpenReader` refuses root UID/GID, symbolic ancestors, unexpected physical root
 identity, private root/object directory metadata, malformed canonical root
@@ -45,6 +46,62 @@ non-root match, then real same-device/same-inode directory/file/root bind mounts
 including mounts after the cached directory FD is open, and root replacement.
 It checks foreign-UID write refusal and unchanged synthetic object bytes. It
 uses its own mount namespace, no network/Docker/services, and refuses fnOS.
-Until that exact source executes successfully, native kernel proof is NOT RUN.
-Even PASS is private-reader evidence, not a Writer, SQLite, NAS, full Q/R/P or
-release acceptance.
+The earlier Reader at `0884e8bc27432d328de98b433afeea1aaa95e0a6` passed that
+driver on both native architectures in Linux Web boundary run 38912435812,
+with source/binary/build/kernel sidecars. This prototype revision changes the
+shared file verifier and adds a Writer: earlier PASS does not certify it.
+
+## Writer protocol and evidence limits
+
+Initialize requires a private existing parent and exclusively creates a new
+root, directories, lock, canonical marker/control and fixed SQLite catalog.
+Root proof, physical catalog/lock/objects/staging identities, random root/store
+IDs, epoch and pending state bind reopening. No adoption, repair or missing-DB
+creation occurs. A persistent flock and non-reentrant instance gate cover every
+method and Close. Interface copies share lifetime. Busy Close never releases FDs.
+
+SQLite uses its ordinary Unix VFS within the exclusive namespace contract,
+not a claimed rooted-FD VFS. Pre-existing main/WAL/SHM and namespace entries are
+admitted through kernel-rooted checks before opening. The entire session holds
+one pinned physical connection; operations never reacquire from the pool.
+WAL/FULL and other fixed settings are read back. PERSIST_WAL is set and queried
+before changing journal mode; Close may checkpoint/truncate retained files,
+but must retain WAL/SHM names. Whole-root and stale-catalog restore are not an
+approved backup-import protocol. [SQLite WAL](https://www.sqlite.org/wal.html)
+and [file controls](https://www.sqlite.org/c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntlpersistwal)
+define those engine settings; they do not certify device power-loss behavior.
+
+Every mutator first marks its session blocked and durably writes root Pending
+at epoch N+1, then commits SQLite's matching intent before object mutation.
+SealCopy uses fresh staging, bounded full hash, file/directory fsync and
+NOREPLACE publication before catalog completion. Purge first verifies the stored
+catalog proof/full bytes, renames only that private object into staging, syncs
+both directories, verifies/records the staged identity (including changed
+ctime), commits irreversible intent, rechecks, unlinks and syncs staging. A
+completion transaction updates object/result state atomically. Only acknowledged
+catalog completion followed by durable root Ready lets that session proceed.
+
+Any uncertain attempt leaves the current session blocked. A new opener requires
+matching Ready root/catalog epochs, no pending catalog operation, no unknown root
+entries/control temporaries, empty staging and an exact registered-object name
+inventory. It cannot infer completion merely from flock availability. Failure
+before the first file creation can leave a provably clean pre-operation state;
+failure after complete Ready publication can leave a complete state. Reopening
+may accept those consistent endpoints, but the failed session never self-clears.
+
+AuthorizationSHA256 records a caller-supplied decision digest only. It does not
+check approval, retention, keeper/protection rules, Dry Run or high-risk user
+confirmation; product integration must independently enforce all of them.
+No public command/API exposes this primitive or its unexported test fault hook.
+
+Writer tests cover fixed-store binding, stored child identity, same-inode stale
+catalog rollback, real SQLite read-only transaction failure, every persistence
+fault/acknowledgement boundary, cancellation, callback reentry and concurrent
+Close/FD pressure. The new private GitHub-hosted driver covers process lease,
+foreign-UID denial, same-inode bind mounts after cached Writer/SQLite FDs,
+replacement-root Close keepers, and actual SIGKILL/fresh-process reopen around
+root, SQLite commit, rename/unlink/fsync boundaries for SealCopy and Purge.
+These Writer/native cases are NOT RUN for this revision until exact-source CI
+evidence exists. Bootstrap crash/fault completeness, per-filesystem durability,
+deployment isolation, backup import, source unlink/Restore, NAS, GUI, full Q/R/P
+and new release acceptance remain uncompleted independent obligations.

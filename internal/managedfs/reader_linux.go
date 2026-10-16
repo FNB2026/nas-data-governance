@@ -250,7 +250,14 @@ func (r *reader) Inspect(ctx context.Context, proof ObjectProof) error {
 	if err := r.bound(); err != nil {
 		return err
 	}
-	fd, err := rooted(r.objects, proof.ObjectID, unix.O_RDONLY)
+	if err := inspectFile(ctx, r.objects, proof.ObjectID, proof); err != nil {
+		return err
+	}
+	return r.bound()
+}
+
+func inspectFile(ctx context.Context, parent int, name string, proof ObjectProof) error {
+	fd, err := rooted(parent, name, unix.O_RDONLY)
 	if err != nil {
 		return err
 	}
@@ -284,12 +291,9 @@ func (r *reader) Inspect(ctx context.Context, proof ObjectProof) error {
 	if err != nil || !matches(st, proof) || total != proof.Size || hex.EncodeToString(h.Sum(nil)) != proof.SHA256 {
 		return ErrRejected
 	}
-	if err = r.bound(); err != nil {
-		return err
-	}
 	// A pinned content FD is not a fresh pathname binding. Reopen the name
 	// under the same kernel restrictions before reporting an observed match.
-	fresh, err := rooted(r.objects, proof.ObjectID, unix.O_RDONLY)
+	fresh, err := rooted(parent, name, unix.O_RDONLY)
 	if err != nil {
 		return err
 	}
@@ -298,7 +302,7 @@ func (r *reader) Inspect(ctx context.Context, proof ObjectProof) error {
 	if err != nil || !matches(st, proof) {
 		return ErrRejected
 	}
-	return r.bound()
+	return nil
 }
 
 func (r *reader) Close() error {

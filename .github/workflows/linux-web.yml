@@ -47,9 +47,16 @@ jobs:
           cd /tmp/ndg-managed-reader-evidence
           sha256sum -c probe-before.sha256
           sha256sum probe.test probe-before.sha256 source-sha.txt kernel.txt build-info.txt proof.json > SHA256SUMS
+      - name: Private Writer process-kill and mount counterexamples (not product or NAS acceptance)
+        shell: bash
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-writer-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/writer-proof.json
+          cd /tmp/ndg-managed-reader-evidence
+          sha256sum -c probe-before.sha256
+          sha256sum probe.test probe-before.sha256 source-sha.txt kernel.txt build-info.txt proof.json writer-proof.json > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: private-managed-reader-proof-${{ matrix.architecture }}
+          name: private-managed-object-proof-${{ matrix.architecture }}
           path: /tmp/ndg-managed-reader-evidence/
           if-no-files-found: error
       - run: |
