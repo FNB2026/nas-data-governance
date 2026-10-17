@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test container-evidence-test nas-smoke-test nas-namespace-model-test
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test fnos-lifecycle-test fnos-install-chain-test container-evidence-test nas-smoke-test nas-namespace-model-test
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -26,6 +26,16 @@ fnos-check:
 
 fnos-test: fnos-check
 	python3 scripts/packaging/test-fnos-package.py
+
+# Offline verifier matrix plus real local file/HTTP/argv execution for the
+# fnOS install-chain lifecycle tool (no Docker, no root).
+fnos-lifecycle-test:
+	python3 -B scripts/packaging/test-fnos-lifecycle.py
+
+# Real Linux amd64 install/uninstall chain on the published pinned image.
+# Root + GitHub-hosted Docker; never run on a user NAS.
+fnos-install-chain-test:
+	python3 -B scripts/packaging/test-fnos-install-chain.py
 
 container-evidence-test:
 	python3 scripts/packaging/test-container-evidence.py

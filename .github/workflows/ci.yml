@@ -112,6 +112,9 @@ jobs:
       - name: Check fnOS research scaffold and offline lifecycle safety
         run: make fnos-test
 
+      - name: Check fnOS install-chain lifecycle verifier matrix (offline)
+        run: make fnos-lifecycle-test
+
       - name: Check experimental OCI evidence integrity offline
         run: make container-evidence-test
 

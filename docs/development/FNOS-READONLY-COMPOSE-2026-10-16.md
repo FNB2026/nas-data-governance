@@ -135,3 +135,110 @@ helper SHA-256 `cd1cf60004067579b1b17daf3cc50a55df6de89cd14dfdbd79155fa3a30cee0e
 下一步是可审查的首次引导和授权服务安装链路，之后再认证缺少绑定路径的实际启动
 拒绝、原位升级、完整卸载、手机与整机重启。Quarantine、Restore、Purge 继续关闭，
 完整 fnOS Governance 未交付。
+
+## 2026-10-17 生命周期核验工具（R4 Task D，离线层）
+
+[fnos-install-lifecycle.py](../../scripts/packaging/fnos-install-lifecycle.py)
+把本文"分开的执行与验收步骤"与"冷备份、恢复和卸载"两节的人工核对矩阵产品化：
+证据进、类型化裁决出。它**自身不执行任何 docker/compose 命令**（测试用静态
+不变量证明源码无 subprocess/os.system/popen/eval/exec），只核验管理员提供的
+`docker image inspect`、`docker compose config --format json`、
+`docker container inspect` 与备份证据 JSON，并产出下一步的精确命令计划：
+
+- `verify-image`：只接受 digest 引用锚定在冻结的 OCI index/amd64 config 上；
+  仅标签、错误架构、未锚定 digest 一律拒绝。
+- `verify-mounts`：resolved compose 配置必须与冻结身份逐项相等（四 bind、
+  `create_host_path: false` ×4、只读属性、无端口、无 build、无 environment、
+  10001:10001、read_only 根、`pull_policy: never`、external 完整 64 位网络 ID），
+  且 prepared.json 的 network_verified / image_verified / gateway_installed
+  必须仍为 false——准备回执不得自我预认证。
+- `plan-backup` / `verify-backup`：容器必须以精确 ID 停止；冷拷贝计划含逐文件
+  SHA-256/mode/uid/gid 证据与 quick_check；证据缺哈希、DB 损坏、无 DB 备份拒绝。
+- `plan-restore`：拒绝恢复进原 state 目录（必须全新空目录）；重建命令固定
+  `--no-build --pull never --no-deps`。
+- `plan-upgrade`：备份验证必须排在镜像重建之前；同镜像"升级"拒绝；回滚=
+  恢复已验证的备份回执。
+- `plan-uninstall`：仅按容器身份删除；`-v`/`--force`/`prune`/按名称前缀批量
+  删除全部列为 forbidden；要求事后核验来源/state/备份仍在。
+
+离线证明
+[test-fnos-lifecycle.py](../../scripts/packaging/test-fnos-lifecycle.py)
+24 项（`make fnos-lifecycle-test`，已接入 CI）：接受矩阵 + 拒绝矩阵 +
+"核验器无执行路径"静态不变量。CI 步骤名为
+`Check fnOS install-chain lifecycle verifier matrix (offline)`。
+
+边界不变：这是核验与计划层，不是运行时验收。缺少绑定路径的实际启动拒绝、
+原位升级、完整卸载、手机与整机重启仍需在真实 fnOS 上按本文件既有流程实测；
+本工具不改变任何既有工具的合同，也不覆盖 Preview.1 的 15 个冻结资产。
+
+## 2026-10-17 可执行安装链（R5；独立 Linux 实测，非 fnOS 验收）
+
+同一支 [fnos-install-lifecycle.py](../../scripts/packaging/fnos-install-lifecycle.py)
+新增 `plan` / `authorize` / `run` / `status` 四个子命令，把"证据核验"升级为
+"可实际操作"。原有 `verify-*` / `plan-*` 的输出与拒绝词保持不变。
+
+### 三道前置件，缺一不可
+
+1. **冻结计划**：`plan` 读取结构化请求 JSON，校验 origin、网络全 ID、IPv4、
+   边界根、源目录、备份目录与 14 步参数，输出规范化 SHA-256（`plan_digest`）
+   到私有 receipt（0700，plan.json 0600）。计划不写安装根。
+2. **逐步授权**：`authorize --steps a,b,c --confirm <digest 前 12 位>` 生成
+   0600 的 `authorization.json`，只包含与**该摘要**绑定的步骤；已存在即拒绝覆盖
+   （换计划必须换 receipt 目录）。
+3. **显式执行**：`run --execute`。缺任一件即拒绝；计划被改动一个字节，
+   `plan_digest_mismatch`。
+
+### 14 步与真实动作
+
+`compat`（Linux/amd64/root/内核/Compose）→ `sources`（目录身份 + 源基线）→
+`image`（冻结 index/架构/config）→ `init`（新根、config/state 0700/10001、
+口令 0600、installation.env、compose、prepared 全 false）→ `gateway`（仅生产：
+单元/证书复核 + systemctl）→ `start`（解析后配置逐项核验、独占 internal bridge、
+固定 IP、启动、健康、容器身份复核）→ `browser`（200/CSP/nosniff/app shell）→
+`access`（登录、CSRF、扫描、checkpoint=completed、源字节不变、退出）→
+`gui`（服务端能力声明必须诚实；出现 `data-ndg-enabled="true"` 的危险控件即拒绝）→
+`backup`（按 ID 停止、冷拷贝、逐文件 SHA-256、WAL 一并 quick_check）→
+`upgrade`（候选镜像必须不同且本地存在；改 compose 前必须先有已验证备份）→
+`rollback`（旧 state 改名保留、从备份恢复到新 state、逐文件比对、回滚镜像）→
+`uninstall`（按 ID 停止/删除、网络仅在无端点且 `network_owned` 时删除、
+来源/state/备份字节复核）→ `reboot`（restart policy + 进程重启后快照一致）。
+
+### 安全不变量（由测试而非注释保证）
+
+- **无 shell**：所有外部动作是 argv 列表；AST 断言每个 `subprocess.*` 调用都有
+  字面 `shell=False`，且首参不是字符串/拼接/f-string；禁止
+  `os.system/os.popen/os.exec*/os.spawn*/pty.*/eval/exec`。
+- **目录身份**：`O_NOFOLLOW` 打开、`chmod` 后复读断言（umask 无法静默过滤模式）、
+  Linux `openat2(BENEATH|NO_SYMLINKS|NO_XDEV)`、设备/inode 快照在
+  `init/start/backup/rollback` 前复核；路径含 `\n`/NUL、`..`、任何符号链接
+  组件一律拒绝。
+- **Journal**：append-only、每条 fsync；`start` 无终态即崩溃足迹，
+  仅声明可对账且后置复核确实通过的步骤允许 `--reconcile`，否则
+  `manual_reconciliation_required`，不猜成功、不删不明文件。
+- **范围隔离**：`DISPOSABLE_LINUX_ACCEPTANCE` 在 plan/authorize/run 三处都要
+  `--acceptance`，只允许 core 明文入口且安装根必须在 `ndg-chain-` 临时父目录；
+  `PRODUCTION` 必须 HTTPS DNS origin + 网关参数 + 冻结镜像；两者不可混用。
+  `uninstall` 永不删除来源、state 或备份。
+
+### 实测证据
+
+- 本地 `make fnos-lifecycle-test`：54 项。原 24 项证据矩阵之外，新增计划/授权/
+  Journal 拒绝矩阵、真实文件复制（空格与中文文件名、模式/UID 保持）、
+  umask 0077 下的模式断言、真实 HTTP 请求与 Origin、argv 含空格不被拆分、
+  篡改计划与未授权步骤拒绝。
+- 独立 Linux `make fnos-install-chain-test`（GitHub-hosted ubuntu-latest amd64，
+  root，真实 Docker）：匿名拉取冻结 index 镜像 → 创建本安装独占 internal
+  bridge → 真实执行 compat/sources/image/init/start/browser/access/gui →
+  `docker restart` 后快照一致 → 冷备份 → 按身份卸载 → 来源字节、state、
+  备份逐文件保留，容器与自有网络按身份删除。CI 步骤名为
+  `Real install/uninstall chain on the pinned image (amd64, not NAS acceptance)`。
+
+### 仍未主张
+
+这不是 fnOS 验收：未安装 HTTPS 网关（`gateway` 在 acceptance 范围类型化拒绝）、
+未做整机重启（`reboot` 仅进程重启）、未做原位升级（无第二个候选镜像时
+`upgrade` 拒绝）、未在真实 NAS 上写入或删除任何数据。Q/R/P 仍关闭，
+`PurgeReleaseAllowed=false` 不变，公开 API 仍只读。真实 fnOS 人工源验收仍需
+所有者授权；逐项授权清单、通过判据与中止条件见
+[人工源验收申请](FNOS-MANUAL-ACCEPTANCE-APPLICATION-2026-10-17.md)，
+在该申请获批前不执行任何真实 NAS 写入。

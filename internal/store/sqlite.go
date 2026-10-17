@@ -29,6 +29,18 @@ type SQLiteStore struct {
 	scopeBinding       string
 }
 
+// Path reports the canonical database file path this handle operates on. It
+// is the identity used to bind an execution-lock scope to the store it was
+// acquired from: the flock lives on this path's ".execution.lock" sibling, so
+// two handles on the same path share one lock truth, and a scope from a
+// different path can never be ownership evidence for this store.
+func (s *SQLiteStore) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
+
 // Open creates (or opens) a SQLite database at path and applies migrations.
 // The database is project-owned; it never reads or writes user files.
 func Open(ctx context.Context, path string) (*SQLiteStore, error) {
