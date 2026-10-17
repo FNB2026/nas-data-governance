@@ -90,6 +90,12 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		dispatchMode(t, layout, subject, caller, input.Ops)
 	case "seal_refused":
 		sealRefusedMode(t, layout, subject, input.Root, input.State)
+	case "seal":
+		sealMode(t, layout, subject, input.Root, input.State)
+	case "reader":
+		readerMode(t, layout, subject, input.Root, input.State)
+	case "reader_refused":
+		readerRefusedMode(t, layout, subject, input.Root, input.State)
 	case "pending":
 		// Begins a real SealCopy, announces readiness from inside the copy,
 		// then waits: the driver SIGKILLs this process at that exact point so
@@ -202,6 +208,59 @@ func serve(t *testing.T, layout Layout, subject, caller Subject) {
 	emit(map[string]any{"state": "PASS", "category": "peer_authorization", "outcomes": outcomes})
 }
 
+// persistProof writes an identity record as the durable hand-off between
+// processes, exactly the way a real bootstrap or copy-in layer would persist a
+// proof for a later verifier to read. It lives in the state directory, never
+// inside the managed root: an extra entry inside the root would itself be a
+// recovery condition.
+func persistProof(t *testing.T, state, name string, value any) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal("proof encoding failed", err)
+	}
+	path := filepath.Join(state, name)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal("proof persistence failed", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal("proof ownership failed", err)
+	}
+}
+
+// loadRootProof reads the persisted root identity. A fresh observation must
+// never replace a stored, approved identity, so every later process reads the
+// record instead of re-deriving one.
+func loadRootProof(t *testing.T, state string) managedfs.RootProof {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(state, "root-proof.json"))
+	if err != nil {
+		t.Fatal("persisted proof unavailable")
+	}
+	var proof managedfs.RootProof
+	if json.Unmarshal(raw, &proof) != nil {
+		t.Fatal("persisted proof malformed")
+	}
+	return proof
+}
+
+// loadObjectProof reads the persisted object identity: the record a real
+// copy-in layer would hand a verifier. Verification is therefore exercised
+// against stored evidence, never against a value the verifier just computed
+// itself.
+func loadObjectProof(t *testing.T, state string) managedfs.ObjectProof {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(state, "object-proof.json"))
+	if err != nil {
+		t.Fatal("persisted object proof unavailable")
+	}
+	var proof managedfs.ObjectProof
+	if json.Unmarshal(raw, &proof) != nil {
+		t.Fatal("persisted object proof malformed")
+	}
+	return proof
+}
+
 // rootMode proves the worker can own a managed root under the dedicated
 // identity, and that an incomplete root is refused rather than adopted.
 //
@@ -220,33 +279,16 @@ func rootMode(t *testing.T, layout Layout, subject Subject, root, state string, 
 	}
 	defer func() { _ = lease.Release() }()
 	ctx := context.Background()
-	proofPath := filepath.Join(state, "root-proof.json")
 	if bootstrap {
 		proof, err := managedfs.Initialize(ctx, root)
 		if err != nil {
 			t.Fatal("bootstrap refused", err)
 		}
-		raw, err := json.Marshal(proof)
-		if err != nil {
-			t.Fatal("proof encoding failed", err)
-		}
-		if err := os.WriteFile(proofPath, raw, 0o600); err != nil {
-			t.Fatal("proof persistence failed", err)
-		}
-		if err := os.Chmod(proofPath, 0o600); err != nil {
-			t.Fatal("proof ownership failed", err)
-		}
+		persistProof(t, state, "root-proof.json", proof)
 		emit(map[string]any{"state": "PASS", "category": "bootstrap", "root": proof})
 		return
 	}
-	raw, err := os.ReadFile(proofPath)
-	if err != nil {
-		t.Fatal("persisted proof unavailable", err)
-	}
-	var proof managedfs.RootProof
-	if json.Unmarshal(raw, &proof) != nil {
-		t.Fatal("persisted proof malformed")
-	}
+	proof := loadRootProof(t, state)
 	reader, err := managedfs.OpenReader(root, proof)
 	if err != nil {
 		// A partial root is refused before any object operation is attempted.
@@ -292,31 +334,14 @@ func pendingMode(t *testing.T, layout Layout, subject Subject, root, state strin
 	}
 	defer func() { _ = lease.Release() }()
 	ctx := context.Background()
-	proofPath := filepath.Join(state, "root-proof.json")
 	if bootstrap {
 		proof, err := managedfs.Initialize(ctx, root)
 		if err != nil {
 			t.Fatal("bootstrap refused", err)
 		}
-		raw, err := json.Marshal(proof)
-		if err != nil {
-			t.Fatal("proof encoding failed", err)
-		}
-		if err := os.WriteFile(proofPath, raw, 0o600); err != nil {
-			t.Fatal("proof persistence failed", err)
-		}
-		if err := os.Chmod(proofPath, 0o600); err != nil {
-			t.Fatal("proof ownership failed", err)
-		}
+		persistProof(t, state, "root-proof.json", proof)
 	}
-	raw, err := os.ReadFile(proofPath)
-	if err != nil {
-		t.Fatal("persisted proof unavailable", err)
-	}
-	var proof managedfs.RootProof
-	if json.Unmarshal(raw, &proof) != nil {
-		t.Fatal("persisted proof malformed")
-	}
+	proof := loadRootProof(t, state)
 	w, err := managedfs.OpenWriter(ctx, root, proof)
 	if err != nil {
 		t.Fatal("writer refused", err)
@@ -355,15 +380,7 @@ func sealRefusedMode(t *testing.T, layout Layout, subject Subject, root, state s
 	}
 	defer func() { _ = lease.Release() }()
 	ctx := context.Background()
-	proofPath := filepath.Join(state, "root-proof.json")
-	raw, err := os.ReadFile(proofPath)
-	if err != nil {
-		t.Fatal("persisted proof unavailable")
-	}
-	var proof managedfs.RootProof
-	if json.Unmarshal(raw, &proof) != nil {
-		t.Fatal("persisted proof malformed")
-	}
+	proof := loadRootProof(t, state)
 	w, err := managedfs.OpenWriter(ctx, root, proof)
 	if err != nil {
 		t.Fatal("writer refused", err)
@@ -392,6 +409,128 @@ func sealRefusedMode(t *testing.T, layout Layout, subject Subject, root, state s
 		t.Fatal("second writer close failed", err)
 	}
 	emit(map[string]any{"state": "PASS", "category": "malformed_authorization_refused"})
+}
+
+// sealMode seals one synthetic object under a well-formed approval digest and
+// persists the returned proof as the durable object-identity record, the same
+// hand-off a real copy-in layer would make to a verifier. The digest is well
+// formed on purpose: this mode exists to produce a real object with a stored
+// identity, not to test the digest boundary, which sealRefusedMode covers.
+func sealMode(t *testing.T, layout Layout, subject Subject, root, state string) {
+	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
+	}
+	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
+	proof := loadRootProof(t, state)
+	w, err := managedfs.OpenWriter(ctx, root, proof)
+	if err != nil {
+		t.Fatal("writer refused", err)
+	}
+	payload := "synthetic sealed object for identity verification"
+	digest := sha256.Sum256([]byte(payload))
+	object, err := w.SealCopy(ctx, strings.NewReader(payload), managedfs.CopySpec{
+		Size:                int64(len(payload)),
+		SHA256:              hex.EncodeToString(digest[:]),
+		AuthorizationSHA256: strings.Repeat("c", 64),
+	})
+	if err != nil {
+		t.Fatal("synthetic seal refused", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal("writer close failed", err)
+	}
+	persistProof(t, state, "object-proof.json", object)
+	emit(map[string]any{"state": "PASS", "category": "sealed",
+		"object_id": object.ObjectID, "sha256": object.SHA256, "size": object.Size})
+}
+
+// readerMode is the positive control for object identity: the stored proof is
+// accepted. It has to exist on its own, because a verifier that refused
+// everything would otherwise let every refusal case below pass while proving
+// nothing.
+func readerMode(t *testing.T, layout Layout, subject Subject, root, state string) {
+	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
+	}
+	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
+	proof := loadRootProof(t, state)
+	object := loadObjectProof(t, state)
+	r, err := managedfs.OpenReader(root, proof)
+	if err != nil {
+		t.Fatal("reader refused a ready root", err)
+	}
+	if err := r.Inspect(ctx, object); err != nil {
+		t.Fatal("stored object proof rejected", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal("reader close failed", err)
+	}
+	emit(map[string]any{"state": "PASS", "category": "object_identity_accepted",
+		"outcomes": []string{"accepted"}})
+}
+
+// readerRefusedMode tampers with one field of the stored proof at a time. Each
+// variant keeps the shape the verifier accepts -- the digest stays opaque, the
+// size stays in range, the object ID stays a well-formed name -- so what
+// refuses them is the identity comparison, not request validation. The
+// untampered proof is inspected before and after the tampering: before, so the
+// refusals cannot pass by refusing everything; after, so a refusal that had
+// modified the object would be caught by the verifier's own read-only
+// guarantee.
+func readerRefusedMode(t *testing.T, layout Layout, subject Subject, root, state string) {
+	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
+	}
+	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
+	proof := loadRootProof(t, state)
+	stored := loadObjectProof(t, state)
+	r, err := managedfs.OpenReader(root, proof)
+	if err != nil {
+		t.Fatal("reader refused a ready root", err)
+	}
+	outcomes := []string{}
+	if err := r.Inspect(ctx, stored); err != nil {
+		t.Fatal("stored object proof rejected before tampering", err)
+	}
+	outcomes = append(outcomes, "accepted")
+	for _, variant := range []struct {
+		name   string
+		mutate func(*managedfs.ObjectProof)
+	}{
+		{"digest", func(p *managedfs.ObjectProof) { p.SHA256 = strings.Repeat("0", 64) }},
+		{"size", func(p *managedfs.ObjectProof) { p.Size++ }},
+		{"inode", func(p *managedfs.ObjectProof) { p.Inode++ }},
+		{"root", func(p *managedfs.ObjectProof) { p.Root.StoreID = strings.Repeat("d", 64) }},
+		{"object_id", func(p *managedfs.ObjectProof) { p.ObjectID = strings.Repeat("e", 64) }},
+	} {
+		tampered := stored
+		variant.mutate(&tampered)
+		if err := r.Inspect(ctx, tampered); !errors.Is(err, managedfs.ErrRejected) {
+			t.Fatal("tampered object proof accepted", variant.name, err)
+		}
+		outcomes = append(outcomes, variant.name+"_refused")
+	}
+	if err := r.Inspect(ctx, stored); err != nil {
+		t.Fatal("refusals modified the object or its identity", err)
+	}
+	outcomes = append(outcomes, "accepted_again")
+	if err := r.Close(); err != nil {
+		t.Fatal("reader close failed", err)
+	}
+	emit(map[string]any{"state": "PASS", "category": "object_identity_refused",
+		"outcomes": outcomes})
 }
 
 func emit(value map[string]any) {

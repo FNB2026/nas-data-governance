@@ -567,6 +567,78 @@ def main():
     finally:
         settle(victim)
 
+    # --- 20 and 21: the stored object identity is accepted, and only that ---
+    # The reader verifies supplied evidence, so the positive control matters as
+    # much as the refusals: a verifier that refused everything would record
+    # every tampered variant as a pass. The untampered proof is therefore
+    # inspected inside the same process, before the tampering and again after
+    # it, and the driver independently re-reads the sealed bytes around both.
+    id_run, id_state = layout('identity')
+    id_root = id_state / 'managed'
+    boot = launch(probe_config('id-boot', 'root', id_run, id_state,
+                               root=str(id_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'identity-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'identity bootstrap failed'
+        assert outcome['category'] == 'bootstrap', outcome.get('category')
+    finally:
+        settle(boot)
+    seal = launch(probe_config('id-seal', 'seal', id_run, id_state, root=str(id_root)), worker)
+    try:
+        outcome = handshake(seal, 'identity-seal')
+        remaining, errors = seal.communicate(timeout=20)
+        assert seal.returncode == 0 and errors == b'', 'identity seal failed'
+        assert outcome['category'] == 'sealed', outcome.get('category')
+        object_id = outcome['object_id']
+        sealed_hash = outcome['sha256']
+    finally:
+        settle(seal)
+    object_path = id_root / 'objects' / object_id
+    sealed_bytes = object_path.read_bytes()
+    assert hashlib.sha256(sealed_bytes).hexdigest() == sealed_hash, \
+        'the sealed bytes on disk are not what the seal recorded'
+
+    reader = launch(probe_config('id-read', 'reader', id_run, id_state, root=str(id_root)), worker)
+    try:
+        outcome = handshake(reader, 'identity-read')
+        remaining, errors = reader.communicate(timeout=20)
+        assert reader.returncode == 0 and errors == b'', 'identity reader failed'
+        record('worker_accepts_stored_object_proof',
+               outcome.get('category') == 'object_identity_accepted' and
+               outcome.get('outcomes') == ['accepted'],
+               'category=' + str(outcome.get('category')))
+    finally:
+        settle(reader)
+    assert object_path.read_bytes() == sealed_bytes, \
+        'inspection modified the sealed object'
+
+    refused = launch(probe_config('id-refused', 'reader_refused', id_run, id_state,
+                                  root=str(id_root)), worker)
+    try:
+        outcome = handshake(refused, 'identity-refused')
+        remaining, errors = refused.communicate(timeout=20)
+        assert refused.returncode == 0 and errors == b'', 'identity refusal child failed'
+        record('worker_refuses_tampered_object_proof',
+               outcome.get('category') == 'object_identity_refused' and
+               outcome.get('outcomes') == ['accepted', 'digest_refused', 'size_refused',
+                                           'inode_refused', 'root_refused', 'object_id_refused',
+                                           'accepted_again'],
+               'outcomes=' + ','.join(outcome.get('outcomes') or []))
+    finally:
+        settle(refused)
+    assert object_path.read_bytes() == sealed_bytes, \
+        'the refusals modified the sealed object'
+    # Nothing durable happened either: the root is still ready, not pending.
+    check = launch(probe_config('id-check', 'root', id_run, id_state, root=str(id_root)), worker)
+    try:
+        outcome = handshake(check, 'identity-check')
+        remaining, errors = check.communicate(timeout=20)
+        assert check.returncode == 0 and errors == b'', 'identity check child failed'
+        assert outcome.get('category') == 'ready_root', outcome.get('category')
+    finally:
+        settle(check)
+
     print(json.dumps({'result': 'PASS' if all(r['result'] == 'PASS' for r in results) else 'FAIL',
                       'scope': 'DISPOSABLE_NATIVE_PRIVATE_WORKER_NOT_PRODUCT_OR_NAS_OR_DEPLOYMENT_ACCEPTANCE',
                       'checks': results,
