@@ -24,6 +24,7 @@ import sys
 HELPER = Path(__file__).with_name('fnos-install-lifecycle.py')
 INDEX = 'sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1'
 IMAGE = 'ghcr.io/fnb2026/ndg-readonly-preview@' + INDEX
+STATE = {}
 
 
 def run(argv, timeout=600, check=True):
@@ -70,6 +71,27 @@ def preconditions():
     run(['docker', 'compose', 'version', '--short'], timeout=60)
 
 
+def diagnose(fixture, installation_id, core_ip):
+    """Bounded failure evidence; never used to turn a failure into a pass."""
+    print('--- diagnostics (bounded) ---', file=sys.stderr)
+    for argv in (['docker', 'container', 'ls', '-a', '--format', '{{.ID}} {{.Names}} {{.Status}}'],
+                 ['docker', 'network', 'ls', '--format', '{{.ID}} {{.Name}}']):
+        completed = subprocess.run(argv, capture_output=True, timeout=60, shell=False)
+        print(completed.stdout.decode('utf-8', 'replace')[:2000], file=sys.stderr)
+    name = 'ndg-' + installation_id + '-core'
+    for argv in (['docker', 'container', 'inspect', name, '--format',
+                  '{{json .State}} {{json .NetworkSettings.Networks}}'],
+                 ['docker', 'logs', '--tail', '40', name],
+                 ['ip', '-4', 'route']):
+        completed = subprocess.run(argv, capture_output=True, timeout=60, shell=False)
+        print('$', ' '.join(argv[:3]), file=sys.stderr)
+        print((completed.stdout + completed.stderr).decode('utf-8', 'replace')[:2000], file=sys.stderr)
+    receipt = fixture / 'receipt'
+    if (receipt / 'journal.jsonl').exists():
+        print('--- journal ---', file=sys.stderr)
+        print((receipt / 'journal.jsonl').read_text()[-4000:], file=sys.stderr)
+
+
 def main():
     checks = []
     preconditions()
@@ -81,6 +103,16 @@ def main():
     (fixture / 'source_a' / 'alpha.txt').write_text('alpha line\n' * 64)
     (fixture / 'source_a' / 'notes one.md').write_text('# notes\n')
     (fixture / 'source_b' / 'beta.txt').write_text('beta line\n' * 32)
+    # The core runs as 10001 and must be able to traverse and read sources;
+    # the directories stay root-owned so the trusted-ancestor contract holds.
+    for label in ('source_a', 'source_b'):
+        for current, directories, files in os.walk(fixture / label):
+            os.chown(current, 0, 10001)
+            os.chmod(current, 0o750)
+            for name in files:
+                path = os.path.join(current, name)
+                os.chown(path, 0, 10001)
+                os.chmod(path, 0o640)
     baseline = {'source_a': tree_digest(fixture / 'source_a'),
                 'source_b': tree_digest(fixture / 'source_b')}
     checks.append('fixture_created_with_known_source_bytes')
@@ -89,6 +121,7 @@ def main():
     third = 100 + int(installation_id[:2], 16) % 100
     subnet = '10.253.' + str(third) + '.0/24'
     core_ip = '10.253.' + str(third) + '.2'
+    STATE.update(fixture=fixture, installation_id=installation_id, core_ip=core_ip)
     network_name = 'ndg-chain-' + installation_id
     run(['docker', 'network', 'create', '--driver', 'bridge', '--internal',
          '--subnet', subnet, '--gateway', '10.253.' + str(third) + '.1',
@@ -186,6 +219,11 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except Exception as error:  # noqa: BLE001 - the exit code carries the verdict
+        if STATE:
+            try:
+                diagnose(**STATE)
+            except Exception:  # diagnostics must never hide the original failure
+                pass
         print(json.dumps({'result': 'FAIL', 'error': type(error).__name__ + ': ' + str(error)[:400]}),
               file=sys.stderr)
         sys.exit(1)

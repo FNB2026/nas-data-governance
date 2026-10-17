@@ -239,4 +239,6 @@ helper SHA-256 `cd1cf60004067579b1b17daf3cc50a55df6de89cd14dfdbd79155fa3a30cee0e
 未做整机重启（`reboot` 仅进程重启）、未做原位升级（无第二个候选镜像时
 `upgrade` 拒绝）、未在真实 NAS 上写入或删除任何数据。Q/R/P 仍关闭，
 `PurgeReleaseAllowed=false` 不变，公开 API 仍只读。真实 fnOS 人工源验收仍需
-所有者授权后按本文件既有流程执行。
+所有者授权；逐项授权清单、通过判据与中止条件见
+[人工源验收申请](FNOS-MANUAL-ACCEPTANCE-APPLICATION-2026-10-17.md)，
+在该申请获批前不执行任何真实 NAS 写入。
