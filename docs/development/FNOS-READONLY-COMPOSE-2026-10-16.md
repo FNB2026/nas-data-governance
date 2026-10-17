@@ -135,3 +135,38 @@ helper SHA-256 `cd1cf60004067579b1b17daf3cc50a55df6de89cd14dfdbd79155fa3a30cee0e
 下一步是可审查的首次引导和授权服务安装链路，之后再认证缺少绑定路径的实际启动
 拒绝、原位升级、完整卸载、手机与整机重启。Quarantine、Restore、Purge 继续关闭，
 完整 fnOS Governance 未交付。
+
+## 2026-10-17 生命周期核验工具（R4 Task D，离线层）
+
+[fnos-install-lifecycle.py](../../scripts/packaging/fnos-install-lifecycle.py)
+把本文"分开的执行与验收步骤"与"冷备份、恢复和卸载"两节的人工核对矩阵产品化：
+证据进、类型化裁决出。它**自身不执行任何 docker/compose 命令**（测试用静态
+不变量证明源码无 subprocess/os.system/popen/eval/exec），只核验管理员提供的
+`docker image inspect`、`docker compose config --format json`、
+`docker container inspect` 与备份证据 JSON，并产出下一步的精确命令计划：
+
+- `verify-image`：只接受 digest 引用锚定在冻结的 OCI index/amd64 config 上；
+  仅标签、错误架构、未锚定 digest 一律拒绝。
+- `verify-mounts`：resolved compose 配置必须与冻结身份逐项相等（四 bind、
+  `create_host_path: false` ×4、只读属性、无端口、无 build、无 environment、
+  10001:10001、read_only 根、`pull_policy: never`、external 完整 64 位网络 ID），
+  且 prepared.json 的 network_verified / image_verified / gateway_installed
+  必须仍为 false——准备回执不得自我预认证。
+- `plan-backup` / `verify-backup`：容器必须以精确 ID 停止；冷拷贝计划含逐文件
+  SHA-256/mode/uid/gid 证据与 quick_check；证据缺哈希、DB 损坏、无 DB 备份拒绝。
+- `plan-restore`：拒绝恢复进原 state 目录（必须全新空目录）；重建命令固定
+  `--no-build --pull never --no-deps`。
+- `plan-upgrade`：备份验证必须排在镜像重建之前；同镜像"升级"拒绝；回滚=
+  恢复已验证的备份回执。
+- `plan-uninstall`：仅按容器身份删除；`-v`/`--force`/`prune`/按名称前缀批量
+  删除全部列为 forbidden；要求事后核验来源/state/备份仍在。
+
+离线证明
+[test-fnos-lifecycle.py](../../scripts/packaging/test-fnos-lifecycle.py)
+24 项（`make fnos-lifecycle-test`，已接入 CI）：接受矩阵 + 拒绝矩阵 +
+"核验器无执行路径"静态不变量。CI 步骤名为
+`Check fnOS install-chain lifecycle verifier matrix (offline)`。
+
+边界不变：这是核验与计划层，不是运行时验收。缺少绑定路径的实际启动拒绝、
+原位升级、完整卸载、手机与整机重启仍需在真实 fnOS 上按本文件既有流程实测；
+本工具不改变任何既有工具的合同，也不覆盖 Preview.1 的 15 个冻结资产。

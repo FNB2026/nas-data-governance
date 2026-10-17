@@ -27,6 +27,11 @@ fnos-check:
 fnos-test: fnos-check
 	python3 scripts/packaging/test-fnos-package.py
 
+# Offline verifier matrix for the fnOS install-chain lifecycle tool
+# (evidence in, typed verdicts out; never runs Docker itself).
+fnos-lifecycle-test:
+	python3 -B scripts/packaging/test-fnos-lifecycle.py
+
 container-evidence-test:
 	python3 scripts/packaging/test-container-evidence.py
 
