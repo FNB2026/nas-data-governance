@@ -445,13 +445,14 @@ func TestStoreFacts_SyntheticLifecycle(t *testing.T) {
 	}
 
 	// Re-verification under our own lock (the chained contract's second gate):
-	// our own reservation is not a competing writer's.
-	releaseOwn, e := st2.AcquireExecutionLock()
+	// our own reservation is not a competing writer's. Ownership comes from
+	// the real scope, never a caller-supplied predicate.
+	scopeOwn, e := AcquireExecutionLockScope(st2)
 	if e != nil {
 		t.Fatal(e)
 	}
-	el, _ = v.Check(ctx, NewStoreFactsOwningExecutionLock(st2, func() bool { return true }), req)
-	releaseOwn()
+	el, _ = v.Check(ctx, NewStoreFactsWithScope(st2, scopeOwn), req)
+	scopeOwn.Release()
 	if !el.Eligible {
 		t.Fatalf("our own lock reservation must not block re-verification, got %s", el.Reason)
 	}

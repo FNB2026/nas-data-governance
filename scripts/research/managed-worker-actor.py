@@ -756,6 +756,108 @@ def main():
     finally:
         settle(check)
 
+    # --- 23: the business authorization gate answers a real authorized connection ---
+    # The worker now wires its dispatch path to the durable authorization
+    # store. One legally approved envelope reaches an eligible internal
+    # verdict (and executes nothing); forged, drifted, unplanned and revoked
+    # envelopes get typed denials. Quarantine item ids are deterministic
+    # (sha256 over plan id, action index and target path), so the driver can
+    # compose every envelope before the worker seeds its own store. The worker
+    # seeds exactly one eligible object and one revoked-plan object; the
+    # seeded bytes must be byte-identical after the whole exchange.
+    authz_run, authz_state = layout('authzgate')
+    plan_id = 'purge-kernel-authorize'
+    revoked_plan_id = 'purge-kernel-revoked'
+    content = b'gate-object-payload'
+    revoked_content = b'gate-object-revoked-payload'
+    digest = 'a' * 64
+    revoked_digest = 'c' * 64
+
+    def deterministic_item_id(pid, target):
+        # Mirrors store.quarantineItemID: sha256(planID \0 actionIndex \0 targetPath),
+        # first 24 hex chars, prefixed with 'q-'.
+        return 'q-' + hashlib.sha256(f'{pid}\x00{0}\x00{target}'.encode()).hexdigest()[:24]
+
+    object_path = authz_state / 'quarantine' / 'gate-object'
+    revoked_object_path = authz_state / 'quarantine' / 'gate-object-revoked'
+    item = deterministic_item_id(plan_id, str(object_path))
+    revoked_item = deterministic_item_id(revoked_plan_id, str(revoked_object_path))
+
+    legal = {'plan_id': plan_id, 'object_id': item, 'sha256': hashlib.sha256(content).hexdigest(),
+             'authorization_sha256': digest, 'size': len(content), 'device': 1, 'inode': 2}
+
+    def purged(fields):
+        return {'op': 'PURGE', 'fields': fields}
+
+    def without(d, key):
+        rest = dict(d)
+        rest.pop(key)
+        return rest
+
+    authz_envelopes = [
+        purged(legal),
+        purged({**legal, 'authorization_sha256': 'b' * 64}),
+        purged({**legal, 'size': len(content) + 1}),
+        purged({**legal, 'object_id': 'e' * 64}),
+        purged(without(legal, 'plan_id')),
+        purged({**legal, 'plan_id': 'purge-does-not-exist'}),
+        purged({'plan_id': revoked_plan_id, 'object_id': revoked_item,
+                'sha256': hashlib.sha256(revoked_content).hexdigest(),
+                'authorization_sha256': revoked_digest, 'size': len(revoked_content),
+                'device': 1, 'inode': 2}),
+        {'op': 'PING', 'fields': {}},
+        {'op': 'STATUS', 'fields': {}},
+    ]
+    expected_authz_outcomes = [
+        'PURGE:authorized_verdict',
+        'PURGE:denied:tampered',
+        'PURGE:denied:wrong_object',
+        'PURGE:denied:wrong_object',
+        'PURGE:denied:wrong_plan',
+        'PURGE:denied:wrong_plan',
+        'PURGE:denied:revoked',
+        'PING:executed',
+        'STATUS:executed',
+    ]
+    authz_process = launch(probe_config('authzgate', 'authorize', authz_run, authz_state,
+                                        envelopes=authz_envelopes), worker)
+    try:
+        ready = handshake(authz_process, 'authzgate')
+        assert ready['state'] == 'READY', 'authorize worker did not start'
+        identity(ready['pid'], worker)
+        sender = launch(probe_config('authzgate-send', 'send', authz_run, authz_state,
+                                     socket_path=ready['socket'], envelopes=authz_envelopes,
+                                     owner=caller), caller)
+        try:
+            reach(caller, 'w', ready['socket'])
+            sent = handshake(sender, 'authzgate-send')
+            remaining, errors = sender.communicate(timeout=20)
+            assert sender.returncode == 0 and errors == b'', 'authorize send child failed'
+            # ok=true exactly for the legal purge, the PING and the STATUS.
+            for entry, expected in zip(sent['outcomes'], expected_authz_outcomes):
+                op, _, body = entry.partition(':')
+                answer = json.loads(body)
+                should_pass = expected.endswith('authorized_verdict') or expected.endswith('executed')
+                assert answer['ok'] is should_pass, (entry, expected)
+        finally:
+            settle(sender)
+        outcome = handshake(authz_process, 'authzgate-outcome')
+        assert outcome['state'] == 'PASS', 'authorize case failed'
+        assert outcome['category'] == 'authorize', outcome.get('category')
+        assert outcome['outcomes'] == expected_authz_outcomes, outcome.get('outcomes')
+        assert outcome['executable'] == ['PING', 'STATUS'], outcome.get('executable')
+        remaining, errors = authz_process.communicate(timeout=15)
+        assert authz_process.returncode == 0 and errors == b'', 'authorize child failed'
+        # The worker-side invariant already proved the object is unchanged;
+        # double-check from the driver so the claim does not rest on the
+        # component under test alone.
+        assert object_path.read_bytes() == content, 'the eligible verdict modified the object'
+        record('worker_authorizes_legal_and_types_denials', True,
+               'durable gate: eligible verdict for the legal envelope, typed denials '
+               '(tampered/wrong_object/wrong_plan/revoked) over one real authorized connection')
+    finally:
+        settle(authz_process)
+
     print(json.dumps({'result': 'PASS' if all(r['result'] == 'PASS' for r in results) else 'FAIL',
                       'scope': 'DISPOSABLE_NATIVE_PRIVATE_WORKER_NOT_PRODUCT_OR_NAS_OR_DEPLOYMENT_ACCEPTANCE',
                       'checks': results,

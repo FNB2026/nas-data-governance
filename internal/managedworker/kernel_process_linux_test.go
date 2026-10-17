@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/FNB2026/nas-data-governance/internal/managedfs"
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 // envelope is one request exactly as the caller composed it. Field values are
@@ -97,6 +98,8 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		sendMode(t, input.Socket, input.Envelopes)
 	case "dispatch":
 		dispatchMode(t, layout, subject, caller, input.Envelopes)
+	case "authorize":
+		authorizeMode(t, layout, subject, caller, input.State, input.Envelopes)
 	case "seal_refused":
 		sealRefusedMode(t, layout, subject, input.Root, input.State)
 	case "seal":
@@ -656,4 +659,91 @@ func sendMode(t *testing.T, socket string, envelopes []envelope) {
 		outcomes = append(outcomes, env.Op+":"+string(answer))
 	}
 	emit(map[string]any{"state": "PASS", "category": "sent", "outcomes": outcomes})
+}
+
+// authorizeMode runs the full controlled chain over a real authorized
+// connection: the worker seeds its own durable authorization store (a real
+// quarantine registration plus an approved, dry-run-verified purge plan and a
+// rolled-back plan), wires the business gate onto that store, and answers each
+// envelope with either a typed durable-authorization denial or — for the one
+// legal envelope — an internal eligible Verdict. The verdict performs no
+// operation: the seeded object is proven byte-identical afterwards, and the
+// executable surface is still exactly PING and STATUS.
+func authorizeMode(t *testing.T, layout Layout, subject, caller Subject, stateDir string, envelopes []envelope) {
+	t.Helper()
+	if len(envelopes) == 0 {
+		t.Fatal("no operations requested")
+	}
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		t.Fatal("authorize gate refused", refused)
+	}
+	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(stateDir, "authz-gate.db"))
+	if err != nil {
+		t.Fatal("authorize store unavailable", err)
+	}
+	defer st.Close()
+	_, _, _, _, objectPath, _, _ := seedApprovedPurge(t, ctx, st, stateDir)
+	gate := NewStoreAuthorizationGate(st)
+	listener, err := Listen(layout, subject, []Subject{caller})
+	if err != nil {
+		t.Fatal("listen refused", err)
+	}
+	defer listener.Close()
+	emit(map[string]any{"state": "READY", "socket": listener.Addr(), "pid": os.Getpid()})
+	conn, err := listener.Accept()
+	if err != nil {
+		t.Fatal("accept refused", err)
+	}
+	defer conn.Close()
+	outcomes := []string{}
+	for range envelopes {
+		request, err := conn.ReadRequest()
+		if err != nil {
+			t.Fatal("request refused", err)
+		}
+		response, err := DispatchAuthorized(ctx, request, conn.Peer(), gate)
+		switch {
+		case err == nil:
+			if v, ok := response.(Verdict); ok && v.Eligible {
+				outcomes = append(outcomes, request.Op+":authorized_verdict")
+			} else {
+				outcomes = append(outcomes, request.Op+":executed")
+			}
+		case errors.Is(err, ErrAuthorization):
+			var denied *AuthorizationDenied
+			if errors.As(err, &denied) {
+				outcomes = append(outcomes, request.Op+":denied:"+string(denied.Reason))
+			} else {
+				outcomes = append(outcomes, request.Op+":refused")
+			}
+		case errors.Is(err, ErrProtocol):
+			outcomes = append(outcomes, request.Op+":protocol_refused")
+		default:
+			outcomes = append(outcomes, request.Op+":refused")
+		}
+		raw, err := json.Marshal(map[string]any{"ok": err == nil, "op": request.Op})
+		if err != nil {
+			t.Fatal("response encoding failed", err)
+		}
+		if err := conn.WriteResponse(raw); err != nil {
+			t.Fatal("response write failed", err)
+		}
+	}
+	// An eligible verdict forms an internal record and nothing else: the
+	// seeded object must be byte-identical after the whole exchange.
+	after, err := os.ReadFile(objectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != "gate-object-payload" {
+		t.Fatal("an eligible verdict must not modify the object")
+	}
+	if Executable()[0] != "PING" || len(Executable()) != 2 {
+		t.Fatal("executable operations changed", Executable())
+	}
+	emit(map[string]any{"state": "PASS", "category": "authorize", "outcomes": outcomes,
+		"executable": Executable()})
 }

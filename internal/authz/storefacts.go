@@ -20,27 +20,43 @@ import (
 // pending restores, recoverable purge journals) and additionally probes the
 // execution lock file, which reports three states: confirmed free, confirmed
 // held, and unknown (an error, and therefore a refusal).
+//
+// Lock ownership (the re-verification phase of the chained contract) is
+// claimed only through an ExecutionLockScope acquired from this same store.
+// There is deliberately no constructor that accepts a caller-supplied
+// owns-callback: a callback can keep returning true after the lock is gone,
+// which is the A6 window this design closes.
 type storeFacts struct {
 	store *store.SQLiteStore
-	// ownsExecutionLock reports that the calling component already holds the
-	// execution lock — the re-verification phase of the chained contract.
-	// When true, a "held" probe result reflects our own reservation, which
-	// flock exclusivity guarantees no competing writer shares. Journal-based
-	// recovery evidence still blocks independently.
-	ownsExecutionLock func() bool
+	// scope is the real execution-lock reservation held by the calling
+	// component, or nil when this fact source runs before the lock is
+	// reserved. Ownership is evaluated freshly on every facts read, so a
+	// scope released mid-chain stops being ownership for later reads.
+	scope *ExecutionLockScope
 }
 
-// NewStoreFacts builds a FactSource from the durable store.
+// NewStoreFacts builds a FactSource from the durable store, with no execution
+// lock ownership claim. This is the initial authorization gate.
 func NewStoreFacts(st *store.SQLiteStore) FactSource {
 	return &storeFacts{store: st}
 }
 
-// NewStoreFactsOwningExecutionLock builds a FactSource for the re-verification
-// phase of the chained contract, where the caller already holds the execution
-// lock. The owns callback must report exactly the span during which the caller
-// holds the lock.
-func NewStoreFactsOwningExecutionLock(st *store.SQLiteStore, owns func() bool) FactSource {
-	return &storeFacts{store: st, ownsExecutionLock: owns}
+// NewStoreFactsWithScope builds a FactSource for the re-verification phase of
+// the chained contract, where the caller holds the execution lock through
+// scope. The scope must have been acquired from the same store; a scope from
+// another database, a zero-value scope, or a scope that has since been
+// released is not ownership, and the plain lock probe then governs.
+func NewStoreFactsWithScope(st *store.SQLiteStore, scope *ExecutionLockScope) FactSource {
+	return &storeFacts{store: st, scope: scope}
+}
+
+// ownsExecutionLock reports that the calling component really holds the
+// execution lock of exactly this store right now. A held probe result that
+// this predicate covers reflects our own reservation, which flock exclusivity
+// guarantees no competing writer shares. Journal-based recovery evidence
+// still blocks independently.
+func (f *storeFacts) ownsExecutionLock() bool {
+	return f.scope.Covers(f.store)
 }
 
 func (f *storeFacts) ReadOnlyFacts(ctx context.Context, op OpKind, planID string) (Facts, error) {
@@ -101,13 +117,14 @@ func (f *storeFacts) ReadOnlyFacts(ctx context.Context, op OpKind, planID string
 	facts.ApprovalCorroboration = corroboration
 
 	// Execution lock: the probe distinguishes free / held / unknown, and an
-	// unknown state is an error. Our own reservation is not a competing
-	// writer's.
+	// unknown state is an error. Our own reservation — proven by a scope
+	// acquired from this same store and not yet released — is not a
+	// competing writer's.
 	held, err := f.store.ExecutionLockHeld()
 	if err != nil {
 		return Facts{}, err
 	}
-	if held && !(f.ownsExecutionLock != nil && f.ownsExecutionLock()) {
+	if held && !f.ownsExecutionLock() {
 		facts.RecoveryLockHeld = true
 	}
 

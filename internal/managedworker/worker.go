@@ -62,13 +62,17 @@ const maxRequestBytes = 64 << 10
 
 // The protocol is a fixed op plus a fixed key set per op. Any other key is
 // refused, so a path, a command, an environment variable or an execution hint
-// cannot be smuggled into a request even if a caller is authorized.
+// cannot be smuggled into a request even if a caller is authorized. plan_id
+// names the durable authorization plan a dangerous request claims: the
+// business gate binds it against the store. An envelope without it still
+// decodes (omission is meaningful) and is refused by the business gate as a
+// typed wrong_plan, not as a protocol error.
 var allowedKeys = map[string][]string{
 	"PING":    {},
 	"STATUS":  {},
-	"SEAL":    {"object_id", "size", "sha256", "authorization_sha256"},
-	"PURGE":   {"object_id", "authorization_sha256", "size", "sha256", "device", "inode"},
-	"INSPECT": {"object_id", "size", "sha256", "device", "inode"},
+	"SEAL":    {"object_id", "size", "sha256", "authorization_sha256", "plan_id"},
+	"PURGE":   {"object_id", "authorization_sha256", "size", "sha256", "device", "inode", "plan_id"},
+	"INSPECT": {"object_id", "size", "sha256", "device", "inode", "plan_id"},
 }
 
 // Ops returns the fixed set of operations this prototype accepts.

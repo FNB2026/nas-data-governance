@@ -53,17 +53,19 @@ func runChainedContract(t *testing.T, ctx context.Context, st *store.SQLiteStore
 		return audit
 	}
 
-	// Reserve the execution lock for the whole re-verification + validation span.
-	release, err := st.AcquireExecutionLock()
+	// Reserve the execution lock for the whole re-verification + validation
+	// span through the real scope: ownership is managed by the release handle
+	// itself, never by a caller-supplied predicate.
+	scope, err := AcquireExecutionLockScope(st)
 	if err != nil {
 		t.Fatalf("acquire execution lock: %v", err)
 	}
-	defer release()
+	defer scope.Release()
 	audit.LockAcquired = true
 
-	// Re-verify while holding the lock: our own reservation is not a
-	// competing writer's, but journal-based recovery still blocks.
-	el2, err := v.Check(ctx, NewStoreFactsOwningExecutionLock(st, func() bool { return true }), req)
+	// Re-verify while holding the lock through the scope: our own reservation
+	// is not a competing writer's, but journal-based recovery still blocks.
+	el2, err := v.Check(ctx, NewStoreFactsWithScope(st, scope), req)
 	if err != nil {
 		t.Fatalf("authz re-check under lock: %v", err)
 	}
