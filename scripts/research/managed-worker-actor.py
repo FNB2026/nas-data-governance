@@ -59,9 +59,25 @@ def main():
     # input and the socket by exact path, while every probe file stays private
     # to the identity that runs it. A sealed base would stop an outsider at the
     # filesystem and the peer-credential check would never be what refused it.
+    def directory(path, mode, owner=None):
+        """Create a directory with an exact mode and prove it.
+
+        mkdir's mode argument is filtered by the process umask, which is 0o077
+        here. A directory meant to be reachable would therefore silently come
+        out sealed at 0700: the peer would be stopped by the filesystem instead
+        of by its credentials, and the case would prove nothing while still
+        looking healthy. chmod is not filtered, so the mode is set explicitly
+        and then read back.
+        """
+        path.mkdir(mode=mode)
+        os.chmod(path, mode)
+        assert os.stat(path).st_mode & 0o7777 == mode, 'directory mode not exact: ' + str(path)
+        if owner is not None:
+            os.chown(path, owner, owner)
+        return path
+
     base = Path('/var/lib') / ('ndg-managed-worker-' + uuid.uuid4().hex)
-    base.mkdir(mode=0o711)
-    os.chown(base, worker, worker)
+    directory(base, 0o711, worker)
     results = []
 
     def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None):
@@ -130,13 +146,10 @@ def main():
         # unwritable by anyone but the worker. State is strictly private. The
         # area above them is traversable but not listable for the same reason.
         area = base / name
-        area.mkdir(mode=0o711)
+        directory(area, 0o711, worker)
         run_dir, state_dir = area / 'run', area / 'state'
-        run_dir.mkdir(mode=0o755)
-        state_dir.mkdir(mode=0o700)
-        for directory in (run_dir, state_dir):
-            os.chown(directory, worker, worker)
-        os.chown(area, worker, worker)
+        directory(run_dir, 0o755, worker)
+        directory(state_dir, 0o700, worker)
         if foreign_writable:
             os.chmod(run_dir, 0o777)
         return run_dir, state_dir
@@ -311,8 +324,7 @@ def main():
     # Replace the objects directory with a fresh one: the stored child identity
     # in control.json no longer describes what is on disk.
     shutil.rmtree(swap_root / 'objects')
-    (swap_root / 'objects').mkdir(mode=0o700)
-    os.chown(swap_root / 'objects', worker, worker)
+    directory(swap_root / 'objects', 0o700, worker)
     swapped = launch(probe_config('swap-after', 'root', swap_run, swap_state,
                                   root=str(swap_root)), worker)
     try:
@@ -336,8 +348,7 @@ def main():
     finally:
         settle(boot)
     decoy = mount_state / 'decoy'
-    decoy.mkdir(mode=0o700)
-    os.chown(decoy, worker, worker)
+    directory(decoy, 0o700, worker)
     run('mount', '--bind', str(decoy), str(mount_root))
     remounted = launch(probe_config('mount-after', 'root', mount_run, mount_state,
                                     root=str(mount_root)), worker)
