@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,16 +34,17 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		t.Fatal("private probe input unavailable")
 	}
 	var input struct {
-		Mode      string `json:"mode"`
-		Run       string `json:"run"`
-		State     string `json:"state"`
-		Root      string `json:"root"`
-		Socket    string `json:"socket"`
-		Bootstrap bool   `json:"bootstrap"`
-		WorkerUID uint32 `json:"worker_uid"`
-		WorkerGID uint32 `json:"worker_gid"`
-		CallerUID uint32 `json:"caller_uid"`
-		CallerGID uint32 `json:"caller_gid"`
+		Mode      string   `json:"mode"`
+		Run       string   `json:"run"`
+		State     string   `json:"state"`
+		Root      string   `json:"root"`
+		Socket    string   `json:"socket"`
+		Ops       []string `json:"ops"`
+		Bootstrap bool     `json:"bootstrap"`
+		WorkerUID uint32   `json:"worker_uid"`
+		WorkerGID uint32   `json:"worker_gid"`
+		CallerUID uint32   `json:"caller_uid"`
+		CallerGID uint32   `json:"caller_gid"`
 	}
 	if json.Unmarshal(raw, &input) != nil {
 		t.Fatal("private probe input malformed")
@@ -79,6 +81,12 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		}
 		_ = conn.Close()
 		emit(map[string]any{"state": "PASS", "category": "dialed", "uid": os.Geteuid()})
+	case "send":
+		// The authorized peer sends the operations itself, so a refusal is
+		// witnessed by the caller that would have performed it.
+		sendMode(t, input.Socket, input.Ops)
+	case "dispatch":
+		dispatchMode(t, layout, subject, caller, input.Ops)
 	case "pending":
 		// Begins a real SealCopy, announces readiness from inside the copy,
 		// then waits: the driver SIGKILLs this process at that exact point so
@@ -329,4 +337,102 @@ func pendingMode(t *testing.T, layout Layout, subject Subject, root, state strin
 
 func emit(value map[string]any) {
 	_ = json.NewEncoder(os.Stdout).Encode(value)
+}
+
+// dispatchMode proves that an authorized caller still cannot reach SEAL, PURGE
+// or INSPECT. The peer identity was already established by Accept, so this
+// connection is as privileged as a connection can get, and each request is
+// complete and well formed: what refuses them is authorization, not validation.
+// Reaching the socket is therefore never the same permission as deleting an
+// object.
+func dispatchMode(t *testing.T, layout Layout, subject, caller Subject, ops []string) {
+	t.Helper()
+	if len(ops) == 0 {
+		t.Fatal("no operations requested")
+	}
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		t.Fatal("dispatch gate refused", refused)
+	}
+	defer func() { _ = lease.Release() }()
+	listener, err := Listen(layout, subject, []Subject{caller})
+	if err != nil {
+		t.Fatal("listen refused", err)
+	}
+	defer listener.Close()
+	emit(map[string]any{"state": "READY", "socket": listener.Addr(), "pid": os.Getpid()})
+	conn, err := listener.Accept()
+	if err != nil {
+		t.Fatal("accept refused", err)
+	}
+	defer conn.Close()
+	outcomes := []string{}
+	for range ops {
+		request, err := conn.ReadRequest()
+		if err != nil {
+			t.Fatal("request refused", err)
+		}
+		response, err := Dispatch(context.Background(), request)
+		if err != nil {
+			outcomes = append(outcomes, request.Op+":refused")
+		} else if response == nil {
+			outcomes = append(outcomes, request.Op+":empty")
+		} else {
+			outcomes = append(outcomes, request.Op+":executed")
+		}
+		raw, err := json.Marshal(map[string]any{"ok": err == nil, "op": request.Op})
+		if err != nil {
+			t.Fatal("response encoding failed", err)
+		}
+		if err := conn.WriteResponse(raw); err != nil {
+			t.Fatal("response write failed", err)
+		}
+	}
+	if Executable()[0] != "PING" || len(Executable()) != 2 {
+		t.Fatal("executable operations changed", Executable())
+	}
+	emit(map[string]any{"state": "PASS", "category": "dispatch", "outcomes": outcomes,
+		"executable": Executable()})
+}
+
+// sendMode runs inside the authorized peer identity and sends each operation as
+// a real framed request, reading the answer back with the same bound the
+// product enforces so the client cannot be the thing that accepts an oversized
+// response.
+func sendMode(t *testing.T, socket string, ops []string) {
+	t.Helper()
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal("dial failed", err)
+	}
+	defer conn.Close()
+	client := &Conn{conn: conn.(*net.UnixConn)}
+	outcomes := []string{}
+	for _, op := range ops {
+		body, err := json.Marshal(map[string]string{"op": op})
+		if err != nil {
+			t.Fatal("request encoding failed", err)
+		}
+		raw, err := frame(body)
+		if err != nil {
+			t.Fatal("frame failed", err)
+		}
+		if _, err := client.conn.Write(raw); err != nil {
+			t.Fatal("write failed", err)
+		}
+		var header [4]byte
+		if _, err := io.ReadFull(client.conn, header[:]); err != nil {
+			t.Fatal("response read failed", err)
+		}
+		size := binary.BigEndian.Uint32(header[:])
+		if size == 0 || size > maxRequestBytes {
+			t.Fatal("response bound", size)
+		}
+		answer := make([]byte, size)
+		if _, err := io.ReadFull(client.conn, answer); err != nil {
+			t.Fatal("response read failed", err)
+		}
+		outcomes = append(outcomes, op+":"+string(answer))
+	}
+	emit(map[string]any{"state": "PASS", "category": "sent", "outcomes": outcomes})
 }

@@ -79,12 +79,12 @@ def main():
     directory(base, 0o711, worker)
     results = []
 
-    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None):
+    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None, ops=()):
         """owner defaults to the worker, but a dialer must be able to read its
         own config, so each probe file is owned by the identity that runs it."""
         path = base / (name + '.json')
         payload = {'mode': mode, 'run': str(run_dir), 'state': str(state_dir), 'root': root,
-                   'socket': socket_path, 'bootstrap': bootstrap,
+                   'socket': socket_path, 'ops': list(ops), 'bootstrap': bootstrap,
                    'worker_uid': worker, 'worker_gid': worker,
                    'caller_uid': caller, 'caller_gid': caller}
         private(path, json.dumps(payload).encode(), worker if owner is None else owner)
@@ -464,6 +464,43 @@ def main():
         # cannot repair a launcher that left it out. The gate has to refuse, and
         # it has to refuse before the root exists.
         assert not nnp_root.exists(), 'the root was created before no-new-privs was required'
+    finally:
+        settle(process)
+
+    # --- 15: an authorized caller still cannot reach SEAL, PURGE or INSPECT ---
+    # Reaching the socket is not the same permission as deleting an object, so
+    # the operations are sent by the authorized peer itself and each refusal is
+    # witnessed by the caller that would have performed it.
+    ops = ['SEAL', 'PURGE', 'INSPECT', 'STATUS']
+    disp_run, disp_state = layout('dispatch')
+    process = launch(probe_config('dispatch', 'dispatch', disp_run, disp_state, ops=ops), worker)
+    try:
+        ready = handshake(process, 'dispatch')
+        assert ready['state'] == 'READY', 'dispatch worker did not start'
+        identity(ready['pid'], worker)
+        sender = launch(probe_config('send', 'send', disp_run, disp_state,
+                                     socket_path=ready['socket'], ops=ops, owner=caller), caller)
+        try:
+            reach(caller, 'w', ready['socket'])
+            outcome = handshake(sender, 'send')
+            remaining, errors = sender.communicate(timeout=20)
+            assert sender.returncode == 0 and errors == b'', 'send child failed'
+            for entry in outcome['outcomes']:
+                op, _, body = entry.partition(':')
+                answer = json.loads(body)
+                assert answer['ok'] is (op == 'STATUS'), entry
+        finally:
+            settle(sender)
+        outcome = handshake(process, 'dispatch-outcome')
+        assert outcome['state'] == 'PASS', 'dispatch case failed'
+        assert outcome['category'] == 'dispatch', outcome.get('category')
+        assert outcome['outcomes'] == ['SEAL:refused', 'PURGE:refused',
+                                       'INSPECT:refused', 'STATUS:executed'], outcome.get('outcomes')
+        assert outcome['executable'] == ['PING', 'STATUS'], outcome.get('executable')
+        remaining, errors = process.communicate(timeout=15)
+        assert process.returncode == 0 and errors == b'', 'dispatch child failed'
+        record('worker_refuses_dangerous_ops_for_authorized_peer', True,
+               'SEAL/PURGE/INSPECT refused over an authorized connection')
     finally:
         settle(process)
 
