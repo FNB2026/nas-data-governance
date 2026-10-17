@@ -40,6 +40,7 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		Root      string   `json:"root"`
 		Socket    string   `json:"socket"`
 		Ops       []string `json:"ops"`
+		Auth      string   `json:"auth"`
 		Bootstrap bool     `json:"bootstrap"`
 		WorkerUID uint32   `json:"worker_uid"`
 		WorkerGID uint32   `json:"worker_gid"`
@@ -87,11 +88,13 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		sendMode(t, input.Socket, input.Ops)
 	case "dispatch":
 		dispatchMode(t, layout, subject, caller, input.Ops)
+	case "seal_refused":
+		sealRefusedMode(t, layout, subject, input.Root, input.State)
 	case "pending":
 		// Begins a real SealCopy, announces readiness from inside the copy,
 		// then waits: the driver SIGKILLs this process at that exact point so
 		// the next worker meets a root with a durable pending intent.
-		pendingMode(t, layout, subject, input.Root, input.State, input.Bootstrap)
+		pendingMode(t, layout, subject, input.Root, input.State, input.Bootstrap, input.Auth)
 	case "hold":
 		// Holds the lease while the driver tries to start a second worker.
 		if err := RequireSubject(subject); err != nil {
@@ -280,7 +283,7 @@ func (b *blockedCopy) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-func pendingMode(t *testing.T, layout Layout, subject Subject, root, state string, bootstrap bool) {
+func pendingMode(t *testing.T, layout Layout, subject Subject, root, state string, bootstrap bool, auth string) {
 	t.Helper()
 	lease, refused := workerGates(t, layout, subject)
 	if refused != "" {
@@ -319,7 +322,9 @@ func pendingMode(t *testing.T, layout Layout, subject Subject, root, state strin
 		t.Fatal("writer refused", err)
 	}
 	source := &blockedCopy{entered: make(chan struct{}), block: make(chan struct{})}
-	auth := strings.Repeat("b", 64)
+	if auth == "" {
+		auth = strings.Repeat("b", 64)
+	}
 	digest := sha256.Sum256([]byte("synthetic pending input"))
 	spec := managedfs.CopySpec{
 		Size:                int64(len("synthetic pending input")),
@@ -333,6 +338,60 @@ func pendingMode(t *testing.T, layout Layout, subject Subject, root, state strin
 	emit(map[string]any{"state": "READY", "pid": os.Getpid()})
 	// Stay alive with the lease and the pending root until the driver kills us.
 	<-source.block
+}
+
+// sealRefusedMode proves a malformed approval digest is refused before anything
+// is written. The digest is the caller-supplied decision record, so a request
+// that cannot even name one must not reach the copy. After the refusals the root
+// must still open as Ready: a refusal that had left a pending intent would turn
+// an audit failure into a recovery condition, and the next worker would have to
+// refuse a root that was never actually operated on.
+func sealRefusedMode(t *testing.T, layout Layout, subject Subject, root, state string) {
+	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
+	}
+	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
+	proofPath := filepath.Join(state, "root-proof.json")
+	raw, err := os.ReadFile(proofPath)
+	if err != nil {
+		t.Fatal("persisted proof unavailable")
+	}
+	var proof managedfs.RootProof
+	if json.Unmarshal(raw, &proof) != nil {
+		t.Fatal("persisted proof malformed")
+	}
+	w, err := managedfs.OpenWriter(ctx, root, proof)
+	if err != nil {
+		t.Fatal("writer refused", err)
+	}
+	payload := "synthetic refused approval input"
+	digest := sha256.Sum256([]byte(payload))
+	for _, auth := range []string{"", "not-a-digest", strings.Repeat("z", 64), strings.Repeat("a", 63)} {
+		spec := managedfs.CopySpec{
+			Size:                int64(len(payload)),
+			SHA256:              hex.EncodeToString(digest[:]),
+			AuthorizationSHA256: auth,
+		}
+		if _, err := w.SealCopy(ctx, strings.NewReader(payload), spec); !errors.Is(err, managedfs.ErrRejected) {
+			t.Fatal("malformed approval digest accepted", auth, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal("writer close failed", err)
+	}
+	// Nothing durable happened, so the root is still Ready rather than pending.
+	fresh, err := managedfs.OpenWriter(ctx, root, proof)
+	if err != nil {
+		t.Fatal("refused copies left the root unready", err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal("second writer close failed", err)
+	}
+	emit(map[string]any{"state": "PASS", "category": "malformed_authorization_refused"})
 }
 
 func emit(value map[string]any) {

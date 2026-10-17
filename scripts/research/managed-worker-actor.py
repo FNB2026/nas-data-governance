@@ -7,6 +7,7 @@ No network, Docker, service, NAS, source cleanup or recovery-clear action.
 """
 import ctypes
 import grp
+import hashlib
 import importlib.util
 import json
 import os
@@ -79,12 +80,12 @@ def main():
     directory(base, 0o711, worker)
     results = []
 
-    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None, ops=()):
+    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None, ops=(), auth=''):
         """owner defaults to the worker, but a dialer must be able to read its
         own config, so each probe file is owned by the identity that runs it."""
         path = base / (name + '.json')
         payload = {'mode': mode, 'run': str(run_dir), 'state': str(state_dir), 'root': root,
-                   'socket': socket_path, 'ops': list(ops), 'bootstrap': bootstrap,
+                   'socket': socket_path, 'ops': list(ops), 'auth': auth, 'bootstrap': bootstrap,
                    'worker_uid': worker, 'worker_gid': worker,
                    'caller_uid': caller, 'caller_gid': caller}
         private(path, json.dumps(payload).encode(), worker if owner is None else owner)
@@ -508,6 +509,63 @@ def main():
                'SEAL/PURGE/INSPECT refused over an authorized connection')
     finally:
         settle(process)
+
+    # --- 18: a malformed approval digest is refused before anything is written ---
+    auth_run, auth_state = layout('auth')
+    auth_root = auth_state / 'managed'
+    boot = launch(probe_config('auth-boot', 'root', auth_run, auth_state,
+                               root=str(auth_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'auth-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'auth bootstrap failed'
+        assert outcome['category'] == 'bootstrap', outcome.get('category')
+    finally:
+        settle(boot)
+    before = sorted(p.name for p in (auth_root / 'objects').iterdir())
+    process = launch(probe_config('auth-refused', 'seal_refused', auth_run, auth_state,
+                                  root=str(auth_root)), worker)
+    try:
+        outcome = handshake(process, 'seal-refused')
+        remaining, errors = process.communicate(timeout=20)
+        assert process.returncode == 0 and errors == b'', 'seal-refused child failed'
+        record('worker_refuses_malformed_approval_digest',
+               outcome.get('category') == 'malformed_authorization_refused',
+               'category=' + str(outcome.get('category')))
+        # A refusal must not write: the object inventory is unchanged, and the
+        # root still opens as Ready rather than carrying a pending intent.
+        after = sorted(p.name for p in (auth_root / 'objects').iterdir())
+        assert before == after, 'a refused copy changed the object inventory'
+    finally:
+        settle(process)
+
+    # --- 19: the approval digest that is accepted is durably recorded ---
+    # The primitive records the digest for audit; it does not validate approval,
+    # so the record itself is what has to exist. The digest is chosen here and
+    # read back out of the control record while the copy is still in flight.
+    audit_run, audit_state = layout('audit')
+    audit_root = audit_state / 'managed'
+    boot = launch(probe_config('audit-boot', 'root', audit_run, audit_state,
+                               root=str(audit_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'audit-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'audit bootstrap failed'
+    finally:
+        settle(boot)
+    digest = hashlib.sha256(b'synthetic approval decision').hexdigest()
+    victim = launch(probe_config('audit-victim', 'pending', audit_run, audit_state,
+                                 root=str(audit_root), auth=digest), worker)
+    try:
+        ready = handshake(victim, 'audit-victim')
+        assert ready['state'] == 'READY', 'audit copy did not start'
+        control = json.loads((audit_root / 'control.json').read_text())
+        recorded = control.get('pending', {}).get('authorization_sha256')
+        assert recorded == digest, 'approval digest not recorded: ' + str(recorded)
+        record('worker_records_approval_digest_for_audit', True,
+               'authorization_sha256 recorded in the durable intent')
+    finally:
+        settle(victim)
 
     print(json.dumps({'result': 'PASS' if all(r['result'] == 'PASS' for r in results) else 'FAIL',
                       'scope': 'DISPOSABLE_NATIVE_PRIVATE_WORKER_NOT_PRODUCT_OR_NAS_OR_DEPLOYMENT_ACCEPTANCE',
