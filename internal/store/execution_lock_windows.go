@@ -31,3 +31,32 @@ func (s *SQLiteStore) AcquireExecutionLock() (func(), error) {
 	}
 	return func() { _ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, ov); _ = f.Close() }, nil
 }
+
+// ExecutionLockHeld reports whether another writer currently holds the
+// execution/recovery lock, without acquiring it. It is a read-only probe used
+// by the authz verifier's recovery-lock check; it never blocks and never
+// persists a lock.
+func (s *SQLiteStore) ExecutionLockHeld() bool {
+	path, e := windows.UTF16PtrFromString(s.path + ".execution.lock")
+	if e != nil {
+		return false
+	}
+	handle, e := windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if e != nil {
+		// No lock file yet, or unreadable: not held, so the caller falls
+		// through to the journal-based recovery checks.
+		return false
+	}
+	f := os.NewFile(uintptr(handle), "execution lock probe")
+	defer f.Close()
+	ov := new(windows.Overlapped)
+	if e := windows.LockFileEx(windows.Handle(f.Fd()),
+		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
+		0, 1, 0, ov); e != nil {
+		return true // a writer holds it
+	}
+	_ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, ov)
+	return false
+}
