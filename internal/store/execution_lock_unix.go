@@ -33,23 +33,35 @@ func (s *SQLiteStore) AcquireExecutionLock() (func(), error) {
 	return func() { _ = unix.Flock(fd, unix.LOCK_UN); _ = f.Close() }, nil
 }
 
-// ExecutionLockHeld reports whether another writer currently holds the
-// execution/recovery lock, without acquiring it. It is a read-only probe used
-// by the authz verifier's recovery-lock check; it never blocks and never
-// persists a lock.
-func (s *SQLiteStore) ExecutionLockHeld() bool {
+// ExecutionLockHeld probes whether a writer currently holds the
+// execution/recovery lock, without acquiring it. It never blocks and never
+// persists a lock. Three outcomes are distinguished and callers MUST treat
+// them differently:
+//
+//	(false, nil)  — confirmed free: the lock file does not exist (acquisition
+//	                always creates it) or the probe took and released the lock;
+//	(true, nil)   — confirmed held: the probe was refused with EWOULDBLOCK/EAGAIN;
+//	(false, err)  — unknown: the lock file exists but is not accessible (wrong
+//	                type, permissions, symlink, unexpected flock error). The
+//	                caller must refuse, never proceed as if the lock were free.
+func (s *SQLiteStore) ExecutionLockHeld() (bool, error) {
 	fd, e := unix.Open(s.path+".execution.lock", unix.O_RDWR|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if e != nil {
-		// No lock file yet, or unreadable: treat as not held so the caller
-		// falls through to the journal-based recovery checks.
-		return false
+		if errors.Is(e, unix.ENOENT) {
+			// No lock file: acquisition creates one before taking the flock,
+			// so no writer can hold the lock.
+			return false, nil
+		}
+		return false, errors.New("store: execution lock state unknown")
 	}
 	f := os.NewFile(uintptr(fd), "execution lock probe")
 	defer f.Close()
 	if e := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); e != nil {
-		// EWOULDBLOCK / EAGAIN: a writer holds it.
-		return true
+		if errors.Is(e, unix.EWOULDBLOCK) || errors.Is(e, unix.EAGAIN) {
+			return true, nil // a writer holds it
+		}
+		return false, errors.New("store: execution lock state unknown")
 	}
 	_ = unix.Flock(fd, unix.LOCK_UN)
-	return false
+	return false, nil
 }
