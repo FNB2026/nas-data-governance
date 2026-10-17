@@ -55,8 +55,10 @@ func RequireNoNewPrivs() error {
 	return nil
 }
 
-// SetNoNewPrivs is used by the worker's own startup path, before any private
-// root is opened. It is irreversible for this process.
+// SetNoNewPrivs sets the calling thread's no-new-privs bit. It is per-thread,
+// not per-process: it cannot cover threads that already exist, and it is
+// therefore not a substitute for a launcher that establishes no-new-privs
+// before the process starts. It is irreversible once set.
 func SetNoNewPrivs() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return ErrUnsupported

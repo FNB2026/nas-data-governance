@@ -116,10 +116,18 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 // refused. Every path that touches the managed root goes through it, so a root
 // can never be created, opened or recovered while a gate is still open, and the
 // refusal is observable instead of silent.
+//
+// No-new-privs is required, not set. Setting it from inside the process only
+// covers the calling thread, and a Go worker already has other threads by the
+// time any test code runs, so a worker cannot repair a launcher that left it
+// out. The launcher has to establish it before the process starts.
 func workerGates(t *testing.T, layout Layout, subject Subject) (*Lease, string) {
 	t.Helper()
-	if err := SetNoNewPrivs(); err != nil {
-		t.Fatal("no-new-privs unavailable", err)
+	if err := RequireNoNewPrivs(); err != nil {
+		if !errors.Is(err, ErrIsolation) {
+			t.Fatal("no-new-privs check unavailable", err)
+		}
+		return nil, "no_new_privs_required"
 	}
 	if err := RequireSubject(subject); err != nil {
 		if !errors.Is(err, ErrIsolation) {

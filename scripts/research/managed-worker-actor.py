@@ -446,22 +446,24 @@ def main():
     finally:
         settle(holder)
 
-    # --- 14: the worker establishes no-new-privs itself, before it holds a root ---
+    # --- 14: the root path refuses a worker the launcher left privilegeable ---
     nnp_root_run, nnp_root_state = layout('nnproot')
     nnp_root = nnp_root_state / 'managed'
-    process = launch(probe_config('nnproot', 'pending', nnp_root_run, nnp_root_state,
+    process = launch(probe_config('nnproot', 'root', nnp_root_run, nnp_root_state,
                                   root=str(nnp_root), bootstrap=True), worker,
                      privileged_safe=False)
     try:
-        ready = handshake(process, 'nnproot')
-        assert ready['state'] == 'READY', 'no-new-privs root worker did not start'
-        # The launcher deliberately did not set no-new-privs. The worker sets it
-        # as its first act, and it is attested here from procfs while the worker
-        # already holds the managed root, so the ordering is observable rather
-        # than assumed.
-        identity(ready['pid'], worker)
-        record('worker_sets_no_new_privs_before_holding_root', True,
-               'NoNewPrivs=1 attested while the managed root is held')
+        outcome = handshake(process, 'root-without-no-new-privs')
+        remaining, errors = process.communicate(timeout=20)
+        assert process.returncode == 0 and errors == b'', 'no-new-privs root child failed'
+        record('worker_refuses_root_without_no_new_privs',
+               outcome.get('category') == 'no_new_privs_required',
+               'category=' + str(outcome.get('category')))
+        # Setting no-new-privs from inside the process only covers the calling
+        # thread, and a Go worker already has others by then, so the worker
+        # cannot repair a launcher that left it out. The gate has to refuse, and
+        # it has to refuse before the root exists.
+        assert not nnp_root.exists(), 'the root was created before no-new-privs was required'
     finally:
         settle(process)
 
