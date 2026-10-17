@@ -48,6 +48,9 @@ import (
 //	scope, _ := authz.AcquireExecutionLockScope(store)  // real flock reservation
 //	AuthorizeRestoreWithScope(ctx, ..., scope)          // re-verification: ownership proven, not claimed
 //
+// Purge requests additionally carry the caller's live device/inode
+// observation of the object, mirroring the Worker envelope contract.
+//
 // The with-scope phase is the A6-corrected re-verification: ownership is
 // carried by the same release handle the lock was acquired with, and a scope
 // bound to another database is never ownership evidence for this store.
@@ -124,7 +127,7 @@ func (g *AuthorizationGate) claimsFor(ctx context.Context, op authz.OpKind, plan
 // decision is the shared body of every entry point: load durable claims,
 // verify against the gate's own fact source, audit, and translate refusals
 // into the typed error.
-func (g *AuthorizationGate) decision(ctx context.Context, op authz.OpKind, planID, presentedDigest string, scope *authz.ExecutionLockScope) (authz.Eligibility, error) {
+func (g *AuthorizationGate) decision(ctx context.Context, op authz.OpKind, planID, presentedDigest string, scope *authz.ExecutionLockScope, live *liveIdentity) (authz.Eligibility, error) {
 	facts := authz.NewStoreFacts(g.store)
 	if scope != nil {
 		facts = authz.NewStoreFactsWithScope(g.store, scope)
@@ -146,6 +149,10 @@ func (g *AuthorizationGate) decision(ctx context.Context, op authz.OpKind, planI
 	}
 	if claims.hasIdentity {
 		req.Size = authz.Int64Field(claims.size)
+	}
+	if live != nil {
+		req.Device = authz.Uint64Field(live.device)
+		req.Inode = authz.Uint64Field(live.inode)
 	}
 	el, verr := g.verifier.Check(ctx, facts, req)
 	if verr != nil {
@@ -206,7 +213,7 @@ func (g *AuthorizationGate) audit(ctx context.Context, op authz.OpKind, planID, 
 // plan planID with the presented digest. This is the pre-lock phase: the
 // plain execution-lock probe governs the recovery evidence.
 func (g *AuthorizationGate) AuthorizeRestore(ctx context.Context, planID, presentedDigest string) (authz.Eligibility, error) {
-	return g.decision(ctx, authz.OpRestore, planID, presentedDigest, nil)
+	return g.decision(ctx, authz.OpRestore, planID, presentedDigest, nil, nil)
 }
 
 // AuthorizeRestoreWithScope is the re-verification phase, run while the
@@ -214,19 +221,31 @@ func (g *AuthorizationGate) AuthorizeRestore(ctx context.Context, planID, presen
 // scope, or a scope bound to another database is not ownership; the plain
 // lock probe then governs exactly as in the pre-lock phase.
 func (g *AuthorizationGate) AuthorizeRestoreWithScope(ctx context.Context, planID, presentedDigest string, scope *authz.ExecutionLockScope) (authz.Eligibility, error) {
-	return g.decision(ctx, authz.OpRestore, planID, presentedDigest, scope)
+	return g.decision(ctx, authz.OpRestore, planID, presentedDigest, scope, nil)
 }
 
-// AuthorizePurge verifies business authorization for a purge plan. The
-// read-only authorization path is productized here; the execution side
-// remains unreleased (PurgeReleaseAllowed=false) — an eligible purge
-// verdict authorizes nothing until the release gate opens.
-func (g *AuthorizationGate) AuthorizePurge(ctx context.Context, planID, presentedDigest string) (authz.Eligibility, error) {
-	return g.decision(ctx, authz.OpPurge, planID, presentedDigest, nil)
+// AuthorizePurge verifies business authorization for a purge plan. device
+// and inode are the caller's live identity observation of the quarantine
+// object (the same dimension a Worker envelope must carry); the executor
+// re-proves them against the mount root before any write. The read-only
+// authorization path is productized here; the execution side remains
+// unreleased (PurgeReleaseAllowed=false) — an eligible purge verdict
+// authorizes nothing until the release gate opens.
+func (g *AuthorizationGate) AuthorizePurge(ctx context.Context, planID, presentedDigest string, device, inode uint64) (authz.Eligibility, error) {
+	return g.decision(ctx, authz.OpPurge, planID, presentedDigest, nil, &liveIdentity{device: device, inode: inode})
 }
 
 // AuthorizePurgeWithScope is the re-verification phase for purge, run under
 // the caller's execution-lock scope.
-func (g *AuthorizationGate) AuthorizePurgeWithScope(ctx context.Context, planID, presentedDigest string, scope *authz.ExecutionLockScope) (authz.Eligibility, error) {
-	return g.decision(ctx, authz.OpPurge, planID, presentedDigest, scope)
+func (g *AuthorizationGate) AuthorizePurgeWithScope(ctx context.Context, planID, presentedDigest string, scope *authz.ExecutionLockScope, device, inode uint64) (authz.Eligibility, error) {
+	return g.decision(ctx, authz.OpPurge, planID, presentedDigest, scope, &liveIdentity{device: device, inode: inode})
+}
+
+// liveIdentity carries the caller's live object observation into the
+// request. It is never persisted and never becomes authorization truth on
+// its own: durable facts still bind the plan, and the executor re-proves
+// the live dimension.
+type liveIdentity struct {
+	device uint64
+	inode  uint64
 }

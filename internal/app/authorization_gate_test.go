@@ -216,7 +216,7 @@ func TestAuthorizationGate_Restore(t *testing.T) {
 		env := newGateEnv(t)
 		// A restore plan id under the purge entry point is structurally
 		// unknown to the purge fact source.
-		el, err := env.gate.AuthorizePurge(ctx, env.restorePlan.ID, env.restoreDigest)
+		el, err := env.gate.AuthorizePurge(ctx, env.restorePlan.ID, env.restoreDigest, 0, 0)
 		if err == nil || el.Eligible || el.Reason != authz.ReasonWrongPlan {
 			t.Fatalf("cross-operation reuse must be wrong_plan, got %s (%v)", el.Reason, err)
 		}
