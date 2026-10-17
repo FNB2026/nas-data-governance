@@ -138,9 +138,16 @@ func serve(t *testing.T, layout Layout, subject, caller Subject) {
 	outcomes := []string{}
 	for i := 0; i < 2; i++ {
 		conn, err := listener.Accept()
-		if err != nil {
+		// Only a kernel-attested refusal counts as "unauthorized". An accept
+		// error means the peer never arrived, or the listener stopped working,
+		// and recording that as a refusal would let this case pass without any
+		// peer credential ever having been examined.
+		if errors.Is(err, ErrUnauthorized) {
 			outcomes = append(outcomes, "unauthorized")
 			continue
+		}
+		if err != nil {
+			t.Fatal("accept failed", err)
 		}
 		_ = conn.Close()
 		outcomes = append(outcomes, "authorized")

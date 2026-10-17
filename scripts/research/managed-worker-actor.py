@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 import pwd
 import select
-import shutil
 import signal
 import subprocess
 import sys
@@ -265,7 +264,8 @@ def main():
         remaining, errors = partial.communicate(timeout=15)
         assert partial.returncode == 0 and errors == b'', 'partial child failed'
         record('worker_refuses_incomplete_root',
-               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+               outcome.get('category') == 'incomplete_refused',
+               'stage=' + str(outcome.get('stage')) + ' category=' + str(outcome.get('category')))
     finally:
         settle(partial)
 
@@ -306,7 +306,8 @@ def main():
         remaining, errors = after.communicate(timeout=20)
         assert after.returncode == 0 and errors == b'', 'post-crash child failed'
         record('worker_refuses_pending_root_after_crash',
-               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+               outcome.get('category') == 'incomplete_refused',
+               'stage=' + str(outcome.get('stage')) + ' category=' + str(outcome.get('category')))
     finally:
         settle(after)
 
@@ -321,10 +322,21 @@ def main():
         assert boot.returncode == 0 and errors == b'', 'swap bootstrap failed'
     finally:
         settle(boot)
-    # Replace the objects directory with a fresh one: the stored child identity
-    # in control.json no longer describes what is on disk.
-    shutil.rmtree(swap_root / 'objects')
+    # Replace the objects directory with a different one: the child identity
+    # stored in control.json no longer describes what is on disk.
+    #
+    # The original is moved out of the root instead of being deleted. Deleting
+    # it frees the inode, and a filesystem may hand that same inode straight
+    # back to the replacement, which leaves the recorded identity unchanged: the
+    # worker would then be right to open the root and the case would prove
+    # nothing while looking like a failure. Keeping the original alive makes the
+    # new identity necessarily different, and the assertion below says so.
+    original = os.stat(swap_root / 'objects')
+    os.rename(swap_root / 'objects', swap_state / 'objects-replaced')
     directory(swap_root / 'objects', 0o700, worker)
+    replaced = os.stat(swap_root / 'objects')
+    assert (original.st_dev, original.st_ino) != (replaced.st_dev, replaced.st_ino), \
+        'replacement kept the recorded identity; the case cannot prove anything'
     swapped = launch(probe_config('swap-after', 'root', swap_run, swap_state,
                                   root=str(swap_root)), worker)
     try:
@@ -332,7 +344,8 @@ def main():
         remaining, errors = swapped.communicate(timeout=20)
         assert swapped.returncode == 0 and errors == b'', 'post-swap child failed'
         record('worker_refuses_replaced_root',
-               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+               outcome.get('category') == 'incomplete_refused',
+               'stage=' + str(outcome.get('stage')) + ' category=' + str(outcome.get('category')))
     finally:
         settle(swapped)
 
@@ -357,7 +370,8 @@ def main():
         remaining, errors = remounted.communicate(timeout=20)
         assert remounted.returncode == 0 and errors == b'', 'post-mount child failed'
         record('worker_refuses_changed_mount',
-               outcome.get('category') == 'incomplete_refused', str(outcome.get('category')))
+               outcome.get('category') == 'incomplete_refused',
+               'stage=' + str(outcome.get('stage')) + ' category=' + str(outcome.get('category')))
     finally:
         settle(remounted)
         run('umount', str(mount_root))
@@ -381,6 +395,13 @@ def main():
                       'checks': results,
                       'uids': {'worker': worker, 'caller': caller, 'outsider': outsider},
                       'fixtures_retained_until_runner_disposal': True}))
+    # The proof is written first, so the artifact is complete, and only then is
+    # the process failed. Printing FAIL while exiting 0 would let a step with
+    # pipefail go green over a recorded failure, which is the one outcome this
+    # whole probe exists to prevent.
+    failed = [r['case'] for r in results if r['result'] != 'PASS']
+    if failed:
+        raise SystemExit('recorded failures: ' + ', '.join(failed))
 
 
 if __name__ == '__main__':
