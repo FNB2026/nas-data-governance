@@ -134,6 +134,15 @@ def main():
         return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, env=env, bufsize=0)
 
+    def launch_privileged(config):
+        """Launch the probe as the driver's own identity, root with full
+        capabilities: the strongest impostor for the dedicated worker subject."""
+        env = {**os.environ, 'NDG_MANAGED_WORKER_PROBE': str(config)}
+        return subprocess.Popen([str(binary), '-test.run=^TestManagedWorkerKernelProcess$',
+                                 '-test.timeout=60s'],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=env, bufsize=0)
+
     def settle(process):
         if process.poll() is None:
             process.kill()
@@ -383,10 +392,76 @@ def main():
         remaining, errors = process.communicate(timeout=30)
         # A failing Go test reports on stdout, never on stderr.
         report = remaining + errors
-        denied = b'layout refused' in report or b'private' in report
+        denied = any(token in report for token in
+                     (b'layout_refused', b'layout refused', b'private'))
         record('worker_refuses_shared_layout', process.returncode != 0 and denied,
                'shared run directory rejected: ' +
                report.decode('utf-8', 'replace').strip().replace('\n', ' | ')[-160:])
+    finally:
+        settle(process)
+
+    # --- 12: the root path runs the same gates, and refuses before the root exists ---
+    gate_run, gate_state = layout('gate')
+    gate_root = gate_state / 'managed'
+    impostor = launch_privileged(probe_config('gate', 'root', gate_run, gate_state,
+                                              root=str(gate_root), bootstrap=True))
+    try:
+        outcome = handshake(impostor, 'root-under-root')
+        remaining, errors = impostor.communicate(timeout=20)
+        assert impostor.returncode == 0 and errors == b'', 'impostor child failed'
+        record('worker_refuses_root_under_foreign_subject',
+               outcome.get('category') == 'subject_refused',
+               'category=' + str(outcome.get('category')))
+        # The gate has to run before the root is touched. An impostor that had
+        # reached bootstrap would already have left the directory behind, and
+        # the managed filesystem layer would also refuse root -- so the category
+        # above is what proves the worker's own gate stopped it, not that one.
+        assert not gate_root.exists(), 'the root was created before the subject gate refused'
+    finally:
+        settle(impostor)
+
+    # --- 13: a second worker cannot take a managed root another one holds ---
+    dup_run, dup_state = layout('rootdup')
+    dup_root = dup_state / 'managed'
+    holder = launch(probe_config('rootdup-hold', 'pending', dup_run, dup_state,
+                                 root=str(dup_root), bootstrap=True), worker)
+    try:
+        ready = handshake(holder, 'rootdup-hold')
+        assert ready['state'] == 'READY', 'root holder did not start'
+        identity(ready['pid'], worker)
+        duplicate = launch(probe_config('rootdup-dup', 'root', dup_run, dup_state,
+                                        root=str(dup_root)), worker)
+        try:
+            outcome = handshake(duplicate, 'rootdup-duplicate')
+            remaining, errors = duplicate.communicate(timeout=20)
+            assert duplicate.returncode == 0 and errors == b'', 'duplicate root child failed'
+            record('worker_refuses_second_root_holder',
+                   outcome.get('category') == 'duplicate_refused',
+                   'category=' + str(outcome.get('category')))
+            # The refused worker must not have opened, recovered or cleared
+            # anything: the held root keeps the control record it was built with.
+            assert (dup_root / 'control.json').exists(), 'the held root lost its control record'
+        finally:
+            settle(duplicate)
+    finally:
+        settle(holder)
+
+    # --- 14: the worker establishes no-new-privs itself, before it holds a root ---
+    nnp_root_run, nnp_root_state = layout('nnproot')
+    nnp_root = nnp_root_state / 'managed'
+    process = launch(probe_config('nnproot', 'pending', nnp_root_run, nnp_root_state,
+                                  root=str(nnp_root), bootstrap=True), worker,
+                     privileged_safe=False)
+    try:
+        ready = handshake(process, 'nnproot')
+        assert ready['state'] == 'READY', 'no-new-privs root worker did not start'
+        # The launcher deliberately did not set no-new-privs. The worker sets it
+        # as its first act, and it is attested here from procfs while the worker
+        # already holds the managed root, so the ordering is observable rather
+        # than assumed.
+        identity(ready['pid'], worker)
+        record('worker_sets_no_new_privs_before_holding_root', True,
+               'NoNewPrivs=1 attested while the managed root is held')
     finally:
         settle(process)
 

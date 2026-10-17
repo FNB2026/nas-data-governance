@@ -103,26 +103,51 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		}
 		emit(map[string]any{"state": "PASS", "category": "lease_released"})
 	case "root":
-		rootMode(t, input.Root, input.State, input.Bootstrap)
+		rootMode(t, layout, subject, input.Root, input.State, input.Bootstrap)
 	default:
 		t.Fatal("unknown probe mode")
 	}
 }
 
-func serve(t *testing.T, layout Layout, subject, caller Subject) {
+// workerGates runs the privilege gates in the order the worker establishes
+// them: no-new-privs first, because it has to be irreversible before anything
+// else runs, then the dedicated subject, the private layout and the
+// single-instance lease. It returns the lease, or the category of the gate that
+// refused. Every path that touches the managed root goes through it, so a root
+// can never be created, opened or recovered while a gate is still open, and the
+// refusal is observable instead of silent.
+func workerGates(t *testing.T, layout Layout, subject Subject) (*Lease, string) {
 	t.Helper()
 	if err := SetNoNewPrivs(); err != nil {
 		t.Fatal("no-new-privs unavailable", err)
 	}
 	if err := RequireSubject(subject); err != nil {
-		t.Fatal("subject refused", err)
+		if !errors.Is(err, ErrIsolation) {
+			t.Fatal("subject check unavailable", err)
+		}
+		return nil, "subject_refused"
 	}
 	if err := RequireLayout(layout, subject); err != nil {
-		t.Fatal("layout refused", err)
+		if !errors.Is(err, ErrIsolation) {
+			t.Fatal("layout check unavailable", err)
+		}
+		return nil, "layout_refused"
 	}
 	lease, err := AcquireLease(layout.Run, subject)
 	if err != nil {
-		t.Fatal("lease refused", err)
+		if !errors.Is(err, ErrBusy) {
+			t.Fatal("lease unavailable", err)
+		}
+		return nil, "duplicate_refused"
+	}
+	return lease, ""
+}
+
+func serve(t *testing.T, layout Layout, subject, caller Subject) {
+	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		t.Fatal("serve gate refused", refused)
 	}
 	defer func() { _ = lease.Release() }()
 	if err := lease.Record(); err != nil {
@@ -163,8 +188,18 @@ func serve(t *testing.T, layout Layout, subject, caller Subject) {
 //
 // The persisted proof lives in the state directory, never inside the managed
 // root: an extra entry inside the root would itself be a recovery condition.
-func rootMode(t *testing.T, root, state string, bootstrap bool) {
+//
+// The gates run before anything else, so a worker that is not the dedicated
+// subject, or a second worker while one holds the lease, is refused before the
+// root is created or opened.
+func rootMode(t *testing.T, layout Layout, subject Subject, root, state string, bootstrap bool) {
 	t.Helper()
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
+	}
+	defer func() { _ = lease.Release() }()
 	ctx := context.Background()
 	proofPath := filepath.Join(state, "root-proof.json")
 	if bootstrap {
@@ -231,18 +266,13 @@ func (b *blockedCopy) Read([]byte) (int, error) {
 
 func pendingMode(t *testing.T, layout Layout, subject Subject, root, state string, bootstrap bool) {
 	t.Helper()
-	ctx := context.Background()
-	if err := RequireSubject(subject); err != nil {
-		t.Fatal("subject refused", err)
-	}
-	if err := RequireLayout(layout, subject); err != nil {
-		t.Fatal("layout refused", err)
-	}
-	lease, err := AcquireLease(layout.Run, subject)
-	if err != nil {
-		t.Fatal("lease refused", err)
+	lease, refused := workerGates(t, layout, subject)
+	if refused != "" {
+		emit(map[string]any{"state": "PASS", "category": refused})
+		return
 	}
 	defer func() { _ = lease.Release() }()
+	ctx := context.Background()
 	proofPath := filepath.Join(state, "root-proof.json")
 	if bootstrap {
 		proof, err := managedfs.Initialize(ctx, root)
