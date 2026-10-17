@@ -135,10 +135,13 @@ def main():
                                 stderr=subprocess.PIPE, env=env, bufsize=0)
 
     def launch_privileged(config):
-        """Launch the probe as the driver's own identity, root with full
-        capabilities: the strongest impostor for the dedicated worker subject."""
+        """Launch the probe as root with full capabilities, but with no-new-privs
+        already established: the strongest impostor for the dedicated worker
+        subject, with the gate that would otherwise fire first satisfied so the
+        subject gate is what refuses."""
         env = {**os.environ, 'NDG_MANAGED_WORKER_PROBE': str(config)}
-        return subprocess.Popen([str(binary), '-test.run=^TestManagedWorkerKernelProcess$',
+        return subprocess.Popen(['setpriv', '--no-new-privs', str(binary),
+                                 '-test.run=^TestManagedWorkerKernelProcess$',
                                  '-test.timeout=60s'],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, env=env, bufsize=0)
@@ -416,6 +419,8 @@ def main():
         # reached bootstrap would already have left the directory behind, and
         # the managed filesystem layer would also refuse root -- so the category
         # above is what proves the worker's own gate stopped it, not that one.
+        # No-new-privs is already established for this process, so the subject
+        # gate is the first one that can refuse.
         assert not gate_root.exists(), 'the root was created before the subject gate refused'
     finally:
         settle(impostor)
