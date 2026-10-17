@@ -509,6 +509,15 @@ def runner_matrix(base, checks):
             self.end_headers()
             self.wfile.write(body)
 
+        def do_POST(self):
+            Handler.seen.append((self.path, dict(self.headers)))
+            body = b'{"accepted":true}'
+            self.send_response(202)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def log_message(self, *args):
             pass
 
@@ -520,10 +529,21 @@ def runner_matrix(base, checks):
         status, _, raw = client.request('GET', '/healthz')
         assert status == 200 and json.loads(raw) == {'state': 'alive'}
         assert Handler.seen[-1][1].get('Origin') == 'http://127.0.0.1:' + str(server.server_port)
+        # The scan contract answers 202; the default JSON helper must not
+        # silently accept it, and the explicit allow-list must.
+        try:
+            engine.http_json(client, 'POST', '/api/scan', payload={'alias': 'a'})
+        except engine.Refused as refusal:
+            assert str(refusal) == 'access_status_202'
+        else:
+            raise AssertionError('202 must not pass the default 200-only contract')
+        assert engine.http_json(client, 'POST', '/api/scan', payload={'alias': 'a'},
+                                accept=(200, 202)) == {'accepted': True}
     finally:
         server.shutdown()
         server.server_close()
     checks.append('http_real_request_with_origin')
+    checks.append('http_scan_202_is_explicit_not_default')
 
 
 def main():

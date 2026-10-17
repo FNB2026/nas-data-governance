@@ -537,10 +537,10 @@ class HTTP(object):
             raise Refused('access_unreachable')
 
 
-def http_json(http, method, path, payload=None, cookie=None, csrf=None):
+def http_json(http, method, path, payload=None, cookie=None, csrf=None, accept=(200,)):
     headers = {'X-CSRF-Token': csrf} if csrf else None
     status, _, raw = http.request(method, path, payload=payload, headers=headers, cookie=cookie)
-    require(status == 200, f'access_status_{status}')
+    require(status in accept, f'access_status_{status}')
     try:
         return json.loads(raw)
     except ValueError:
@@ -1081,7 +1081,7 @@ def step_access(ctx):
     sources = http_json(ctx.http, 'GET', '/api/sources', cookie=cookie)
     require(isinstance(sources, list) and sources, 'sources_endpoint_rejected')
     http_json(ctx.http, 'POST', '/api/scan', payload={'alias': 'source_a', 'resume': False},
-              cookie=cookie, csrf=csrf)
+              cookie=cookie, csrf=csrf, accept=(200, 202))
     deadline = time.time() + 300
     snapshot = None
     expected = ctx.plan['expected_scanned']
