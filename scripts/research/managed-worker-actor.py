@@ -55,8 +55,12 @@ def main():
     # process. outsider: every other account, which must never be admitted.
     worker, caller, outsider = [n for n in range(24000, 25000) if n not in used][:3]
 
+    # Traversable but not listable: a peer must be able to reach its own probe
+    # input and the socket by exact path, while every probe file stays private
+    # to the identity that runs it. A sealed base would stop an outsider at the
+    # filesystem and the peer-credential check would never be what refused it.
     base = Path('/var/lib') / ('ndg-managed-worker-' + uuid.uuid4().hex)
-    base.mkdir(mode=0o700)
+    base.mkdir(mode=0o711)
     os.chown(base, worker, worker)
     results = []
 
@@ -83,7 +87,29 @@ def main():
             settle(process)
             raise AssertionError(label + ': no probe output; child stderr=' + errors[-800:])
         assert len(raw) <= 8192 and raw.endswith(b'\n'), label + ': probe output bound'
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except ValueError:
+            # A failing probe reports its own reason on stdout. Without this the
+            # first line would only ever surface as an opaque JSON error, which
+            # is indistinguishable from a harness bug.
+            if process.poll() is None:
+                process.kill()
+            remaining, errors = process.communicate(timeout=10)
+            raise AssertionError(label + ': probe output not JSON; stdout=' +
+                                 repr(raw[:200] + remaining[:600]) + '; child stderr=' +
+                                 errors.decode('utf-8', 'replace')[-800:])
+
+    def reach(uid, flag, path):
+        """Prove the identity can reach the path itself, so that a filesystem
+        block can never masquerade as a peer-credential refusal."""
+        checked = subprocess.run(['setpriv', '--reuid=' + str(uid), '--regid=' + str(uid),
+                                  '--clear-groups', '--no-new-privs', 'test',
+                                  '-' + flag, str(path)],
+                                 capture_output=True, timeout=15)
+        assert checked.returncode == 0, (str(uid) + ' cannot reach ' + str(path) +
+                                         ' (-' + flag + '): ' +
+                                         checked.stderr.decode('utf-8', 'replace')[-200:])
 
     def launch(config, as_uid, privileged_safe=True):
         env = {**os.environ, 'NDG_MANAGED_WORKER_PROBE': str(config)}
@@ -101,9 +127,10 @@ def main():
     def layout(name, foreign_writable=False):
         # The run directory is traversable on purpose: a peer must be able to
         # reach the socket before its credentials can be examined. It stays
-        # unwritable by anyone but the worker. State is strictly private.
+        # unwritable by anyone but the worker. State is strictly private. The
+        # area above them is traversable but not listable for the same reason.
         area = base / name
-        area.mkdir(mode=0o700)
+        area.mkdir(mode=0o711)
         run_dir, state_dir = area / 'run', area / 'state'
         run_dir.mkdir(mode=0o755)
         state_dir.mkdir(mode=0o700)
@@ -131,8 +158,14 @@ def main():
         # really carries it, so each dial runs under its own UID: an outsider
         # first, which SO_PEERCRED must refuse, then the authorized Web UID.
         for label, uid in (('outsider', outsider), ('caller', caller)):
-            dialer = launch(probe_config('dial-' + label, 'dial', run_dir, state_dir,
-                                         socket_path=socket_path, owner=uid), uid)
+            config = probe_config('dial-' + label, 'dial', run_dir, state_dir,
+                                  socket_path=socket_path, owner=uid)
+            # Both must hold before the dial means anything: the peer reads its
+            # own probe input, and it can reach and write the socket. Otherwise
+            # the filesystem would refuse it and SO_PEERCRED would decide nothing.
+            reach(uid, 'r', config)
+            reach(uid, 'w', socket_path)
+            dialer = launch(config, uid)
             try:
                 outcome = handshake(dialer, 'dial-' + label)
                 remaining, errors = dialer.communicate(timeout=20)
@@ -323,9 +356,12 @@ def main():
     process = launch(probe_config('shared', 'serve', shared_run, shared_state), worker)
     try:
         remaining, errors = process.communicate(timeout=30)
-        denied = b'layout refused' in errors or b'private' in errors
+        # A failing Go test reports on stdout, never on stderr.
+        report = remaining + errors
+        denied = b'layout refused' in report or b'private' in report
         record('worker_refuses_shared_layout', process.returncode != 0 and denied,
-               'shared 0755 run directory rejected')
+               'shared run directory rejected: ' +
+               report.decode('utf-8', 'replace').strip().replace('\n', ' | ')[-160:])
     finally:
         settle(process)
 
