@@ -546,6 +546,43 @@ def runner_matrix(base, checks):
     checks.append('http_scan_202_is_explicit_not_default')
 
 
+def preflight_matrix(base, checks):
+    # A survey must report what it could not see; it must never invent readiness.
+    before = sorted(child.name for child in base.iterdir())
+    result = subprocess.run([sys.executable, '-B', str(HELPER), 'preflight'],
+                            capture_output=True, timeout=180)
+    assert result.returncode == 0, f'preflight must report, not refuse: {result.stderr.decode()[:400]}'
+    payload = json.loads(result.stdout)
+    assert payload['result'] == 'PREFLIGHT_READ_ONLY'
+    assert payload['mutating_actions_performed'] == 0
+    assert payload['declares'] == 'nothing_installed_nothing_started_nothing_written_nothing_removed'
+    assert payload['authorises'] == 'nothing_awaiting_owner_authorisation_still_required'
+    assert sorted(child.name for child in base.iterdir()) == before, 'preflight wrote into the tree'
+    checks.append('preflight_declares_no_mutation_and_writes_nothing')
+
+    assert payload['checks']['host']['sysname'] == os.uname().sysname, 'host identity must be ground truth'
+    assert 'existing_https_origin_not_supplied' in payload['not_checked'], 'un-supplied survey stays unchecked'
+    for forbidden in ('ready', 'approved', 'authorized', 'install_permitted'):
+        assert forbidden not in payload, f'preflight must not emit {forbidden!r}'
+    checks.append('preflight_reports_unchecked_instead_of_guessing')
+
+    assert payload['commands_executed'], 'preflight must publish what it ran'
+    for tokens in payload['commands_executed']:
+        program = os.path.basename(tokens[0])
+        assert program in {'docker', 'docker-compose', 'systemctl', 'uname'}, f'unexpected program {program}'
+        for token in tokens[1:]:
+            assert token not in {'rm', '-rf', '--force', '--prune', '-v'}, f'mutating token {token}'
+    checks.append('preflight_executes_only_read_only_programs')
+
+    bad = subprocess.run([sys.executable, '-B', str(HELPER), 'preflight', '--root', 'relative/place'],
+                         capture_output=True, timeout=180)
+    assert bad.returncode == 0, 'a host finding is a report, not a refusal'
+    blocker = json.loads(bad.stdout)
+    assert 'boundary_root_not_absolute' in blocker['blocking']
+    assert 'relative/place' not in bad.stdout.decode(), 'findings must not echo unusable paths'
+    checks.append('preflight_flags_unusable_paths_without_failing')
+
+
 def main():
     checks = []
     tmp = Path(tempfile.mkdtemp(prefix='ndg-lifecycle-proof-'))
@@ -565,6 +602,9 @@ def main():
     fsbase.mkdir(mode=0o700)
     filesystem_matrix(fsbase, checks)
     runner_matrix(tmp, checks)
+    pfbase = tmp / 'preflight'
+    pfbase.mkdir(mode=0o700)
+    preflight_matrix(pfbase, checks)
 
     print(json.dumps({'result': 'PASS',
                       'scope': 'OFFLINE_MATRIX_PLUS_REAL_LOCAL_FILES_AND_HTTP_NOT_CONTAINER_CHAIN',

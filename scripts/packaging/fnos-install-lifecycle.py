@@ -18,6 +18,7 @@ through a shell pipe into logs):
   plan-upgrade      current + candidate image evidence -> ordered upgrade/rollback plan
   plan-uninstall    container inspect JSON -> identity-scoped uninstall plan
   plan              freeze structured installation parameters into a digest
+  preflight         read-only survey of the host and of any existing NDG instance
   authorize         grant named steps against one plan digest
   run               execute only granted steps, journaled and resumable
   status            read the append-only journal back
@@ -188,6 +189,161 @@ def freeze_plan(args):
                  + plan['plan_digest'][:12]})
 
 
+# ---------------- read-only preflight survey ----------------
+
+PREFLIGHT_PROGRAMS = frozenset({'docker', 'docker-compose', 'systemctl', 'uname'})
+
+
+def _trim(raw, limit=512):
+    text = (raw or b'').decode('utf-8', 'replace').strip()
+    return text[:limit] if len(text) > limit else text
+
+
+def _kernel_ok(release):
+    parts = release.split('.', 2)[:2]
+    try:
+        major, minor = int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return None
+    return (major, minor) >= (5, 10)
+
+
+def _listening_ports():
+    """Which IPv4 ports are already bound. Read-only, Linux only."""
+    listeners = {}
+    for name in ('/proc/net/tcp', '/proc/net/tcp6'):
+        try:
+            with open(name) as handle:
+                rows = handle.read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if len(fields) < 4 or fields[3] != '0A':  # 0A == LISTEN
+                continue
+            listeners[int(fields[1].split(':')[1], 16)] = name.split('/')[-1]
+    return listeners
+
+
+def preflight(args):
+    """Read-only environment and service identity survey.
+
+    This is investigation only: nothing is written (the Runner gets no
+    receipt path), nothing is installed, started, restarted or removed,
+    and no public/private boundary is changed. Anything that could not be
+    determined is reported under `not_checked` instead of being guessed.
+    A preflight report authorises nothing.
+    """
+    runner = engine.Runner()  # no record_path: no file is ever written
+    checks, blocking, not_checked = {}, [], []
+
+    host = os.uname()
+    if hasattr(os, 'geteuid'):
+        euid = os.geteuid()
+        checks['euid'] = euid
+        if euid != 0:
+            blocking.append('root_required_for_any_install_step')
+    else:
+        not_checked.append('euid_token_unavailable_on_this_platform')
+    # The 5.10 floor is a Linux claim; never evaluate it for another kernel.
+    kernel_ok = _kernel_ok(host.release) if host.sysname == 'Linux' else None
+    checks['host'] = {'sysname': host.sysname, 'release': host.release,
+                      'machine': host.machine, 'kernel_at_least_5_10': kernel_ok}
+    if host.sysname != 'Linux':
+        blocking.append('surveyed_platform_is_not_linux')
+        not_checked.append('kernel_floor_only_defined_for_linux')
+    elif kernel_ok is None:
+        not_checked.append('kernel_version_unparseable')
+    elif not kernel_ok:
+        blocking.append('kernel_below_5_10')
+
+    def probe(label, argv, timeout=60):
+        try:
+            code, stdout, stderr = runner.run(argv, timeout=timeout)
+        except Refused as refusal:
+            return {'status': 'unavailable', 'reason': str(refusal)}
+        return {'status': 'ok' if code == 0 else 'failed', 'exit': code,
+                'stdout': _trim(stdout), 'stderr': _trim(stderr)}
+
+    docker = probe('docker_version', ['docker', 'version', '--format', '{{.Server.Version}}'])
+    checks['docker_version'] = docker
+    if docker.get('status') != 'ok':
+        blocking.append('docker_server_unavailable')
+        not_checked.extend(['existing_containers', 'existing_networks'])
+    else:
+        listing = probe('containers', ['docker', 'container', 'ls', '--all', '--no-trunc',
+                                       '--format', '{{.Names}}\t{{.Image}}\t{{.Status}}'])
+        named = [row for row in listing.get('stdout', '').splitlines()
+                 if 'ndg' in row.lower() or PINS['image'].split('@')[0].split('/')[-1] in row.lower()]
+        checks['existing_containers'] = {'seen': named, 'total_rows': len(listing.get('stdout', '').splitlines())}
+        networks = probe('networks', ['docker', 'network', 'ls', '--format',
+                                      '{{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Internal}}'])
+        checks['existing_networks'] = {'rows': networks.get('stdout', '').splitlines()}
+
+    compose = probe('compose', ['docker', 'compose', 'version', '--short'])
+    if compose.get('status') != 'ok':
+        compose = probe('compose_legacy', ['docker-compose', 'version', '--short'])
+    checks['compose_version'] = compose
+    if compose.get('status') != 'ok':
+        blocking.append('compose_unavailable')
+
+    units = probe('units', ['systemctl', 'list-units', '--all', '--no-legend', '--type=service'])
+    if units.get('status') == 'ok':
+        checks['existing_units'] = [row for row in units['stdout'].splitlines() if 'ndg' in row.lower()]
+    else:
+        checks['existing_units'] = {'status': units.get('status')}
+        not_checked.append('systemd_units_or_systemd_is_absent')
+
+    listeners = _listening_ports()
+    if listeners:
+        checks['listening_tcp_ports'] = sorted(listeners)
+        for port in (443, 8080, 24483):
+            if port in listeners:
+                checks.setdefault('ports_in_use_for_ndg', []).append({'port': port, 'family': listeners[port]})
+    else:
+        not_checked.append('proc_net_tcp_unavailable')
+
+    paths = {}
+    for label, value in (('boundary_root', args.root), *[('source', item) for item in args.source]):
+        if not value.startswith('/') or value == '/':
+            paths[label] = {'path_reported': False, 'finding': 'absolute_path_required'}
+            blocking.append(f'{label}_not_absolute')
+            continue
+        try:
+            engine.strict_path(value, label)
+            stat = os.lstat(value)
+            paths[label] = {'exists': True, 'mode': oct(stat.st_mode & 0o777), 'uid': stat.st_uid,
+                            'gid': stat.st_gid, 'identity': 'strict_path_accepted'}
+        except Refused as refusal:
+            paths[label] = {'exists': os.path.exists(value), 'identity': str(refusal)}
+        except FileNotFoundError:
+            paths[label] = {'exists': False, 'identity': 'not_present_yet'}
+    checks['requested_paths'] = paths
+
+    if args.origin:
+        try:
+            http = engine.HTTP(args.origin)
+            status, _, _ = http.request('GET', '/healthz', timeout=15)
+            checks['origin_healthz'] = {'origin': args.origin, 'status': status}
+        except Refused as refusal:
+            checks['origin_healthz'] = {'origin': args.origin, 'status': 'unchecked',
+                                        'reason': str(refusal)}
+    else:
+        not_checked.append('existing_https_origin_not_supplied')
+
+    executed = [list(tokens) for tokens in runner.actions]
+    unexpected = sorted({tokens[0].rsplit('/', 1)[-1] for tokens in executed} - PREFLIGHT_PROGRAMS)
+    require(not unexpected, 'preflight_ran_an_unexpected_program')
+    out({'result': 'PREFLIGHT_READ_ONLY',
+         'checks': checks,
+         'blocking': sorted(set(blocking)),
+         'not_checked': sorted(set(not_checked)),
+         'commands_executed': executed,
+         'mutating_actions_performed': 0,
+         'declares': 'nothing_installed_nothing_started_nothing_written_nothing_removed',
+         'authorises': 'nothing_awaiting_owner_authorisation_still_required'})
+
+
 def authorize_steps(args):
     steps = [step.strip() for step in args.steps.split(',') if step.strip()]
     out(engine.authorize(args.plan, args.receipt, steps, args.confirm, args.acceptance))
@@ -221,6 +377,11 @@ def main():
 
     p = sub.add_parser('plan'); p.add_argument('request'); p.add_argument('--receipt', required=True)
     p.add_argument('--acceptance', action='store_true'); p.set_defaults(func=freeze_plan)
+    p = sub.add_parser('preflight')
+    p.add_argument('--root', default='', help='candidate boundary_root to inspect read-only')
+    p.add_argument('--source', action='append', default=[], help='candidate source directory (repeatable)')
+    p.add_argument('--origin', default='', help='existing https origin to probe /healthz on')
+    p.set_defaults(func=preflight)
     p = sub.add_parser('authorize'); p.add_argument('--plan', required=True)
     p.add_argument('--receipt', required=True); p.add_argument('--steps', required=True)
     p.add_argument('--confirm', required=True); p.add_argument('--acceptance', action='store_true')

@@ -43,6 +43,28 @@ def cli(*argv, timeout=900):
     return json.loads(completed.stdout)
 
 
+def refusal(*argv, timeout=900):
+    """Expect a non-zero exit carrying a typed machine-readable refusal."""
+    completed = run([sys.executable, '-B', str(HELPER), *argv], timeout=timeout, check=False)
+    if completed.returncode == 0:
+        raise RuntimeError('expected a typed refusal, got success')
+    payload = json.loads(completed.stderr.decode('utf-8', 'replace'))
+    if payload.get('result') != 'REFUSED' or not payload.get('reason'):
+        raise RuntimeError('refusal was not machine-readable: ' + str(payload)[:300])
+    return payload['reason']
+
+
+def compose_image_line(root):
+    for current, _directories, files in os.walk(root):
+        if 'compose.yaml' not in files:
+            continue
+        text = (Path(current) / 'compose.yaml').read_text()
+        for line in text.splitlines():
+            if 'image:' in line and 'ndg-readonly-preview@' in line:
+                return line.strip()
+    raise RuntimeError('installed compose.yaml image binding not found')
+
+
 def tree_digest(root):
     entries = []
     for current, directories, files in os.walk(root, followlinks=False):
@@ -172,6 +194,41 @@ def main():
                 '--execute', '--acceptance')
     assert first['steps'][-1] == 'gui', first
     checks.append('install_start_browser_access_gui_executed')
+
+    # --- what this environment refuses rather than fakes (against the LIVE install) ---
+    container_name = 'ndg-' + installation_id + '-core'
+    image_before = run(['docker', 'container', 'inspect', container_name, '--format',
+                        '{{.Image}} {{.State.Running}}'], timeout=60).stdout.decode().strip()
+    binding_before = compose_image_line(fixture / 'parent')
+
+    # No second verified candidate image exists, so an in-place upgrade must stay
+    # refused: nothing was ever granted, and the tool says so in a typed reason.
+    for step in ('upgrade', 'rollback'):
+        reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
+                         '--steps', step, '--execute', '--acceptance')
+        assert reason == 'step_not_authorized', (step, reason)
+    # Re-using the pinned build as the "candidate" is not an upgrade either.
+    same_path = fixture / 'request-same-image.json'
+    same_path.write_text(json.dumps(dict(request, candidate_image=INDEX)))
+    same_path.chmod(0o600)
+    reason = refusal('plan', str(same_path), '--receipt', str(fixture / 'receipt-same'), '--acceptance')
+    assert reason == 'candidate_must_be_a_different_digest_pinned_image', reason
+    # HTTPS gateway belongs to the production plan only; the acceptance plan
+    # cannot even be built with gateway parameters.
+    gateway_request = dict(request, gateway={'unit_sha256': 'a' * 64, 'binary_sha256': 'b' * 64,
+                                            'cert': '/tmp/none', 'key': '/tmp/none'})
+    gateway_path = fixture / 'request-gateway.json'
+    gateway_path.write_text(json.dumps(gateway_request))
+    gateway_path.chmod(0o600)
+    reason = refusal('plan', str(gateway_path), '--receipt', str(fixture / 'receipt-gateway'),
+                     '--acceptance')
+    assert reason == 'gateway_not_in_acceptance_scope', reason
+    # The refusals changed nothing at all.
+    assert image_before == run(['docker', 'container', 'inspect', container_name, '--format',
+                                '{{.Image}} {{.State.Running}}'], timeout=60).stdout.decode().strip(), \
+        'a refused step changed the running container'
+    assert compose_image_line(fixture / 'parent') == binding_before, 'a refused step rewrote compose'
+    checks.append('unverified_upgrade_and_gateway_refused_without_touching_the_install')
 
     restarted = cli('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
                     '--steps', 'reboot', '--execute', '--acceptance')
