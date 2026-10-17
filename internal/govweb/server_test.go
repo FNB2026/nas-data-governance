@@ -10,7 +10,17 @@ import (
 	"testing"
 )
 
-const testToken = "ndg-gov-0123456789abcdef0123456789abcdef"
+// No credential-shaped literal lives in this repository: a source string that
+// looks like a token is exactly what the secret scanner is meant to reject,
+// and an embedded one would also make the shape checks vacuously pass.
+func validToken(t *testing.T) string {
+	t.Helper()
+	token, err := RandomToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
 
 func writeCredential(t *testing.T, token string, mode os.FileMode) string {
 	t.Helper()
@@ -23,7 +33,7 @@ func writeCredential(t *testing.T, token string, mode os.FileMode) string {
 
 func loopbackConfig(t *testing.T) Config {
 	t.Helper()
-	return Config{Addr: "127.0.0.1:8443", CredentialPath: writeCredential(t, testToken, 0o600),
+	return Config{Addr: "127.0.0.1:8443", CredentialPath: writeCredential(t, validToken(t), 0o600),
 		RequireTLS: true, Backing: ClosedBacking{}}
 }
 
@@ -34,6 +44,15 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		t.Fatalf("expected the loopback deployment to be accepted, got %v", err)
 	}
 	return server
+}
+
+// newServer builds a server whose bearer token is known only to this test run.
+func newServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	token := validToken(t)
+	cfg := Config{Addr: "127.0.0.1:8443", CredentialPath: writeCredential(t, token, 0o600),
+		RequireTLS: true, Backing: ClosedBacking{}}
+	return mustServer(t, cfg), token
 }
 
 func call(t *testing.T, server *Server, request *httptest.ResponseRecorder, method, target, body, token string) (int, map[string]interface{}) {
@@ -64,7 +83,7 @@ func TestDeploymentBoundaryRefusals(t *testing.T) {
 		{"credential_missing", func(c *Config) { c.CredentialPath = filepath.Join(t.TempDir(), "gone") },
 			"govweb_credential_unreadable"},
 		{"credential_world_readable", func(c *Config) {
-			c.CredentialPath = writeCredential(t, testToken, 0o644)
+			c.CredentialPath = writeCredential(t, validToken(t), 0o644)
 		}, "govweb_credential_mode_must_be_0600"},
 		{"token_shape", func(c *Config) {
 			c.CredentialPath = writeCredential(t, "hunter2", 0o600)
@@ -153,9 +172,9 @@ func TestAuthenticationIsRequiredAndNotCookieBased(t *testing.T) {
 }
 
 func TestReadEndpointsReportDisabledCapabilities(t *testing.T) {
-	server := mustServer(t, loopbackConfig(t))
+	server, token := newServer(t)
 	recorder := httptest.NewRecorder()
-	code, payload := call(t, server, recorder, http.MethodGet, "/gov/capabilities", "", testToken)
+	code, payload := call(t, server, recorder, http.MethodGet, "/gov/capabilities", "", token)
 	if code != http.StatusOK || payload["result"] != "CAPABILITIES" {
 		t.Fatal(code, payload)
 	}
@@ -186,38 +205,38 @@ func TestEveryWriteIntentIsATypedRefusal(t *testing.T) {
 		"purge":      "govweb_purge_release_disabled",
 	}
 	for kind, reason := range cases {
-		server := mustServer(t, loopbackConfig(t))
+		server, token := newServer(t)
 		body := `{"kind":"` + kind + `","objects":["obj-1"],"note":"operator asked for this"}`
-		code, payload := call(t, server, httptest.NewRecorder(), http.MethodPost, "/gov/intent", body, testToken)
+		code, payload := call(t, server, httptest.NewRecorder(), http.MethodPost, "/gov/intent", body, token)
 		if code != http.StatusForbidden || payload["reason"] != reason {
 			t.Fatalf("%s: expected 403 %s, got %d %v", kind, reason, code, payload)
 		}
 	}
-	server := mustServer(t, loopbackConfig(t))
+	server, token := newServer(t)
 	if code, payload := call(t, server, httptest.NewRecorder(), http.MethodPost, "/gov/intent",
-		`{"kind":"teleport"}`, testToken); code != http.StatusBadRequest ||
+		`{"kind":"teleport"}`, token); code != http.StatusBadRequest ||
 		payload["reason"] != "govweb_intent_kind_unknown" {
 		t.Fatalf("unknown intent must be refused by kind, got %d %v", code, payload)
 	}
 	if code, payload := call(t, server, httptest.NewRecorder(), http.MethodPost, "/gov/intent",
-		`{"kind":`, testToken); code != http.StatusBadRequest ||
+		`{"kind":`, token); code != http.StatusBadRequest ||
 		payload["reason"] != "govweb_intent_unreadable" {
 		t.Fatalf("unreadable intent must be refused, got %d %v", code, payload)
 	}
 	if code, _ := call(t, server, httptest.NewRecorder(), http.MethodDelete, "/gov/capabilities", "",
-		testToken); code != http.StatusMethodNotAllowed {
+		token); code != http.StatusMethodNotAllowed {
 		t.Fatalf("DELETE must not be served, got %d", code)
 	}
 }
 
 func TestRefusedIntentCreatesNoWork(t *testing.T) {
-	server := mustServer(t, loopbackConfig(t))
+	server, token := newServer(t)
 	for _, kind := range []string{"decide", "approve", "quarantine", "restore", "purge"} {
 		call(t, server, httptest.NewRecorder(), http.MethodPost, "/gov/intent",
-			`{"kind":"`+kind+`","objects":["obj-1"]}`, testToken)
+			`{"kind":"`+kind+`","objects":["obj-1"]}`, token)
 	}
 	for _, endpoint := range []string{"/gov/pending", "/gov/journal"} {
-		code, payload := call(t, server, httptest.NewRecorder(), http.MethodGet, endpoint, "", testToken)
+		code, payload := call(t, server, httptest.NewRecorder(), http.MethodGet, endpoint, "", token)
 		if code != http.StatusOK {
 			t.Fatal(endpoint, code, payload)
 		}
