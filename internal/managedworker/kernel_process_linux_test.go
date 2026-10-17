@@ -21,6 +21,15 @@ import (
 	"github.com/FNB2026/nas-data-governance/internal/managedfs"
 )
 
+// envelope is one request exactly as the caller composed it. Field values are
+// raw JSON so an integer the caller sent stays that integer: the request shape
+// is the caller's decision, and the worker's answer must not depend on a
+// re-encoding.
+type envelope struct {
+	Op     string                     `json:"op"`
+	Fields map[string]json.RawMessage `json:"fields"`
+}
+
 // Driven only by the disposable namespace harness, under a dedicated untrusted
 // UID, with artificial private directories. It never touches a product source,
 // a service, a network setting or a real deployment.
@@ -34,18 +43,18 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 		t.Fatal("private probe input unavailable")
 	}
 	var input struct {
-		Mode      string   `json:"mode"`
-		Run       string   `json:"run"`
-		State     string   `json:"state"`
-		Root      string   `json:"root"`
-		Socket    string   `json:"socket"`
-		Ops       []string `json:"ops"`
-		Auth      string   `json:"auth"`
-		Bootstrap bool     `json:"bootstrap"`
-		WorkerUID uint32   `json:"worker_uid"`
-		WorkerGID uint32   `json:"worker_gid"`
-		CallerUID uint32   `json:"caller_uid"`
-		CallerGID uint32   `json:"caller_gid"`
+		Mode      string     `json:"mode"`
+		Run       string     `json:"run"`
+		State     string     `json:"state"`
+		Root      string     `json:"root"`
+		Socket    string     `json:"socket"`
+		Envelopes []envelope `json:"envelopes"`
+		Auth      string     `json:"auth"`
+		Bootstrap bool       `json:"bootstrap"`
+		WorkerUID uint32     `json:"worker_uid"`
+		WorkerGID uint32     `json:"worker_gid"`
+		CallerUID uint32     `json:"caller_uid"`
+		CallerGID uint32     `json:"caller_gid"`
 	}
 	if json.Unmarshal(raw, &input) != nil {
 		t.Fatal("private probe input malformed")
@@ -85,9 +94,9 @@ func TestManagedWorkerKernelProcess(t *testing.T) {
 	case "send":
 		// The authorized peer sends the operations itself, so a refusal is
 		// witnessed by the caller that would have performed it.
-		sendMode(t, input.Socket, input.Ops)
+		sendMode(t, input.Socket, input.Envelopes)
 	case "dispatch":
-		dispatchMode(t, layout, subject, caller, input.Ops)
+		dispatchMode(t, layout, subject, caller, input.Envelopes)
 	case "seal_refused":
 		sealRefusedMode(t, layout, subject, input.Root, input.State)
 	case "seal":
@@ -543,9 +552,14 @@ func emit(value map[string]any) {
 // complete and well formed: what refuses them is authorization, not validation.
 // Reaching the socket is therefore never the same permission as deleting an
 // object.
-func dispatchMode(t *testing.T, layout Layout, subject, caller Subject, ops []string) {
+//
+// Each envelope is sent exactly as the caller composed it -- with the real, full
+// set of protocol fields for the dangerous ops -- so the refusal that comes back
+// is attributed to the right gate: an authorized peer naming a genuine object
+// with a genuine approval digest still cannot delete it.
+func dispatchMode(t *testing.T, layout Layout, subject, caller Subject, envelopes []envelope) {
 	t.Helper()
-	if len(ops) == 0 {
+	if len(envelopes) == 0 {
 		t.Fatal("no operations requested")
 	}
 	lease, refused := workerGates(t, layout, subject)
@@ -565,18 +579,23 @@ func dispatchMode(t *testing.T, layout Layout, subject, caller Subject, ops []st
 	}
 	defer conn.Close()
 	outcomes := []string{}
-	for range ops {
+	for range envelopes {
 		request, err := conn.ReadRequest()
 		if err != nil {
 			t.Fatal("request refused", err)
 		}
 		response, err := Dispatch(context.Background(), request)
-		if err != nil {
-			outcomes = append(outcomes, request.Op+":refused")
-		} else if response == nil {
-			outcomes = append(outcomes, request.Op+":empty")
-		} else {
+		switch {
+		case err == nil && response != nil:
 			outcomes = append(outcomes, request.Op+":executed")
+		case err == nil:
+			outcomes = append(outcomes, request.Op+":empty")
+		case errors.Is(err, ErrAuthorization):
+			outcomes = append(outcomes, request.Op+":authorization_refused")
+		case errors.Is(err, ErrProtocol):
+			outcomes = append(outcomes, request.Op+":protocol_refused")
+		default:
+			outcomes = append(outcomes, request.Op+":refused")
 		}
 		raw, err := json.Marshal(map[string]any{"ok": err == nil, "op": request.Op})
 		if err != nil {
@@ -597,7 +616,7 @@ func dispatchMode(t *testing.T, layout Layout, subject, caller Subject, ops []st
 // a real framed request, reading the answer back with the same bound the
 // product enforces so the client cannot be the thing that accepts an oversized
 // response.
-func sendMode(t *testing.T, socket string, ops []string) {
+func sendMode(t *testing.T, socket string, envelopes []envelope) {
 	t.Helper()
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
@@ -606,16 +625,20 @@ func sendMode(t *testing.T, socket string, ops []string) {
 	defer conn.Close()
 	client := &Conn{conn: conn.(*net.UnixConn)}
 	outcomes := []string{}
-	for _, op := range ops {
-		body, err := json.Marshal(map[string]string{"op": op})
+	for _, env := range envelopes {
+		body := map[string]any{"op": env.Op}
+		for key, value := range env.Fields {
+			body[key] = value
+		}
+		raw, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal("request encoding failed", err)
 		}
-		raw, err := frame(body)
+		framed, err := frame(raw)
 		if err != nil {
 			t.Fatal("frame failed", err)
 		}
-		if _, err := client.conn.Write(raw); err != nil {
+		if _, err := client.conn.Write(framed); err != nil {
 			t.Fatal("write failed", err)
 		}
 		var header [4]byte
@@ -630,7 +653,7 @@ func sendMode(t *testing.T, socket string, ops []string) {
 		if _, err := io.ReadFull(client.conn, answer); err != nil {
 			t.Fatal("response read failed", err)
 		}
-		outcomes = append(outcomes, op+":"+string(answer))
+		outcomes = append(outcomes, env.Op+":"+string(answer))
 	}
 	emit(map[string]any{"state": "PASS", "category": "sent", "outcomes": outcomes})
 }

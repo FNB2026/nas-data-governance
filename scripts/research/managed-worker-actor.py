@@ -32,6 +32,25 @@ def plain_actor(uid, *args):
             '--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all', *args]
 
 
+def envelope(op, values):
+    """Build one request envelope carrying exactly the protocol keys op allows.
+
+    The worker refuses any other key, so the envelope must match the fixed
+    field contract for the op. STATUS has no fields at all; SEAL/PURGE/INSPECT
+    differ in which of object_id, size, sha256, authorization_sha256, device
+    and inode they accept.
+    """
+    if op == 'STATUS':
+        keys = ()
+    elif op == 'SEAL':
+        keys = ('object_id', 'size', 'sha256', 'authorization_sha256')
+    elif op == 'PURGE':
+        keys = ('object_id', 'authorization_sha256', 'size', 'sha256', 'device', 'inode')
+    else:  # INSPECT
+        keys = ('object_id', 'size', 'sha256', 'device', 'inode')
+    return {'op': op, 'fields': {k: values[k] for k in keys}}
+
+
 def main():
     assert os.geteuid() == 0 and len(sys.argv) == 2
     assert os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
@@ -80,12 +99,13 @@ def main():
     directory(base, 0o711, worker)
     results = []
 
-    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None, ops=(), auth=''):
+    def probe_config(name, mode, run_dir, state_dir, root='', bootstrap=False, socket_path='', owner=None, envelopes=(), auth=''):
         """owner defaults to the worker, but a dialer must be able to read its
         own config, so each probe file is owned by the identity that runs it."""
         path = base / (name + '.json')
         payload = {'mode': mode, 'run': str(run_dir), 'state': str(state_dir), 'root': root,
-                   'socket': socket_path, 'ops': list(ops), 'auth': auth, 'bootstrap': bootstrap,
+                   'socket': socket_path, 'envelopes': list(envelopes), 'auth': auth,
+                   'bootstrap': bootstrap,
                    'worker_uid': worker, 'worker_gid': worker,
                    'caller_uid': caller, 'caller_gid': caller}
         private(path, json.dumps(payload).encode(), worker if owner is None else owner)
@@ -476,16 +496,21 @@ def main():
     # --- 15: an authorized caller still cannot reach SEAL, PURGE or INSPECT ---
     # Reaching the socket is not the same permission as deleting an object, so
     # the operations are sent by the authorized peer itself and each refusal is
-    # witnessed by the caller that would have performed it.
-    ops = ['SEAL', 'PURGE', 'INSPECT', 'STATUS']
+    # witnessed by the caller that would have performed it. Each envelope is a
+    # complete, well-formed business request (real op, full protocol field set,
+    # genuine-looking identity), so the refusal that comes back is attributed to
+    # the authorization gate rather than to request validation.
+    synth = {'object_id': 'a' * 64, 'size': 1, 'sha256': 'b' * 64,
+             'authorization_sha256': 'c' * 64, 'device': 1, 'inode': 2}
+    envelopes = [envelope(op, synth) for op in ('SEAL', 'PURGE', 'INSPECT', 'STATUS')]
     disp_run, disp_state = layout('dispatch')
-    process = launch(probe_config('dispatch', 'dispatch', disp_run, disp_state, ops=ops), worker)
+    process = launch(probe_config('dispatch', 'dispatch', disp_run, disp_state, envelopes=envelopes), worker)
     try:
         ready = handshake(process, 'dispatch')
         assert ready['state'] == 'READY', 'dispatch worker did not start'
         identity(ready['pid'], worker)
         sender = launch(probe_config('send', 'send', disp_run, disp_state,
-                                     socket_path=ready['socket'], ops=ops, owner=caller), caller)
+                                     socket_path=ready['socket'], envelopes=envelopes, owner=caller), caller)
         try:
             reach(caller, 'w', ready['socket'])
             outcome = handshake(sender, 'send')
@@ -500,13 +525,15 @@ def main():
         outcome = handshake(process, 'dispatch-outcome')
         assert outcome['state'] == 'PASS', 'dispatch case failed'
         assert outcome['category'] == 'dispatch', outcome.get('category')
-        assert outcome['outcomes'] == ['SEAL:refused', 'PURGE:refused',
-                                       'INSPECT:refused', 'STATUS:executed'], outcome.get('outcomes')
+        assert outcome['outcomes'] == ['SEAL:authorization_refused',
+                                       'PURGE:authorization_refused',
+                                       'INSPECT:authorization_refused',
+                                       'STATUS:executed'], outcome.get('outcomes')
         assert outcome['executable'] == ['PING', 'STATUS'], outcome.get('executable')
         remaining, errors = process.communicate(timeout=15)
         assert process.returncode == 0 and errors == b'', 'dispatch child failed'
         record('worker_refuses_dangerous_ops_for_authorized_peer', True,
-               'SEAL/PURGE/INSPECT refused over an authorized connection')
+               'SEAL/PURGE/INSPECT refused over an authorized connection, by authorization')
     finally:
         settle(process)
 
@@ -635,6 +662,96 @@ def main():
         outcome = handshake(check, 'identity-check')
         remaining, errors = check.communicate(timeout=20)
         assert check.returncode == 0 and errors == b'', 'identity check child failed'
+        assert outcome.get('category') == 'ready_root', outcome.get('category')
+    finally:
+        settle(check)
+
+    # --- 22: a complete, genuine business envelope is refused by authorization ---
+    # The envelopes below carry a REAL, freshly-sealed object identity (object_id,
+    # size, sha256, device, inode from the seal) plus a genuine approval digest.
+    # The caller is the authorized Web identity, over a real authorized
+    # connection. Because the object actually exists and is correctly named, the
+    # refusal cannot be "the object was not found": it is the authorization gate,
+    # in the same worker that would otherwise dispatch SEAL/PURGE/INSPECT. STATUS
+    # still executes, which is the positive control proving the path accepts at
+    # least one operation, so the dangerous-op refusals are not a connection
+    # failure. Cases 20-21 prove this very identity is one the reader accepts.
+    env_run, env_state = layout('envelope')
+    env_root = env_state / 'managed'
+    boot = launch(probe_config('env-boot', 'root', env_run, env_state,
+                               root=str(env_root), bootstrap=True), worker)
+    try:
+        outcome = handshake(boot, 'env-bootstrap')
+        remaining, errors = boot.communicate(timeout=20)
+        assert boot.returncode == 0 and errors == b'', 'envelope bootstrap failed'
+        assert outcome['category'] == 'bootstrap', outcome.get('category')
+    finally:
+        settle(boot)
+    seal = launch(probe_config('env-seal', 'seal', env_run, env_state, root=str(env_root)), worker)
+    try:
+        outcome = handshake(seal, 'env-seal')
+        remaining, errors = seal.communicate(timeout=20)
+        assert seal.returncode == 0 and errors == b'', 'envelope seal failed'
+        assert outcome['category'] == 'sealed', outcome.get('category')
+        object_id = outcome['object_id']
+        sealed_hash = outcome['sha256']
+    finally:
+        settle(seal)
+    object_path = env_root / 'objects' / object_id
+    sealed_bytes = object_path.read_bytes()
+    assert hashlib.sha256(sealed_bytes).hexdigest() == sealed_hash, \
+        'the envelope sealed bytes on disk are not what the seal recorded'
+    # Build a genuinely complete envelope from the stored object-proof: the
+    # worker's reader would accept this very identity (cases 20-21), so the
+    # authorization refusal is not a validation or object-not-found failure.
+    proof = json.loads((env_state / 'object-proof.json').read_text())
+    real = {'object_id': proof['object_id'], 'size': proof['size'],
+            'sha256': proof['sha256'], 'authorization_sha256': 'c' * 64,
+            'device': proof['device'], 'inode': proof['inode']}
+    envelopes = [envelope(op, real) for op in ('SEAL', 'PURGE', 'INSPECT', 'STATUS')]
+    process = launch(probe_config('env-dispatch', 'dispatch', env_run, env_state,
+                                 envelopes=envelopes), worker)
+    try:
+        ready = handshake(process, 'env-dispatch')
+        assert ready['state'] == 'READY', 'envelope dispatch worker did not start'
+        identity(ready['pid'], worker)
+        sender = launch(probe_config('env-send', 'send', env_run, env_state,
+                                     socket_path=ready['socket'], envelopes=envelopes,
+                                     owner=caller), caller)
+        try:
+            reach(caller, 'w', ready['socket'])
+            outcome = handshake(sender, 'env-send')
+            remaining, errors = sender.communicate(timeout=20)
+            assert sender.returncode == 0 and errors == b'', 'envelope send child failed'
+            for entry in outcome['outcomes']:
+                op, _, body = entry.partition(':')
+                answer = json.loads(body)
+                assert answer['ok'] is (op == 'STATUS'), entry
+        finally:
+            settle(sender)
+        outcome = handshake(process, 'env-dispatch-outcome')
+        assert outcome['state'] == 'PASS', 'envelope dispatch case failed'
+        assert outcome['category'] == 'dispatch', outcome.get('category')
+        assert outcome['outcomes'] == ['SEAL:authorization_refused',
+                                       'PURGE:authorization_refused',
+                                       'INSPECT:authorization_refused',
+                                       'STATUS:executed'], outcome.get('outcomes')
+        assert outcome['executable'] == ['PING', 'STATUS'], outcome.get('executable')
+        remaining, errors = process.communicate(timeout=15)
+        assert process.returncode == 0 and errors == b'', 'envelope dispatch child failed'
+        record('worker_refuses_complete_envelope_for_authorized_peer', True,
+               'real object identity + approval digest refused by authorization gate')
+    finally:
+        settle(process)
+    # Authorization performed no object operation: the sealed bytes are unchanged
+    # and the root is still Ready rather than carrying a pending intent.
+    assert object_path.read_bytes() == sealed_bytes, \
+        'the authorization refusal modified the sealed object'
+    check = launch(probe_config('env-check', 'root', env_run, env_state, root=str(env_root)), worker)
+    try:
+        outcome = handshake(check, 'env-check')
+        remaining, errors = check.communicate(timeout=20)
+        assert check.returncode == 0 and errors == b'', 'envelope check child failed'
         assert outcome.get('category') == 'ready_root', outcome.get('category')
     finally:
         settle(check)
