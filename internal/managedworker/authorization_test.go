@@ -29,7 +29,6 @@ import (
 func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore, dir, eligiblePlanID, revokedPlanID, restorePlanID string) (itemID, planID, revokedPlan, restorePlan, digest, objectPath, contentHash string, size int64) {
 	t.Helper()
 	planID = eligiblePlanID
-	restorePlan = restorePlanID
 	sourceRoot := filepath.Join(dir, "source")
 	quarantineRoot := filepath.Join(dir, "quarantine")
 	for _, d := range []string{sourceRoot, quarantineRoot} {
