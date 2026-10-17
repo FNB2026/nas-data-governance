@@ -685,7 +685,8 @@ func authorizeMode(t *testing.T, layout Layout, subject, caller Subject, stateDi
 		t.Fatal("authorize store unavailable", err)
 	}
 	defer st.Close()
-	_, _, _, _, objectPath, _, _ := seedApprovedPurge(t, ctx, st, stateDir)
+	_, _, _, _, objectPath, _, _ := seedApprovedPurge(t, ctx, st, stateDir,
+		"purge-kernel-authorize", "purge-kernel-revoked")
 	gate := NewStoreAuthorizationGate(st)
 	listener, err := Listen(layout, subject, []Subject{caller})
 	if err != nil {
@@ -724,7 +725,16 @@ func authorizeMode(t *testing.T, layout Layout, subject, caller Subject, stateDi
 		default:
 			outcomes = append(outcomes, request.Op+":refused")
 		}
-		raw, err := json.Marshal(map[string]any{"ok": err == nil, "op": request.Op})
+		raw, err := func() ([]byte, error) {
+			body := map[string]any{"ok": err == nil, "op": request.Op}
+			var denied *AuthorizationDenied
+			if errors.As(err, &denied) {
+				// The typed reason travels on the wire too, so a driver-side
+				// assertion failure carries its own diagnosis.
+				body["reason"] = string(denied.Reason)
+			}
+			return json.Marshal(body)
+		}()
 		if err != nil {
 			t.Fatal("response encoding failed", err)
 		}

@@ -21,9 +21,12 @@ import (
 // tests: one quarantined synthetic object with an APPROVED, dry-run-verified
 // purge plan, plus a second quarantined object whose plan has been rolled
 // back (for the revoked denial — an item can carry only one non-terminal
-// purge plan). Returns the identifiers the envelopes must carry.
-func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore, dir string) (itemID, planID, revokedPlanID, digest, objectPath, contentHash string, size int64) {
+// purge plan). eligiblePlanID and revokedPlanID are caller-chosen so the
+// kernel driver can pre-compute deterministic item identities against the
+// very same plan ids. Returns the identifiers the envelopes must carry.
+func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore, dir, eligiblePlanID, revokedPlanID string) (itemID, planID, revokedPlan, digest, objectPath, contentHash string, size int64) {
 	t.Helper()
+	planID = eligiblePlanID
 	sourceRoot := filepath.Join(dir, "source")
 	quarantineRoot := filepath.Join(dir, "quarantine")
 	for _, d := range []string{sourceRoot, quarantineRoot} {
@@ -83,8 +86,6 @@ func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore,
 		return "", "", "", 0
 	}
 
-	planID = "purge-gate-eligible"
-	revokedPlanID = "purge-gate-revoked"
 	itemID, objectPath, contentHash, size = quarantineObject("gate-object", "gate-object-payload", planID)
 	revokedItemID, _, _, _ := quarantineObject("gate-object-revoked", "gate-object-revoked-payload", revokedPlanID)
 
@@ -106,7 +107,7 @@ func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore,
 	revokedDigest := strings.Repeat("c", 64)
 	if err := st.SavePurgePlans(ctx, []domain.PurgePlan{{
 		ID: revokedPlanID, ItemID: revokedItemID, State: domain.PurgeDraft,
-		ExpectedPath: filepath.Join(quarantineRoot, "gate-object-revoked"),
+		ExpectedPath:   filepath.Join(quarantineRoot, "gate-object-revoked"),
 		ExpectedSHA256: sha256Hex([]byte("gate-object-revoked-payload")),
 		ExpectedSize:   int64(len("gate-object-revoked-payload")), RetainUntil: retainUntil,
 		ApprovalDigest: revokedDigest, CreatedAt: now.Add(-12 * time.Hour),
@@ -199,7 +200,7 @@ func TestDispatchAuthorized_BusinessGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	itemID, planID, revokedPlanID, digest, objectPath, contentHash, size := seedApprovedPurge(t, ctx, st, dir)
+	itemID, planID, revokedPlanID, digest, objectPath, contentHash, size := seedApprovedPurge(t, ctx, st, dir, "purge-gate-eligible", "purge-gate-revoked")
 	gate := NewStoreAuthorizationGate(st)
 	peer := Subject{UID: 24001, GID: 24001}
 
