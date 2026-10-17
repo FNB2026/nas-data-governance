@@ -51,11 +51,17 @@ const (
 // Both OperationPlan and PurgePlan use the literal "APPROVED" for this state.
 const stateApproved = "APPROVED"
 
-// minCorroboration is the floor on independent durable approval records that
-// no fact source may weaken. Corroboration counts AUTHORIZATION RECORDS (the
-// approval record and the dry-run verification record); it is never a count
-// of retainable file copies.
+// minCorroboration is the floor on independent durable approval records for
+// PURGE that no fact source may weaken: the approval record plus the dry-run
+// verification record. It is never a count of retainable file copies.
 const minCorroboration = 2
+
+// minRestoreCorroboration is RESTORE's floor. Restore has one durable
+// authorization record (the approved restore plan): it carries no dry-run
+// record, it is the reversible direction, and its safety comes from
+// plan↔item↔original-destination binding here plus the executor's live
+// destination-absence and snapshot checks.
+const minRestoreCorroboration = 1
 
 // Reason is a typed rejection code produced by Verifier.Check. It is stable
 // and suitable for audit logs and operator messaging.
@@ -142,6 +148,12 @@ type Facts struct {
 	ExpectedSHA256   string
 	ExpectedSize     *int64
 	ExpectedPath     string
+
+	// ExpectedRestorePath is the original source location a RESTORE plan is
+	// bound to. For RESTORE facts it must equal the item's durable source
+	// path; PURGE facts leave it empty. It exists so a restore approval can
+	// never silently retarget a different destination.
+	ExpectedRestorePath string
 
 	// Item-side durable state: the object the plan points at. The verifier
 	// binds plan expectations against this record, so a plan whose snapshot
@@ -245,8 +257,13 @@ func (v *Verifier) Check(ctx context.Context, src FactSource, req Request) (Elig
 		return ineligible(ReasonTampered, "approval time is in the future"), nil
 	}
 
-	// 5. Retention period: the protected window must have elapsed.
-	if now.Before(facts.RetainUntil) {
+	// 5. Retention period (PURGE only): the protected window must have
+	//    elapsed. RESTORE deliberately does not inherit this precondition —
+	//    a restore moves an object back to its owner, the opposite direction
+	//    of a destructive purge, and its eligibility is governed by the
+	//    restore business rules (plan approval + item restorability), not by
+	//    the purge retention clock.
+	if req.Operation == OpPurge && now.Before(facts.RetainUntil) {
 		return ineligible(ReasonExpired, "retention period has not expired"), nil
 	}
 
@@ -257,10 +274,15 @@ func (v *Verifier) Check(ctx context.Context, src FactSource, req Request) (Elig
 		return ineligible(ReasonWrongObject, "facts do not bind a complete object identity"), nil
 	}
 
-	// 7. Item durable state and plan↔item binding: the plan's snapshot must
-	//    still match the object it points at, and the object must be in the
-	//    one state a purge may act on.
-	if req.Operation == OpPurge {
+	// 7. Item durable state and plan↔item binding, per operation:
+	//    - PURGE: the plan's snapshot must still match the object it points
+	//      at, and the object must be in the one state a purge may act on.
+	//    - RESTORE: the restore plan's snapshot must still match its item,
+	//      including the original source destination, and the item must be
+	//      in a state a restore may act on (the same set the restore
+	//      executor accepts: active, held, or purge eligible).
+	switch req.Operation {
+	case OpPurge:
 		if facts.ItemStatus != string(domain.QuarantinePurgeEligible) || facts.ItemHoldReason != "" {
 			return ineligible(ReasonWrongObject, "quarantine item is not purge eligible: "+facts.ItemStatus), nil
 		}
@@ -272,6 +294,21 @@ func (v *Verifier) Check(ctx context.Context, src FactSource, req Request) (Elig
 			facts.ItemPath != facts.ExpectedPath ||
 			!facts.ItemRetainUntil.Equal(facts.RetainUntil) {
 			return ineligible(ReasonWrongObject, "plan snapshot no longer matches its quarantine item"), nil
+		}
+	case OpRestore:
+		switch domain.QuarantineStatus(facts.ItemStatus) {
+		case domain.QuarantineActive, domain.QuarantineHold, domain.QuarantinePurgeEligible:
+		default:
+			return ineligible(ReasonWrongObject, "quarantine item is not restorable: "+facts.ItemStatus), nil
+		}
+		if facts.ExpectedRestorePath == "" {
+			return ineligible(ReasonWrongObject, "restore facts lack the original destination binding"), nil
+		}
+		if !strings.EqualFold(facts.ItemSHA256, facts.ExpectedSHA256) ||
+			facts.ItemSize != *facts.ExpectedSize ||
+			facts.ItemPath != facts.ExpectedPath ||
+			facts.SourcePath != facts.ExpectedRestorePath {
+			return ineligible(ReasonWrongObject, "restore plan snapshot no longer matches its quarantine item"), nil
 		}
 	}
 
@@ -290,6 +327,11 @@ func (v *Verifier) Check(ctx context.Context, src FactSource, req Request) (Elig
 	if req.Operation == OpPurge && (req.Device == nil || req.Inode == nil) {
 		return ineligible(ReasonWrongObject, "purge request is missing device or inode"), nil
 	}
+	// Explicit input-domain constraints, not equality substitutes: an object
+	// size is a non-negative identity dimension.
+	if *req.Size < 0 {
+		return ineligible(ReasonWrongObject, "object size must be a non-negative identity dimension"), nil
+	}
 
 	// 9. Request↔facts identity binding, including zero-byte objects.
 	if req.ObjectID != facts.ExpectedObjectID {
@@ -303,25 +345,40 @@ func (v *Verifier) Check(ctx context.Context, src FactSource, req Request) (Elig
 	}
 
 	// 10. Approval corroboration: independent durable records, digest-bound
-	//     and time-ordered. A lone digest is not authority.
+	//     and time-ordered. A lone digest is not authority. The floor is per
+	//     operation: PURGE requires the approval record plus the dry-run
+	//     verification record (minCorroboration); RESTORE's durable record
+	//     set is the approved plan itself — restore is the reversible
+	//     direction, carries no dry-run record, and its identity is instead
+	//     bound plan↔item↔original-destination and re-proven live by the
+	//     executor (destination absence + snapshot). The fact source cannot
+	//     set either floor below its operation's minimum.
+	var floor int
+	if req.Operation == OpPurge {
+		floor = minCorroboration
+	} else {
+		floor = minRestoreCorroboration
+	}
 	required := facts.RequiredCorroboration
-	if required < minCorroboration {
-		required = minCorroboration
+	if required < floor {
+		required = floor
 	}
 	if facts.ApprovalCorroboration < required {
 		return ineligible(ReasonTampered, "approval is not independently corroborated"), nil
 	}
-	if facts.DryRunDigest == "" || facts.DryRunVerifiedAt == nil {
-		return ineligible(ReasonTampered, "dry-run verification record is missing"), nil
-	}
-	if !wellFormedSHA256(facts.DryRunDigest) || !strings.EqualFold(facts.DryRunDigest, facts.ExpectedDigest) {
-		return ineligible(ReasonTampered, "dry-run validated a different digest than the approval"), nil
-	}
-	if facts.DryRunVerifiedAt.Before(*facts.ApprovedAt) {
-		return ineligible(ReasonTampered, "dry-run verification precedes the approval"), nil
-	}
-	if facts.DryRunVerifiedAt.After(now) {
-		return ineligible(ReasonTampered, "dry-run verification time is in the future"), nil
+	if req.Operation == OpPurge {
+		if facts.DryRunDigest == "" || facts.DryRunVerifiedAt == nil {
+			return ineligible(ReasonTampered, "dry-run verification record is missing"), nil
+		}
+		if !wellFormedSHA256(facts.DryRunDigest) || !strings.EqualFold(facts.DryRunDigest, facts.ExpectedDigest) {
+			return ineligible(ReasonTampered, "dry-run validated a different digest than the approval"), nil
+		}
+		if facts.DryRunVerifiedAt.Before(*facts.ApprovedAt) {
+			return ineligible(ReasonTampered, "dry-run verification precedes the approval"), nil
+		}
+		if facts.DryRunVerifiedAt.After(now) {
+			return ineligible(ReasonTampered, "dry-run verification time is in the future"), nil
+		}
 	}
 
 	return Eligibility{Eligible: true, Reason: ReasonEligible, Detail: "all authorization bindings satisfied"}, nil

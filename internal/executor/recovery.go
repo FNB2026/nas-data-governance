@@ -85,6 +85,14 @@ func (e *Executor) recoverPlan(ctx context.Context, rs RecoveryStore, id string)
 		if entry.RollbackStatus == "done" {
 			continue
 		}
+		if entry.Status == "failed" && entry.RollbackStatus == "" {
+			// A cleanly failed action has no outstanding filesystem
+			// effect: every executor primitive removes its partial
+			// destination before reporting failure, so there is
+			// nothing to roll back. Only a crash before the failure
+			// was marked (status 'pending') stays uncertain.
+			continue
+		}
 		if entry.Status != "done" || entry.RollbackStatus != "" {
 			return fail("recovery: uncertain action outcome; manual reconciliation required")
 		}
@@ -92,6 +100,9 @@ func (e *Executor) recoverPlan(ctx context.Context, rs RecoveryStore, id string)
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
 		if entry.RollbackStatus == "done" {
+			continue
+		}
+		if entry.Status == "failed" && entry.RollbackStatus == "" {
 			continue
 		}
 		rollbackErr := rollbackJournalEntry(entry)

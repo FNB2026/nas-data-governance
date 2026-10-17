@@ -19,14 +19,17 @@ import (
 
 // seedApprovedPurge creates the durable authorization truth for the gate
 // tests: one quarantined synthetic object with an APPROVED, dry-run-verified
-// purge plan, plus a second quarantined object whose plan has been rolled
-// back (for the revoked denial — an item can carry only one non-terminal
-// purge plan). eligiblePlanID and revokedPlanID are caller-chosen so the
-// kernel driver can pre-compute deterministic item identities against the
-// very same plan ids. Returns the identifiers the envelopes must carry.
-func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore, dir, eligiblePlanID, revokedPlanID string) (itemID, planID, revokedPlan, digest, objectPath, contentHash string, size int64) {
+// purge plan, a second quarantined object whose plan has been rolled back
+// (for the revoked denial — an item can carry only one non-terminal purge
+// plan), and an APPROVED restore plan for the first object (restore is the
+// reversible direction, allowed for PURGE_ELIGIBLE items). The plan ids are
+// caller-chosen so the kernel driver can pre-compute deterministic item
+// identities against the very same ids. Returns the identifiers the
+// envelopes must carry; the restore digest is the fixed 64×'d'.
+func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore, dir, eligiblePlanID, revokedPlanID, restorePlanID string) (itemID, planID, revokedPlan, restorePlan, digest, objectPath, contentHash string, size int64) {
 	t.Helper()
 	planID = eligiblePlanID
+	restorePlan = restorePlanID
 	sourceRoot := filepath.Join(dir, "source")
 	quarantineRoot := filepath.Join(dir, "quarantine")
 	for _, d := range []string{sourceRoot, quarantineRoot} {
@@ -123,7 +126,23 @@ func seedApprovedPurge(t *testing.T, ctx context.Context, st *store.SQLiteStore,
 	if err := st.MarkPurgeRolledBack(ctx, revokedPlanID, revokedItemID, now); err != nil {
 		t.Fatal(err)
 	}
-	return itemID, planID, revokedPlanID, digest, objectPath, contentHash, size
+
+	// An approved restore plan for the eligible object: restore is bound to
+	// the same item identity and the original source destination. The item
+	// is PURGE_ELIGIBLE after its purge plan, which is a restorable state.
+	restoreDigest := strings.Repeat("d", 64)
+	if err := st.SaveRestorePlan(ctx, domain.RestorePlan{
+		ID: restorePlanID, ItemID: itemID, State: domain.RestoreDraft,
+		QuarantinePath: objectPath, RestorePath: filepath.Join(sourceRoot, "gate-object"),
+		ExpectedSHA256: contentHash, ExpectedSize: size,
+		ApprovalDigest: restoreDigest, CreatedAt: now.Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ApproveRestorePlan(ctx, restorePlanID, restoreDigest, now.Add(-30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	return itemID, planID, revokedPlanID, restorePlanID, digest, objectPath, contentHash, size
 }
 
 func sha256Hex(b []byte) string {
@@ -200,7 +219,7 @@ func TestDispatchAuthorized_BusinessGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	itemID, planID, revokedPlanID, digest, objectPath, contentHash, size := seedApprovedPurge(t, ctx, st, dir, "purge-gate-eligible", "purge-gate-revoked")
+	itemID, planID, revokedPlanID, _, digest, objectPath, contentHash, size := seedApprovedPurge(t, ctx, st, dir, "purge-gate-eligible", "purge-gate-revoked", "restore-gate-eligible")
 	gate := NewStoreAuthorizationGate(st)
 	peer := Subject{UID: 24001, GID: 24001}
 
@@ -310,10 +329,14 @@ func TestDispatchAuthorized_BusinessGate(t *testing.T) {
 		if _, err := DispatchAuthorized(ctx, req, peer, gate); !errors.Is(err, ErrProtocol) {
 			t.Fatalf("negative device must be a protocol refusal, got %v", err)
 		}
-		// RESTORE is not on the protocol surface at all.
+		// RESTORE is protocol-recognized since R4, but it still has no
+		// escape hatch: an empty RESTORE frame is a typed business refusal,
+		// not a pass.
 		req = Request{Op: "RESTORE", Fields: map[string]json.RawMessage{}}
-		if _, err := DispatchAuthorized(ctx, req, peer, gate); !errors.Is(err, ErrProtocol) {
-			t.Fatalf("RESTORE must stay off the protocol surface, got %v", err)
+		_, err = DispatchAuthorized(ctx, req, peer, gate)
+		var denied *AuthorizationDenied
+		if !errors.As(err, &denied) || denied.Reason != authz.ReasonWrongPlan {
+			t.Fatalf("empty RESTORE frame must be wrong_plan under the gate, got %v", err)
 		}
 	})
 
@@ -343,10 +366,11 @@ func TestDispatchAuthorized_BusinessGate(t *testing.T) {
 		}
 	})
 
-	t.Run("restore_stays_wrong_plan_at_authz_layer", func(t *testing.T) {
-		// The protocol surface does not open RESTORE; at the authz layer the
-		// operation keeps its wrong_plan rejection until a durable restore
-		// fact source exists (R2 contract, regression-asserted here).
+	t.Run("purge_plan_cannot_authorize_restore", func(t *testing.T) {
+		// R4: RESTORE has its own durable fact source (restore_plans). A
+		// purge plan id presented to a RESTORE request is structurally
+		// unknown to the restore fact source, so the request keeps its
+		// wrong_plan rejection — one plan kind never authorizes the other.
 		v := authz.NewVerifier()
 		el, err := v.Check(ctx, authz.NewStoreFacts(st), authz.Request{
 			Operation: authz.OpRestore, PlanID: planID,
@@ -357,7 +381,41 @@ func TestDispatchAuthorized_BusinessGate(t *testing.T) {
 			t.Fatal(err)
 		}
 		if el.Eligible || el.Reason != authz.ReasonWrongPlan {
-			t.Fatalf("OpRestore must stay wrong_plan, got %s", el.Reason)
+			t.Fatalf("a purge plan must not authorize RESTORE, got %s", el.Reason)
+		}
+	})
+
+	t.Run("restore_without_own_plan_stays_refused", func(t *testing.T) {
+		// A RESTORE envelope with no restore plan behind it is refused even
+		// though the operation is now protocol-recognized: protocol admission
+		// is not business authorization.
+		req := gateFrame(t, "RESTORE", map[string]any{
+			"object_id": itemID, "sha256": contentHash,
+			"authorization_sha256": digest, "size": size,
+		})
+		_, err := DispatchAuthorized(ctx, req, peer, gate)
+		var denied *AuthorizationDenied
+		if !errors.As(err, &denied) || denied.Reason != authz.ReasonWrongPlan {
+			t.Fatalf("RESTORE without a restore plan must be wrong_plan, got %v", err)
+		}
+		// And without a gate the op is refused exactly like the others.
+		if _, err := DispatchAuthorized(ctx, req, peer, nil); !errors.Is(err, ErrAuthorization) {
+			t.Fatalf("RESTORE without a gate must be authorization_refused, got %v", err)
+		}
+	})
+
+	t.Run("negative_size_is_a_protocol_violation", func(t *testing.T) {
+		// A8: explicit input-domain constraints — a negative size is not an
+		// identity dimension and is refused by the frame contract itself,
+		// never by equality substitution.
+		raw, _ := json.Marshal(map[string]any{"op": "PURGE", "plan_id": planID, "object_id": itemID,
+			"sha256": contentHash, "authorization_sha256": digest, "size": -5, "device": 1, "inode": 2})
+		req, err := DecodeRequest(raw)
+		if err != nil {
+			t.Fatalf("negative size must decode (key is allowed), got %v", err)
+		}
+		if _, err := DispatchAuthorized(ctx, req, peer, gate); !errors.Is(err, ErrProtocol) {
+			t.Fatalf("negative size must be a protocol refusal, got %v", err)
 		}
 	})
 }

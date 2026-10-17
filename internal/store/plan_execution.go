@@ -23,7 +23,9 @@ func (s *SQLiteStore) CompareAndSwapPlanState(ctx context.Context, id string, fr
 		q += ` AND NOT EXISTS (SELECT 1 FROM execution_journal WHERE plan_id=operation_plans.id)`
 	}
 	if to == domain.PlanRolledBack {
-		q += ` AND NOT EXISTS (SELECT 1 FROM execution_journal WHERE plan_id=operation_plans.id AND (rollback_status IS NULL OR rollback_status <> 'done'))`
+		q += ` AND NOT EXISTS (SELECT 1 FROM execution_journal WHERE plan_id=operation_plans.id
+			AND (rollback_status IS NULL OR rollback_status <> 'done')
+			AND NOT (status='failed' AND (rollback_status IS NULL OR rollback_status='')))`
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -61,6 +63,20 @@ func (s *SQLiteStore) CompareAndSwapPlanState(ctx context.Context, id string, fr
 	return tx.Commit()
 }
 
+// journalEntryClean reports whether a journal entry has no outstanding
+// filesystem effect. An entry is clean when its rollback was durably
+// confirmed ('done'), or when the action itself failed cleanly: the
+// executor primitives (CopyFile/MoveFile/SafeRemove) remove any partial
+// destination before reporting failure, so a 'failed' entry with no
+// rollback marker proves the action never left a durable effect. A
+// 'pending' entry (crash before completion) is never clean.
+func journalEntryClean(entry JournalEntry) bool {
+	if entry.RollbackStatus == "done" {
+		return true
+	}
+	return entry.Status == "failed" && entry.RollbackStatus == ""
+}
+
 // CompletePlanExecution commits terminal state, lifecycle items and audit
 // together. Failure leaves the durable reservation and journal recoverable.
 func (s *SQLiteStore) CompletePlanExecution(ctx context.Context, plan domain.OperationPlan, final domain.PlanState, logs []domain.OperationLog, at, retainUntil time.Time) error {
@@ -93,7 +109,7 @@ func (s *SQLiteStore) CompletePlanExecution(ctx context.Context, plan domain.Ope
 	}
 	if final == domain.PlanRolledBack {
 		for _, entry := range entries {
-			if entry.RollbackStatus != "done" {
+			if !journalEntryClean(entry) {
 				return errors.New("store: rollback is not durably confirmed")
 			}
 		}

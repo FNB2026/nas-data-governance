@@ -21,6 +21,13 @@ import (
 // execution lock file, which reports three states: confirmed free, confirmed
 // held, and unknown (an error, and therefore a refusal).
 //
+// Operation binding is structural: a facts read for PURGE consults only the
+// purge plan tables, a facts read for RESTORE consults only the restore plan
+// tables. One plan kind can never authorize the other operation because the
+// other operation's fact source simply does not know the plan. SEAL and
+// INSPECT have no durable approval contract yet and resolve to empty facts
+// (wrong_plan).
+//
 // Lock ownership (the re-verification phase of the chained contract) is
 // claimed only through an ExecutionLockScope acquired from this same store.
 // There is deliberately no constructor that accepts a caller-supplied
@@ -60,12 +67,69 @@ func (f *storeFacts) ownsExecutionLock() bool {
 }
 
 func (f *storeFacts) ReadOnlyFacts(ctx context.Context, op OpKind, planID string) (Facts, error) {
-	// Only PURGE has a durable approval contract today. A purge approval is
-	// not a SEAL/INSPECT/RESTORE approval: binding the operation type here
-	// prevents one plan kind from authorizing a different dangerous operation.
-	if op != OpPurge {
+	switch op {
+	case OpPurge:
+		return f.purgeFacts(ctx, planID)
+	case OpRestore:
+		return f.restoreFacts(ctx, planID)
+	default:
+		// Only PURGE and RESTORE have durable approval contracts today. An
+		// approval of one kind is not an approval of another: binding the
+		// operation here prevents one plan kind from authorizing a different
+		// dangerous operation.
 		return Facts{}, nil
 	}
+}
+
+// readItem loads the quarantine item a plan points at. A missing item yields
+// itemErr == store.ErrNotFound with no error: the verifier refuses on the
+// empty item state. Any other read failure is an error — a refusal.
+func (f *storeFacts) readItem(ctx context.Context, itemID string) (domain.QuarantineItem, error) {
+	item, err := f.store.GetQuarantineItem(ctx, itemID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return domain.QuarantineItem{}, err
+	}
+	return item, nil
+}
+
+// recoveryEvidence mirrors requireNoRecovery and fills RecoveryLockHeld from
+// the execution-lock probe plus the three durable journal queries. Every
+// query failure is an error — never a silent "no recovery pending".
+func (f *storeFacts) recoveryEvidence(ctx context.Context, facts *Facts) error {
+	held, err := f.store.ExecutionLockHeld()
+	if err != nil {
+		return err
+	}
+	if held && !f.ownsExecutionLock() {
+		facts.RecoveryLockHeld = true
+	}
+	ids, err := f.store.ListExecutingPlans(ctx)
+	if err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		facts.RecoveryLockHeld = true
+	}
+	rs, err := f.store.ListPendingRestores(ctx)
+	if err != nil {
+		return err
+	}
+	if len(rs) > 0 {
+		facts.RecoveryLockHeld = true
+	}
+	ps, err := f.store.ListRecoverablePurges(ctx)
+	if err != nil {
+		return err
+	}
+	if len(ps) > 0 {
+		facts.RecoveryLockHeld = true
+	}
+	return nil
+}
+
+// purgeFacts builds the durable facts of a purge plan. A purge approval is
+// not a restore approval: this source consults only purge tables.
+func (f *storeFacts) purgeFacts(ctx context.Context, planID string) (Facts, error) {
 	plan, err := f.store.GetPurgePlan(ctx, planID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -74,8 +138,8 @@ func (f *storeFacts) ReadOnlyFacts(ctx context.Context, op OpKind, planID string
 		}
 		return Facts{}, err
 	}
-	item, itemErr := f.store.GetQuarantineItem(ctx, plan.ItemID)
-	if itemErr != nil && !errors.Is(itemErr, store.ErrNotFound) {
+	item, itemErr := f.readItem(ctx, plan.ItemID)
+	if itemErr != nil {
 		return Facts{}, itemErr
 	}
 
@@ -116,40 +180,64 @@ func (f *storeFacts) ReadOnlyFacts(ctx context.Context, op OpKind, planID string
 	}
 	facts.ApprovalCorroboration = corroboration
 
-	// Execution lock: the probe distinguishes free / held / unknown, and an
-	// unknown state is an error. Our own reservation — proven by a scope
-	// acquired from this same store and not yet released — is not a
-	// competing writer's.
-	held, err := f.store.ExecutionLockHeld()
-	if err != nil {
+	if err := f.recoveryEvidence(ctx, &facts); err != nil {
 		return Facts{}, err
 	}
-	if held && !f.ownsExecutionLock() {
-		facts.RecoveryLockHeld = true
+	return facts, nil
+}
+
+// restoreFacts builds the durable facts of a restore plan. A restore approval
+// is not a purge approval: this source consults only restore tables, and the
+// facts carry no purge retention semantics.
+func (f *storeFacts) restoreFacts(ctx context.Context, planID string) (Facts, error) {
+	plan, err := f.store.GetRestorePlan(ctx, planID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return Facts{}, nil
+		}
+		return Facts{}, err
+	}
+	item, itemErr := f.readItem(ctx, plan.ItemID)
+	if itemErr != nil {
+		return Facts{}, itemErr
 	}
 
-	// Durable recovery evidence, mirroring requireNoRecovery. Every query
-	// failure is an error — never a silent "no recovery pending".
-	ids, err := f.store.ListExecutingPlans(ctx)
-	if err != nil {
+	planSize := plan.ExpectedSize
+	facts := Facts{
+		Operation:             OpRestore,
+		PlanID:                plan.ID,
+		PlanState:             string(plan.State),
+		PlanRevoked:           plan.State == domain.RestoreRolledBack,
+		ApprovedAt:            plan.ApprovedAt,
+		ExpectedDigest:        plan.ApprovalDigest,
+		ExpectedObjectID:      plan.ItemID,
+		ExpectedSHA256:        plan.ExpectedSHA256,
+		ExpectedSize:          &planSize,
+		ExpectedPath:          plan.QuarantinePath,
+		ExpectedRestorePath:   plan.RestorePath,
+		RequiredCorroboration: minRestoreCorroboration, // the approved plan record itself
+	}
+	if itemErr == nil {
+		facts.ItemStatus = string(item.Status)
+		facts.ItemHoldReason = item.HoldReason
+		facts.ItemSHA256 = item.ContentSHA256
+		facts.ItemSize = item.FileSize
+		facts.ItemPath = item.QuarantinePath
+		facts.ItemRetainUntil = item.RetainUntil
+		facts.SourcePath = item.SourcePath
+	}
+
+	// The durable authorization record set for restore is the approved plan
+	// itself: one record, present when the plan carries a real approval time
+	// and digest.
+	corroboration := 0
+	if plan.ApprovedAt != nil && plan.ApprovalDigest != "" {
+		corroboration = 1
+	}
+	facts.ApprovalCorroboration = corroboration
+
+	if err := f.recoveryEvidence(ctx, &facts); err != nil {
 		return Facts{}, err
-	}
-	if len(ids) > 0 {
-		facts.RecoveryLockHeld = true
-	}
-	rs, err := f.store.ListPendingRestores(ctx)
-	if err != nil {
-		return Facts{}, err
-	}
-	if len(rs) > 0 {
-		facts.RecoveryLockHeld = true
-	}
-	ps, err := f.store.ListRecoverablePurges(ctx)
-	if err != nil {
-		return Facts{}, err
-	}
-	if len(ps) > 0 {
-		facts.RecoveryLockHeld = true
 	}
 	return facts, nil
 }

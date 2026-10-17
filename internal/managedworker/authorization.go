@@ -90,7 +90,7 @@ func DispatchAuthorized(ctx context.Context, request Request, peer Subject, gate
 		return map[string]any{"ok": true}, nil
 	case "STATUS":
 		return Status{Ready: true, PurgeReleaseAllowed: false, Executable: len(Executable())}, nil
-	case "SEAL", "PURGE", "INSPECT":
+	case "SEAL", "PURGE", "INSPECT", "RESTORE":
 		if gate == nil {
 			// Fail-closed, identical to the ungated Dispatch.
 			return nil, ErrAuthorization
@@ -168,6 +168,11 @@ func authzRequestFromEnvelope(request Request, peer Subject) (authz.Request, err
 	if value, present, err := optionalInt64(request, "size"); err != nil {
 		return authz.Request{}, err
 	} else if present {
+		// Explicit input-domain constraint, not an equality substitute: an
+		// object size is a non-negative identity dimension.
+		if value < 0 {
+			return authz.Request{}, ErrProtocol
+		}
 		req.Size = authz.Int64Field(value)
 		req.IPCFields["size"] = strconv.FormatInt(value, 10)
 	}

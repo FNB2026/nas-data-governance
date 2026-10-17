@@ -685,8 +685,9 @@ func authorizeMode(t *testing.T, layout Layout, subject, caller Subject, stateDi
 		t.Fatal("authorize store unavailable", err)
 	}
 	defer st.Close()
-	_, _, _, _, objectPath, _, _ := seedApprovedPurge(t, ctx, st, stateDir,
-		"purge-kernel-authorize", "purge-kernel-revoked")
+	_, _, _, restorePlanID, _, objectPath, _, _ := seedApprovedPurge(t, ctx, st, stateDir,
+		"purge-kernel-authorize", "purge-kernel-revoked", "restore-kernel-authorize")
+	_ = restorePlanID // the driver composes the restore envelope against this id
 	gate := NewStoreAuthorizationGate(st)
 	listener, err := Listen(layout, subject, []Subject{caller})
 	if err != nil {

@@ -73,6 +73,10 @@ var allowedKeys = map[string][]string{
 	"SEAL":    {"object_id", "size", "sha256", "authorization_sha256", "plan_id"},
 	"PURGE":   {"object_id", "authorization_sha256", "size", "sha256", "device", "inode", "plan_id"},
 	"INSPECT": {"object_id", "size", "sha256", "device", "inode", "plan_id"},
+	// RESTORE names a durable restore plan and the object it returns. It
+	// carries no device/inode: restore binds plan↔item↔original-destination
+	// durably, and the executor re-proves the destination live.
+	"RESTORE": {"object_id", "authorization_sha256", "size", "sha256", "plan_id"},
 }
 
 // Ops returns the fixed set of operations this prototype accepts.

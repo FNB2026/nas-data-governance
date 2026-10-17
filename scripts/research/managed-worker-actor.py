@@ -768,10 +768,12 @@ def main():
     authz_run, authz_state = layout('authzgate')
     plan_id = 'purge-kernel-authorize'
     revoked_plan_id = 'purge-kernel-revoked'
+    restore_plan_id = 'restore-kernel-authorize'
     content = b'gate-object-payload'
     revoked_content = b'gate-object-revoked-payload'
     digest = 'a' * 64
     revoked_digest = 'c' * 64
+    restore_digest = 'd' * 64
 
     def deterministic_item_id(pid, target):
         # Mirrors store.quarantineItemID: sha256(planID \0 actionIndex \0 targetPath),
@@ -805,6 +807,17 @@ def main():
                 'sha256': hashlib.sha256(revoked_content).hexdigest(),
                 'authorization_sha256': revoked_digest, 'size': len(revoked_content),
                 'device': 1, 'inode': 2}),
+        # RESTORE has its own durable fact source: the approved restore plan
+        # reaches an eligible verdict, and the purge plan id presented to a
+        # RESTORE op is structurally unknown there (typed wrong_plan).
+        {'op': 'RESTORE', 'fields': {'plan_id': restore_plan_id, 'object_id': item,
+                                     'sha256': hashlib.sha256(content).hexdigest(),
+                                     'authorization_sha256': restore_digest,
+                                     'size': len(content)}},
+        {'op': 'RESTORE', 'fields': {'plan_id': plan_id, 'object_id': item,
+                                     'sha256': hashlib.sha256(content).hexdigest(),
+                                     'authorization_sha256': restore_digest,
+                                     'size': len(content)}},
         {'op': 'PING', 'fields': {}},
         {'op': 'STATUS', 'fields': {}},
     ]
@@ -816,6 +829,8 @@ def main():
         'PURGE:denied:wrong_plan',
         'PURGE:denied:wrong_plan',
         'PURGE:denied:revoked',
+        'RESTORE:authorized_verdict',
+        'RESTORE:denied:wrong_plan',
         'PING:executed',
         'STATUS:executed',
     ]
