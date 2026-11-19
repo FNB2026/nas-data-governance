@@ -114,6 +114,30 @@ def diagnose(fixture, installation_id, core_ip):
         print((receipt / 'journal.jsonl').read_text()[-4000:], file=sys.stderr)
 
 
+def verify_missing_bind_policy(fixture, installation_id):
+    # The fixed image intentionally receives no server config. When a bind
+    # is created successfully, the process reaches its fixed startup refusal.
+    for allow in (False, True):
+        source = fixture / ('missing-bind-allowed' if allow else 'missing-bind-refused')
+        assert not source.exists()
+        config = fixture / ('bind-allow.json' if allow else 'bind-refuse.json')
+        config.write_text(json.dumps({'services': {'probe': {
+            'image': IMAGE, 'pull_policy': 'never', 'network_mode': 'none',
+            'read_only': True, 'volumes': [{
+                'type': 'bind', 'source': str(source), 'target': '/fixture',
+                'read_only': True, 'bind': {'create_host_path': allow},
+            }],
+        }}}))
+        probe = run(['docker', 'compose', '--project-name', 'ndgbind' + installation_id,
+                     '--file', str(config), 'run', '--rm', '--no-deps', 'probe'],
+                    timeout=60, check=False)
+        assert probe.returncode != 0
+        if allow:
+            assert source.is_dir() and b'ndg-server: startup or shutdown rejected' in probe.stderr
+        else:
+            assert not source.exists() and b'bind source path does not exist' in probe.stderr
+
+
 def main():
     checks = []
     preconditions()
@@ -158,6 +182,8 @@ def main():
     assert any(str(d).endswith('@' + INDEX) for d in inspect.get('RepoDigests') or []), \
         'pulled image lost its pinned repo digest'
     checks.append('published_pinned_image_pulled_by_digest')
+    verify_missing_bind_policy(fixture, installation_id)
+    checks.append('real_compose_missing_bind_refused_with_creation_control')
 
     receipt = fixture / 'receipt'
     receipt.mkdir(mode=0o700)
