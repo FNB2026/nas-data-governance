@@ -1,0 +1,58 @@
+name: NDG Official Website
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/ndg-website.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/ndg-website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ndg-website-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Build and validate website
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+      - run: node website/build.mjs
+      - run: node --check website/dist/worker.mjs
+      - run: node --test website/tests/site.test.mjs
+
+  deploy:
+    name: Deploy ndg.fnbapp.net
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment: ndg-website-production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+      - run: node website/build.mjs
+      - name: Deploy Cloudflare Worker
+        run: node website/deploy.mjs
+        env:
+          NDG_CLOUDFLARE_API_TOKEN: ${{ secrets.NDG_CLOUDFLARE_API_TOKEN }}
+          NDG_CLOUDFLARE_ACCOUNT_ID: e63a5d011c9ebe3c1cad1d685ec57a3f
