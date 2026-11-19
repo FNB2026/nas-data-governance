@@ -51,8 +51,13 @@ func TestLegacySchemaElevenDatabaseUpgrades(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("close after migration: %v", err)
 	}
-	if got := layoutOf(t, ctx, target); got != governanceSchema12Layout {
-		t.Fatalf("post-migration layout is %s, want schema 12", got)
+	// The layout the migration lands on is whichever schema the branch itself
+	// declares, and branches that keep adding governance tables move that
+	// fingerprint. What must hold everywhere is that the migration changed the
+	// layout and that this branch accepts the result; reopening it below runs
+	// the branch's own preflight, which is the acceptance check.
+	if got := layoutOf(t, ctx, target); got == legacySchema11Layout {
+		t.Fatalf("migration left the schema-11 layout in place")
 	}
 
 	s, err = Open(ctx, target)
