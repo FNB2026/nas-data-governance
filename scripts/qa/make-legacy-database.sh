@@ -24,8 +24,24 @@ if ! git -C "$ROOT" cat-file -e "$LEGACY_COMMIT^{commit}" 2>/dev/null; then
   exit 1
 fi
 
-mkdir -p "$(dirname "$OUT")"
-rm -f "$OUT" "$OUT-wal" "$OUT-shm"
+# Resolve the output path before any directory change, so the fixture always
+# lands where the caller asked for it.
+OUTPUT_DIR=$(dirname "$OUT")
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
+OUT="$OUTPUT_DIR/$(basename "$OUT")"
+
+# Never destroy an existing database, and never write inside the checkout.
+if [[ -e "$OUT" ]]; then
+  echo "make-legacy-database: refusing to overwrite the existing $OUT" >&2
+  exit 1
+fi
+case "$OUT" in
+  "$ROOT"/*)
+    echo "make-legacy-database: refusing to write inside the repository at $OUT" >&2
+    exit 1
+    ;;
+esac
 
 WORK=$(mktemp -d)
 cleanup() {
