@@ -324,20 +324,23 @@ def main():
     binding_before = compose_image_line(fixture / 'parent')
     checks.append('original_install_bound_to_recorded_identity')
 
-    # --- refusal: the candidate is not in the local store yet ---
-    reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
-                     '--steps', 'upgrade', '--execute', '--acceptance')
-    assert reason in ('inspect_failed', 'candidate_inspect_single_record_required'), reason
-    assert compose_image_line(fixture / 'parent') == binding_before, 'refused upgrade rewrote compose'
-    still = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
-    assert still['Image'] == original_image and still['State']['Running'] is True
-    checks.append('missing_candidate_refused_without_touching_the_install')
-
     # --- cold backup of the still-original install, before any upgrade runs ---
     cli('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
         '--steps', 'backup', '--execute', '--acceptance')
     pre_upgrade_state = manifest_digests(fixture / 'parent' / ('ndg-readonly-' + installation_id) / 'state')
     checks.append('cold_backup_taken_before_upgrade')
+
+    # --- refusal: the candidate is not in the local store yet ---
+    before_refusal = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
+    reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
+                     '--steps', 'upgrade', '--execute', '--acceptance')
+    assert reason in ('inspect_failed', 'candidate_inspect_single_record_required'), reason
+    assert compose_image_line(fixture / 'parent') == binding_before, 'refused upgrade rewrote compose'
+    after_refusal = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
+    assert after_refusal['Image'] == before_refusal['Image'], 'refused upgrade changed the container image'
+    assert after_refusal['State']['Running'] == before_refusal['State']['Running'], \
+        'refused upgrade changed the container run state'
+    checks.append('missing_candidate_refused_without_touching_the_install')
 
     # --- the real upgrade ---
     run(['docker', 'pull', CANDIDATE_REPO + '@' + candidate['index']], timeout=900)
