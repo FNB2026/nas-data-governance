@@ -95,7 +95,7 @@ jobs:
           sudo -n mkdir -p /etc/docker
           echo '{"insecure-registries":["127.0.0.1:5000"]}' | sudo -n tee /etc/docker/daemon.json >/dev/null
           sudo -n systemctl restart docker
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if docker info >/dev/null 2>&1; then exit 0; fi
             sleep 1
           done
