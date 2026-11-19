@@ -66,7 +66,8 @@ STEP_PREREQS = {
 MUTATING = {'init', 'gateway', 'start', 'backup', 'upgrade', 'rollback', 'uninstall'}
 # Steps whose mutation is either idempotent or fully described by a
 # side-effect-free postcheck; only these may be reconciled after a crash.
-RECONCILABLE = {'init', 'start', 'backup', 'uninstall', 'upgrade', 'rollback', 'gateway'}
+# A healthy endpoint cannot prove that an interrupted gateway install owns it.
+RECONCILABLE = {'init', 'start', 'backup', 'uninstall', 'upgrade', 'rollback'}
 TEMPLATE_REL = 'packaging/fnos/compose.lan-readonly.yaml'
 SERVICE_UNIT = 'ndg-readonly-https.service'
 UNIT_TEMPLATE_REL = 'packaging/fnos/readonly-https-candidate.service'

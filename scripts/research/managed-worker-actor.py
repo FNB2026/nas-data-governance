@@ -509,10 +509,10 @@ def main():
         ready = handshake(process, 'dispatch')
         assert ready['state'] == 'READY', 'dispatch worker did not start'
         identity(ready['pid'], worker)
+        reach(caller, 'w', ready['socket'])
         sender = launch(probe_config('send', 'send', disp_run, disp_state,
                                      socket_path=ready['socket'], envelopes=envelopes, owner=caller), caller)
         try:
-            reach(caller, 'w', ready['socket'])
             outcome = handshake(sender, 'send')
             remaining, errors = sender.communicate(timeout=20)
             assert sender.returncode == 0 and errors == b'', 'send child failed'
@@ -715,11 +715,11 @@ def main():
         ready = handshake(process, 'env-dispatch')
         assert ready['state'] == 'READY', 'envelope dispatch worker did not start'
         identity(ready['pid'], worker)
+        reach(caller, 'w', ready['socket'])
         sender = launch(probe_config('env-send', 'send', env_run, env_state,
                                      socket_path=ready['socket'], envelopes=envelopes,
                                      owner=caller), caller)
         try:
-            reach(caller, 'w', ready['socket'])
             outcome = handshake(sender, 'env-send')
             remaining, errors = sender.communicate(timeout=20)
             assert sender.returncode == 0 and errors == b'', 'envelope send child failed'
@@ -840,11 +840,11 @@ def main():
         ready = handshake(authz_process, 'authzgate')
         assert ready['state'] == 'READY', 'authorize worker did not start'
         identity(ready['pid'], worker)
+        reach(caller, 'w', ready['socket'])
         sender = launch(probe_config('authzgate-send', 'send', authz_run, authz_state,
                                      socket_path=ready['socket'], envelopes=authz_envelopes,
                                      owner=caller), caller)
         try:
-            reach(caller, 'w', ready['socket'])
             sent = handshake(sender, 'authzgate-send')
             remaining, errors = sender.communicate(timeout=20)
             assert sender.returncode == 0 and errors == b'', 'authorize send child failed'

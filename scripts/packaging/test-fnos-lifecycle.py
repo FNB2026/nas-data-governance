@@ -584,6 +584,7 @@ def preflight_matrix(base, checks):
 
 
 def gateway_unit_matrix(base, checks):
+    assert 'gateway' not in engine.RECONCILABLE
     class UnitState:
         def __init__(self, state):
             self.state = state
