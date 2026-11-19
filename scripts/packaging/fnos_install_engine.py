@@ -47,6 +47,12 @@ PINS = {
     'amd64_config': 'sha256:2c38ca9493ccebc74cdf0cc84fb23e8a4c59babb1660d4892a2f9a50c12a96d4',
     'image': 'ghcr.io/fnb2026/ndg-readonly-preview@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1',
 }
+# The repository half of the pinned reference, derived rather than repeated, so a
+# candidate upgrade cannot silently point at a different registry than the
+# production pin. Test data only narrows where a candidate may come from; it
+# never widens the production default.
+IMAGE_REPO = PINS['image'].split('@', 1)[0]
+CANDIDATE_REPO = re.compile(r'^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?/[a-z0-9][a-z0-9._/-]*$')
 BIND_TARGETS = {'/data': False, '/config': True, '/sources/source_a': True, '/sources/source_b': True}
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
 HEX12 = re.compile(r'^[0-9a-f]{12}$')
@@ -126,9 +132,16 @@ def verify_image_record(record):
     require(any('@sha256:' in digest for digest in digests), 'repo_digest_required_without_tag_identity')
     matched = [d for d in digests if d.endswith('@' + PINS['oci_index'])]
     require(matched, 'image_not_pinned_to_acceptance_index')
+    # The host does not have to agree with us about which digest names an image.
+    # The classic overlay store reports the platform config digest; the
+    # containerd store reports the index digest itself. Both are derived from
+    # the same pinned index, so both prove the same identity; anything else
+    # means the local image body is not the pinned content at all.
+    require(image_id in (PINS['oci_index'], PINS['amd64_config']), 'image_identity_not_bound_to_pinned_index')
+    identity = 'oci_index' if image_id == PINS['oci_index'] else 'amd64_config'
     require(str(record.get('Architecture', '')) == 'amd64', 'acceptance_evidence_is_amd64_only')
-    return {'image_id': image_id, 'pinned_repo_digest': matched[0], 'architecture': 'amd64',
-            'oci_index': PINS['oci_index'], 'amd64_config': PINS['amd64_config']}
+    return {'image_id': image_id, 'identity_kind': identity, 'pinned_repo_digest': matched[0],
+            'architecture': 'amd64', 'oci_index': PINS['oci_index'], 'amd64_config': PINS['amd64_config']}
 
 
 def verify_mounts_payload(compose, prepared):
@@ -586,7 +599,8 @@ def http_json(http, method, path, payload=None, cookie=None, csrf=None, accept=(
 
 PLAN_FIELDS = {'schema', 'scope', 'installation_id', 'root', 'parent', 'boundary_root', 'source_a',
                'source_b', 'origin', 'network_id', 'core_ipv4', 'project', 'backup_dir',
-               'candidate_image', 'expected_scanned', 'gateway', 'tls_ca', 'network_owned', 'request_sha256'}
+               'candidate_image', 'candidate_repo', 'expected_scanned', 'gateway', 'tls_ca',
+               'network_owned', 'request_sha256'}
 
 
 def _validate_origin(origin, scope, core_ipv4):
@@ -703,6 +717,22 @@ def build_plan(request, acceptance):
         require(isinstance(candidate, str) and re.fullmatch(r'sha256:[0-9a-f]{64}', candidate),
                 'candidate_image_digest_required')
         require(candidate != PINS['oci_index'], 'candidate_must_be_a_different_digest_pinned_image')
+    candidate_repo = request.get('candidate_repo')
+    if candidate_repo is None:
+        candidate_repo = IMAGE_REPO
+    else:
+        require(isinstance(candidate_repo, str), 'candidate_repo_string_required')
+        require('@' not in candidate_repo and CANDIDATE_REPO.fullmatch(candidate_repo) is not None,
+                'candidate_repo_shape_rejected')
+    # Production has exactly one allowed source: the pinned GHCR repository.
+    # Only the disposable acceptance scope may name a different (local) registry,
+    # and only when it also names a candidate, so a test cannot loosen the
+    # production image-source contract by omission.
+    if scope == PRODUCTION:
+        require(candidate_repo == IMAGE_REPO, 'production_candidate_repo_must_be_pinned_ghcr')
+    else:
+        require(candidate_repo == IMAGE_REPO or candidate is not None,
+                'candidate_repo_requires_candidate_image')
     expected = request.get('expected_scanned', 1)
     require(isinstance(expected, int) and 1 <= expected <= 1000000, 'expected_scanned_rejected')
     gateway = request.get('gateway')
@@ -736,6 +766,7 @@ def build_plan(request, acceptance):
     }
     if candidate:
         plan['candidate_image'] = candidate
+        plan['candidate_repo'] = candidate_repo
     if tls_ca:
         plan['tls_ca'] = tls_ca
     if gateway:
@@ -760,6 +791,12 @@ def load_plan(path, acceptance):
     for field in ('root', 'parent', 'boundary_root', 'source_a', 'source_b', 'backup_dir'):
         strict_path(plan.get(field, ''), field)
     require(plan.get('access_base') == plan.get('origin'), 'access_origin_mismatch')
+    if plan.get('candidate_repo') is not None:
+        require(isinstance(plan['candidate_repo'], str) and
+                CANDIDATE_REPO.fullmatch(plan['candidate_repo']) is not None,
+                'candidate_repo_shape_rejected')
+        if plan['scope'] == PRODUCTION:
+            require(plan['candidate_repo'] == IMAGE_REPO, 'production_candidate_repo_must_be_pinned_ghcr')
     if plan['scope'] == PRODUCTION:
         frozen_gateway_spec(plan)
     return plan
@@ -1382,11 +1419,24 @@ def step_backup(ctx):
     return {'files': len(files), 'backup': 'verified', 'container_stopped': record['Id'][:12]}
 
 
+def candidate_reference(plan):
+    """Full repository@digest reference for the upgrade candidate.
+
+    A bare index digest is not a valid `docker image inspect` target on a
+    multi-architecture image: Docker resolves digests per repository. Every
+    inspect and every compose rewrite must therefore use the same fully
+    qualified reference, taken from one place.
+    """
+    repo = plan.get('candidate_repo') or IMAGE_REPO
+    return repo + '@' + plan['candidate_image']
+
+
 def step_upgrade(ctx):
     plan = ctx.plan
     candidate = plan.get('candidate_image')
     require(candidate, 'candidate_image_required')
-    records = ctx.runner.json(['docker', 'image', 'inspect', candidate])
+    reference = candidate_reference(plan)
+    records = ctx.runner.json(['docker', 'image', 'inspect', reference])
     require(isinstance(records, list) and len(records) == 1, 'candidate_inspect_single_record_required')
     candidate_id = str(records[0].get('Id', ''))
     require(candidate_id.startswith('sha256:') and
@@ -1394,7 +1444,7 @@ def step_upgrade(ctx):
             'candidate_must_be_a_different_digest_pinned_image')
     current = open(ctx.path('compose.yaml'), 'rb').read().decode()
     replaced, count = re.subn(r'(?m)^(\s*image:\s*)\S+$',
-                              lambda match: match.group(1) + 'ghcr.io/fnb2026/ndg-readonly-preview@' + candidate,
+                              lambda match: match.group(1) + reference,
                               current)
     require(count == 1, 'compose_image_binding_not_unique')
     atomic_write(ctx.path('compose.yaml'), replaced.encode(), 0o644)
@@ -1426,7 +1476,9 @@ def step_rollback(ctx):
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
     ctx.core_health(timeout=180)
     record = ctx.inspect_container()
-    require(record.get('Image') == plan['pins']['amd64_config'], 'rollback_image_mismatch')
+    # Compare against the identity this installation actually recorded, not a
+    # config-digest constant: the host may name the image by its index digest.
+    require(record.get('Image') == ctx.recorded('image.json')['image_id'], 'rollback_image_mismatch')
     return {'state_preserved_at': failed.replace(plan['root'] + '/', ''),
             'container': record['Id'][:12]}
 
@@ -1601,7 +1653,7 @@ def verify_backup(ctx):
 def verify_upgrade(ctx):
     candidate = ctx.plan.get('candidate_image')
     require(candidate, 'candidate_image_required')
-    records = ctx.runner.json(['docker', 'image', 'inspect', candidate])
+    records = ctx.runner.json(['docker', 'image', 'inspect', candidate_reference(ctx.plan)])
     require(isinstance(records, list) and len(records) == 1, 'candidate_inspect_single_record_required')
     candidate_id = str(records[0].get('Id', ''))
     record = ctx.inspect_container()
