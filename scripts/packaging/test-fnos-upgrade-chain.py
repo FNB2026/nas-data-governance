@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -34,7 +35,8 @@ import fnos_install_engine as engine  # noqa: E402 - needs sys.path first
 
 HELPER = HERE / 'fnos-install-lifecycle.py'
 REGISTRY = '127.0.0.1:5000'
-CANDIDATE_REPO = REGISTRY + '/ndg-readonly-candidate'
+CANDIDATE_NAME = 'ndg-readonly-candidate'
+CANDIDATE_REPO = REGISTRY + '/' + CANDIDATE_NAME
 CANDIDATE_TAG = 'upgrade-acceptance'
 CANDIDATE_REF = CANDIDATE_REPO + ':' + CANDIDATE_TAG
 REGISTRY_CONTAINER = 'ndg-acceptance-registry'
@@ -133,6 +135,20 @@ def stop_registry():
     run(['docker', 'rm', '-f', REGISTRY_CONTAINER], timeout=120, check=False)
 
 
+def registry_manifest(reference, accept):
+    """Read a manifest straight from the throwaway registry.
+
+    The registry is authoritative: `docker buildx imagetools inspect --raw`
+    echoes an index back when given an index digest, and parsing CLI text would
+    make the evidence depend on the tool version. The registry response carries
+    both the bytes and the digest it is served under.
+    """
+    url = 'http://127.0.0.1:5000/v2/' + CANDIDATE_NAME + '/manifests/' + reference
+    request = urllib.request.Request(url, headers={'Accept': accept})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read(), response.headers.get('Docker-Content-Digest')
+
+
 def build_candidate():
     """Build the second image from this checkout and publish an OCI index to the
     throwaway registry. Returns the digest/config identity actually published,
@@ -148,17 +164,21 @@ def build_candidate():
          '--tag', CANDIDATE_REF,
          '--file', 'packaging/docker/Dockerfile',
          '--push', '.'], timeout=2400, cwd=str(HERE.parent.parent))
-    raw = run(['docker', 'buildx', 'imagetools', 'inspect', '--raw', CANDIDATE_REF], timeout=120).stdout
-    index = json.loads(raw)
-    index_digest = run(['docker', 'buildx', 'imagetools', 'inspect', '--format',
-                        '{{.Manifest.Digest}}', CANDIDATE_REF], timeout=120).stdout.decode().strip()
-    platforms = [(m.get('platform') or {}) for m in index.get('manifests') or []]
-    amd64 = [p for p in platforms if p.get('os') == 'linux' and p.get('architecture') == 'amd64']
+    body, index_digest = registry_manifest(
+        CANDIDATE_TAG, 'application/vnd.oci.image.index.v1+json,'
+                       'application/vnd.docker.distribution.manifest.list.v2+json')
+    assert index_digest and index_digest.startswith('sha256:') and len(index_digest) == 71, index_digest
+    index = json.loads(body)
+    amd64 = [m for m in index.get('manifests') or []
+             if (m.get('platform') or {}).get('os') == 'linux'
+             and (m.get('platform') or {}).get('architecture') == 'amd64']
     assert len(amd64) == 1, 'candidate index must carry exactly one linux/amd64 manifest'
-    assert index_digest.startswith('sha256:') and len(index_digest) == 71, index_digest
-    raw_manifest = run(['docker', 'buildx', 'imagetools', 'inspect', '--raw',
-                        CANDIDATE_REPO + '@' + index_digest], timeout=120).stdout
-    config_digest = json.loads(raw_manifest)['config']['digest']
+    amd64_manifest = amd64[0]['digest']
+    body, served = registry_manifest(
+        amd64_manifest, 'application/vnd.oci.image.manifest.v1+json,'
+                        'application/vnd.docker.distribution.manifest.v2+json')
+    assert served == amd64_manifest, (served, amd64_manifest)
+    config_digest = json.loads(body)['config']['digest']
     assert index_digest != engine.PINS['oci_index'], 'candidate must not equal the pinned index'
     assert config_digest != engine.PINS['amd64_config'], 'candidate must not equal the pinned config'
     return {'source_sha': source_sha,
@@ -166,8 +186,11 @@ def build_candidate():
             'build_time': stamp,
             'repo': CANDIDATE_REPO,
             'index': index_digest,
+            'amd64_manifest': amd64_manifest,
             'config': config_digest,
-            'platforms': [{'os': p.get('os'), 'architecture': p.get('architecture')} for p in platforms]}
+            'platforms': [{'os': (m.get('platform') or {}).get('os'),
+                           'architecture': (m.get('platform') or {}).get('architecture')}
+                          for m in index.get('manifests') or []]}
 
 
 def candidate_contains(root):
@@ -399,6 +422,7 @@ def main():
                       'original_index': engine.PINS['oci_index'][:19] + '…',
                       'original_config': engine.PINS['amd64_config'][:19] + '…',
                       'candidate_index': candidate['index'][:19] + '…',
+                      'candidate_manifest': candidate['amd64_manifest'][:19] + '…',
                       'candidate_config': candidate['config'][:19] + '…',
                       'checks': checks}, sort_keys=True))
     return 0
