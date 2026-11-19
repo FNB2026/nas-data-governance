@@ -38,8 +38,8 @@ func fingerprint(path string) (string, error) {
 			return "", err
 		}
 		for _, part := range []string{kind, name, table, strings.TrimSpace(statement)} {
-			io.WriteString(h, part)
-			h.Write([]byte{0})
+			_, _ = io.WriteString(h, part)
+			_, _ = h.Write([]byte{0})
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), rows.Err()
