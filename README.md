@@ -6,9 +6,9 @@
 
 NDG（NAS Data Governance）面向个人、家庭与组织的数字资产管理。项目采用本地优先设计、分层哈希识别重复内容、目录职责保护及可审计的操作生命周期。
 
-**官方网站：** [ndg.fnbapp.net](https://ndg.fnbapp.net/) · [GitHub Releases](https://github.com/FNB2026/nas-data-governance/releases)
+**官方网站：** <https://ndg.fnbapp.net> · 备用网址 <https://ngd.fnbapp.net>（自动跳转）· [GitHub Releases](https://github.com/FNB2026/nas-data-governance/releases)
 
-官网展示公开版本、核心能力与安全边界；发布信息以对应 GitHub Release 为准。备用网址 `ngd.fnbapp.net` 将重定向至正式域名。README 与官网内容必须保持一致，不将研发中功能描述为已发布。
+官网展示公开产品定位、公开版本入口与安全边界，发布细节以对应的 GitHub Release 为准。**README、GitHub Releases 与官网三处内容必须保持一致**：未发布的能力不得写成已发布，开发中或实验性的平台不得写成正式支持；三处若出现差异，以最新公开 Release 与本文档的公开边界说明为准并立即修正。
 
 > **当前有两个公开测试渠道，能力并不相同。** macOS Beta 支持经过明确批准的隔离与恢复；Docker Public Preview **只能扫描与查看结果，不能移动、隔离、恢复或删除源文件**。永久清理（Purge）目前在公开版本中禁用。新一代双端完整治理执行能力正在规划与验证，不要把 main 的实验能力视为已发布功能。
 

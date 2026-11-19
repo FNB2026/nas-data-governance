@@ -1,6 +1,8 @@
 # NDG official website
 
-Canonical: https://ndg.fnbapp.net. Typo alias https://ngd.fnbapp.net issues a 308 redirect. Keep links and public release claims aligned with the root README, current immutable GitHub Releases and the website.
+Canonical: https://ndg.fnbapp.net. Typo alias https://ngd.fnbapp.net issues a 308 redirect (path and query are preserved). Keep links and public release claims aligned with the root README, current immutable GitHub Releases and the website.
+
+The site exists to present three things and nothing more: the **public product positioning** (local-first governance, human-in-control), the **public version entry points** (macOS Public Beta, read-only Linux Docker Preview, and the explicitly unshipped platforms), and the **security boundaries** (what the public builds cannot do). It is not a roadmap, a benchmark or a feature announcement channel.
 
 Cloudflare Worker name: `ndg-official-site`. The root FNB website is independent and must remain unchanged.
 
