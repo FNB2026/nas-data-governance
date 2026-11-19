@@ -20,6 +20,12 @@ node --test website/tests/site.test.mjs
 
 The generated `website/dist/` is ignored. The live Worker currently also serves the legacy `ngd.` redirect, `/privacy`, `/style.css`, `/favicon.svg`, `/robots.txt`, `/sitemap.xml` and `/healthz`.
 
+### Asset versioning and cache policy
+
+`build.mjs` writes the first 10 hex characters of the SHA-256 of `style.css` and `favicon.svg` into every `/style.css?v=…` and `/favicon.svg?v=…` reference. HTML is served with `max-age=300`; hashed asset URLs with `max-age=31536000, immutable`; an unhashed asset URL only with `max-age=300, must-revalidate`.
+
+Never hand-edit the `?v=` value, and never give an unversioned path a long cache. HTML expires in minutes while assets used to live for a day, so one CSS deploy could pair new markup with yesterday's stylesheet — that is exactly how the brand tile reverted to the old black square in a browser that had visited before the deploy. The test suite pins both the hash-to-content match and the two cache policies.
+
 ## GitHub Actions production deployment
 
 PRs only build/test. Pushing merged changes under `website/**` or the workflow to `main` first runs tests then deploys to the existing Cloudflare Worker; manual runs from `main` also work. A failed gate never deploys.

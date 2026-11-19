@@ -11,10 +11,15 @@ export default {
     }
     const path = url.pathname === "/privacy/" ? "/privacy" : url.pathname;
     const asset = ASSETS[path];
+    // Only content-hashed URLs may be cached for a year; a bare /style.css must
+    // stay short-lived so late visitors never pair old CSS with new markup.
+    const versioned = url.searchParams.has("v");
     let body, type, status = 200, cache = "public, max-age=300";
     if (asset) {
       ({body, type} = asset);
-      if (path === "/style.css" || path === "/favicon.svg") cache = "public, max-age=86400";
+      if (path === "/style.css" || path === "/favicon.svg") {
+        cache = versioned ? "public, max-age=31536000, immutable" : "public, max-age=300, must-revalidate";
+      }
     } else if (path === "/healthz") {
       body = JSON.stringify({status: "ok", service: "ndg-official-site"});
       type = "application/json; charset=utf-8";
