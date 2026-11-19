@@ -5,7 +5,7 @@ COPY cmd/ndg-desktop/frontend/package*.json ./
 RUN npm ci
 COPY cmd/ndg-desktop/frontend/ ./
 RUN npx tsc && npx vite build --config vite.web.config.ts && cp /src/internal/apihttp/webdist/web.html /src/internal/apihttp/webdist/index.html
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
+FROM golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
