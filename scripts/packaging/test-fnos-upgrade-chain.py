@@ -294,10 +294,12 @@ def main():
 
     container_name = 'ndg-' + installation_id + '-core'
     original = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
+    recorded_image = json.loads((receipt / 'image.json').read_text())
     original_image = original['Image']
-    assert original_image == engine.PINS['amd64_config'], 'install did not bind the pinned config'
+    assert original_image == recorded_image['image_id'], 'container is not on the recorded image identity'
+    assert recorded_image['identity_kind'] in ('oci_index', 'amd64_config'), recorded_image
     binding_before = compose_image_line(fixture / 'parent')
-    checks.append('original_install_bound_to_pinned_config_digest')
+    checks.append('original_install_bound_to_recorded_identity')
 
     # --- refusal: the candidate is not in the local store yet ---
     reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
@@ -320,7 +322,10 @@ def main():
                    '--steps', 'upgrade', '--execute', '--acceptance')
     assert upgraded['steps'] == ['upgrade'], upgraded
     record = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
-    assert record['Image'] == candidate['config'], 'container is not on the candidate config'
+    candidate_id = json.loads(run(['docker', 'image', 'inspect',
+                                   CANDIDATE_REPO + '@' + candidate['index']], timeout=60).stdout)[0]['Id']
+    assert record['Image'] == candidate_id, 'container is not on the candidate image identity'
+    assert candidate_id != original_image, 'candidate identity equals the original identity'
     assert record['HostConfig']['ReadonlyRootfs'] is True, 'upgrade lost the read-only rootfs'
     assert not record['HostConfig'].get('PortBindings'), 'upgrade started publishing ports'
     assert record['Config']['User'] == '10001:10001', 'upgrade changed the run identity'
@@ -360,7 +365,7 @@ def main():
                 '--steps', 'rollback', '--execute', '--acceptance')
     assert rolls['steps'] == ['rollback'], rolls
     back = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
-    assert back['Image'] == engine.PINS['amd64_config'], 'rollback did not return to the pinned config'
+    assert back['Image'] == original_image, 'rollback did not return to the recorded image identity'
     assert back['HostConfig']['ReadonlyRootfs'] is True and not back['HostConfig'].get('PortBindings')
     assert compose_image_line(fixture / 'parent') == binding_before, 'rollback rewrote compose differently'
     restored = manifest_digests(fixture / 'parent' / ('ndg-readonly-' + installation_id) / 'state')

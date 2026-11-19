@@ -132,16 +132,16 @@ def verify_image_record(record):
     require(any('@sha256:' in digest for digest in digests), 'repo_digest_required_without_tag_identity')
     matched = [d for d in digests if d.endswith('@' + PINS['oci_index'])]
     require(matched, 'image_not_pinned_to_acceptance_index')
-    # The index digest alone does not prove which config the host actually has:
-    # RepoDigests can carry the index while the local image body comes from
-    # somewhere else. Pin the config digest too, so the value used by
-    # step_rollback (a constant) and verify_rollback (the recorded value) cannot
-    # diverge without failing here first.
-    require(image_id == PINS['amd64_config'],
-            'image_config_digest_mismatch_actual_' + image_id.split(':', 1)[-1][:12])
+    # The host does not have to agree with us about which digest names an image.
+    # The classic overlay store reports the platform config digest; the
+    # containerd store reports the index digest itself. Both are derived from
+    # the same pinned index, so both prove the same identity; anything else
+    # means the local image body is not the pinned content at all.
+    require(image_id in (PINS['oci_index'], PINS['amd64_config']), 'image_identity_not_bound_to_pinned_index')
+    identity = 'oci_index' if image_id == PINS['oci_index'] else 'amd64_config'
     require(str(record.get('Architecture', '')) == 'amd64', 'acceptance_evidence_is_amd64_only')
-    return {'image_id': image_id, 'pinned_repo_digest': matched[0], 'architecture': 'amd64',
-            'oci_index': PINS['oci_index'], 'amd64_config': PINS['amd64_config']}
+    return {'image_id': image_id, 'identity_kind': identity, 'pinned_repo_digest': matched[0],
+            'architecture': 'amd64', 'oci_index': PINS['oci_index'], 'amd64_config': PINS['amd64_config']}
 
 
 def verify_mounts_payload(compose, prepared):
@@ -1476,7 +1476,9 @@ def step_rollback(ctx):
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
     ctx.core_health(timeout=180)
     record = ctx.inspect_container()
-    require(record.get('Image') == plan['pins']['amd64_config'], 'rollback_image_mismatch')
+    # Compare against the identity this installation actually recorded, not a
+    # config-digest constant: the host may name the image by its index digest.
+    require(record.get('Image') == ctx.recorded('image.json')['image_id'], 'rollback_image_mismatch')
     return {'state_preserved_at': failed.replace(plan['root'] + '/', ''),
             'container': record['Id'][:12]}
 
