@@ -189,6 +189,13 @@ def freeze_plan(args):
                  + plan['plan_digest'][:12]})
 
 
+def show_gateway_spec(args):
+    plan = engine.load_plan(args.plan, False)
+    spec = engine.frozen_gateway_spec(plan)
+    out({'result': 'GATEWAY_SPEC', 'plan_digest': plan['plan_digest'],
+         'spec': spec, 'https_json': engine.canonical(spec['config']).decode() + '\n'})
+
+
 # ---------------- read-only preflight survey ----------------
 
 PREFLIGHT_PROGRAMS = frozenset({'docker', 'docker-compose', 'systemctl', 'uname'})
@@ -377,6 +384,8 @@ def main():
 
     p = sub.add_parser('plan'); p.add_argument('request'); p.add_argument('--receipt', required=True)
     p.add_argument('--acceptance', action='store_true'); p.set_defaults(func=freeze_plan)
+    p = sub.add_parser('gateway-spec'); p.add_argument('--plan', required=True)
+    p.set_defaults(func=show_gateway_spec)
     p = sub.add_parser('preflight')
     p.add_argument('--root', default='', help='candidate boundary_root to inspect read-only')
     p.add_argument('--source', action='append', default=[], help='candidate source directory (repeatable)')

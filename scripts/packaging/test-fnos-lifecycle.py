@@ -291,6 +291,29 @@ def plan_matrix(base, checks):
             variant(gateway={'unit_sha256': 'a' * 64, 'binary_sha256': 'b' * 64,
                              'cert': '/etc/ndg/cert.pem', 'key': '/etc/ndg/key.pem'}),
             '--receipt', str(receipt), '--acceptance')
+    production = {**request, 'scope': 'PRODUCTION', 'origin': 'https://ndg.example.test:24484',
+                  'gateway': {'listen_ipv4': '192.168.50.12', 'binary_sha256': 'a' * 64,
+                              'certificate_sha256': 'b' * 64, 'leaf_sha256': 'c' * 64}}
+    first = engine.build_plan(production, False)
+    second = engine.build_plan({**production, 'installation_id': 'abcdef123456',
+                               'origin': 'https://other.example.test:24485', 'core_ipv4': '10.20.30.41'}, False)
+    a, b = (engine.frozen_gateway_spec(plan) for plan in (first, second))
+    assert a['session_cookie'] != b['session_cookie']
+    assert a['unit_name'] != b['unit_name'] and a['directory'] != b['directory'] and a['account'] != b['account']
+    assert a['config']['listen'] == '192.168.50.12:24484'
+    assert b['config']['gateway']['upstream'] == 'http://10.20.30.41:8080'
+    assert f"User={a['account']}\n" in a['unit'] and '--instance ' + first['installation_id'] in a['unit']
+    assert '/var/apps/ndg-readonly-web' not in a['unit'] and 'ndgreadonlyweb' not in a['unit']
+    prod_plan = write(base / 'frozen-prod.json', first)
+    rendered = ok('gateway-spec', 'gateway-spec', '--plan', str(prod_plan))
+    assert rendered['spec'] == a and json.loads(rendered['https_json']) == a['config']
+    refused('public_gateway_bind', 'gateway_lan_ipv4_required', 'plan',
+            write(base / 'public-gateway.json', {**production, 'gateway': {
+                **production['gateway'], 'listen_ipv4': '8.8.8.8'}}), '--receipt', str(receipt))
+    refused('gateway_core_bind', 'gateway_must_not_bind_core_ip', 'plan',
+            write(base / 'core-gateway.json', {**production, 'gateway': {
+                **production['gateway'], 'listen_ipv4': production['core_ipv4']}}), '--receipt', str(receipt))
+    checks.append('gateway_spec_binds_installation_identity_lan_and_core')
     refused('network_name_rejected', 'full_network_identity_required', 'plan',
             variant(network_id='ndg-net'), '--receipt', str(receipt), '--acceptance')
     refused('state_inside_source', 'state_inside_source_rejected', 'plan',
@@ -502,6 +525,11 @@ def runner_matrix(base, checks):
 
         def do_GET(self):
             Handler.seen.append((self.path, dict(self.headers)))
+            if self.path == '/redirect':
+                self.send_response(307)
+                self.send_header('Location', '/unintended')
+                self.end_headers()
+                return
             body = b'{"state":"alive"}'
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -529,6 +557,9 @@ def runner_matrix(base, checks):
         status, _, raw = client.request('GET', '/healthz')
         assert status == 200 and json.loads(raw) == {'state': 'alive'}
         assert Handler.seen[-1][1].get('Origin') == 'http://127.0.0.1:' + str(server.server_port)
+        visits = len(Handler.seen)
+        assert client.request('GET', '/redirect')[0] == 307
+        assert len(Handler.seen) == visits + 1 and Handler.seen[-1][0] == '/redirect'
         # The scan contract answers 202; the default JSON helper must not
         # silently accept it, and the explicit allow-list must.
         try:
@@ -543,6 +574,7 @@ def runner_matrix(base, checks):
         server.shutdown()
         server.server_close()
     checks.append('http_real_request_with_origin')
+    checks.append('http_lifecycle_client_refuses_redirects')
     checks.append('http_scan_202_is_explicit_not_default')
 
 
@@ -585,20 +617,22 @@ def preflight_matrix(base, checks):
 
 def gateway_unit_matrix(base, checks):
     assert 'gateway' not in engine.RECONCILABLE
+    unit_name = 'ndg-readonly-https-abcdef123456.service'
+
     class UnitState:
         def __init__(self, state):
             self.state = state
 
         def must(self, argv, **_kwargs):
-            assert argv == ['systemctl', 'show', '--property=LoadState', '--value', engine.SERVICE_UNIT]
+            assert argv == ['systemctl', 'show', '--property=LoadState', '--value', unit_name]
             return self.state
 
-    unit = base / engine.SERVICE_UNIT
+    unit = base / unit_name
     for state, existing in ((b'loaded', False), (b'not-found', True)):
         if existing:
             unit.write_bytes(b'original unit')
         try:
-            engine.install_new_gateway_unit(UnitState(state), base, b'new unit')
+            engine.install_new_gateway_unit(UnitState(state), base, unit_name, b'new unit')
         except engine.Refused as exc:
             assert str(exc) == 'gateway_unit_already_exists'
         else:

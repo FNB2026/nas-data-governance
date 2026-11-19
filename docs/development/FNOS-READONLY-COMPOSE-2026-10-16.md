@@ -242,3 +242,25 @@ helper SHA-256 `cd1cf60004067579b1b17daf3cc50a55df6de89cd14dfdbd79155fa3a30cee0e
 所有者授权；逐项授权清单、通过判据与中止条件见
 [人工源验收申请](FNOS-MANUAL-ACCEPTANCE-APPLICATION-2026-10-17.md)，
 在该申请获批前不执行任何真实 NAS 写入。
+
+## 每套安装使用独立 HTTPS 网关
+
+从安装计划工具版本 3 开始，生产计划的 `gateway` 接收四个字段：`listen_ipv4`
+（本机明确的 RFC 1918 地址）、`binary_sha256`（本次网关可执行文件）和
+`certificate_sha256`（证书 PEM 文件）和 `leaf_sha256`（首张证书的 DER 摘要）。`origin` 决定 HTTPS 主机名和端口，
+`core_ipv4` 决定唯一上游 `http://<core_ipv4>:8080`。生产计划旧格式需要重新生成
+及授权。
+
+`gateway-spec --plan <私有计划文件>` 只读取冻结计划并输出派生的 unit 和
+`https.json`。每个 12 位安装 ID 独占 `ndg-readonly-https-<id>.service`、
+`ndgweb-<id>` 用户与组、Cookie 名称，以及 `/etc/ndg/instances/<id>/`。
+unit 使用 `--instance <id>` 启动同目录内的二进制。私密材料由已授权的部署操作者
+预置，目录归 root 且运行账号可遍历。文件 `ndg-fnos-https` 为 root:root 0755，
+`https.json` 和 `tls.crt` 为 root:root 0644，`tls.key` 为该实例专用组可读的
+root-owned 0640，密钥字节不进入计划、回执或命令输出。
+
+先启动并核对只读核心的容器、网络 ID 和 IP，再启动专属网关。网关检查实际加载的
+unit，拒绝已有服务和额外 drop-in，固定连接计划指定的监听 IP，并保留证书主机名
+校验与实际 leaf 摘要核验，并核对 MainPID 的可执行文件及监听 socket。登录前以 `/api/session` 回传核心的 401 核对代理链。启动核验失败时，仅停止
+已经证明归属的新服务并保留现场。开机启动仍需真实浏览器验收及相应主机授权。
+独立原生测试与安装链测试的结果分别记录，真实 NAS 新实例部署另行验收。

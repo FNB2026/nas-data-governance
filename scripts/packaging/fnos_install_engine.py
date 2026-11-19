@@ -24,11 +24,14 @@ Design rules enforced here and asserted by the tests:
 """
 import datetime
 import hashlib
+import http.client
 import http.cookies
+import ipaddress
 import json
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import ssl
 import stat
@@ -48,16 +51,16 @@ BIND_TARGETS = {'/data': False, '/config': True, '/sources/source_a': True, '/so
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
 HEX12 = re.compile(r'^[0-9a-f]{12}$')
 PROJECT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,62}$')
-TOOL_VERSION = 2
+TOOL_VERSION = 3
 PRODUCTION = 'PRODUCTION'
 ACCEPTANCE = 'DISPOSABLE_LINUX_ACCEPTANCE'
 SCOPES = {PRODUCTION, ACCEPTANCE}
-STEP_ORDER = ['compat', 'sources', 'image', 'init', 'gateway', 'start', 'browser',
+STEP_ORDER = ['compat', 'sources', 'image', 'init', 'start', 'gateway', 'browser',
               'access', 'gui', 'backup', 'upgrade', 'rollback', 'uninstall', 'reboot']
 STEP_PREREQS = {
     'compat': [], 'sources': [], 'image': [],
     'init': ['compat', 'sources'],
-    'gateway': ['init'], 'start': ['init'],
+    'gateway': ['start'], 'start': ['init', 'image'],
     'browser': ['start'], 'access': ['start'], 'gui': ['start'],
     'backup': ['access'],
     'upgrade': ['backup'], 'rollback': ['backup'],
@@ -69,7 +72,6 @@ MUTATING = {'init', 'gateway', 'start', 'backup', 'upgrade', 'rollback', 'uninst
 # A healthy endpoint cannot prove that an interrupted gateway install owns it.
 RECONCILABLE = {'init', 'start', 'backup', 'uninstall', 'upgrade', 'rollback'}
 TEMPLATE_REL = 'packaging/fnos/compose.lan-readonly.yaml'
-SERVICE_UNIT = 'ndg-readonly-https.service'
 UNIT_TEMPLATE_REL = 'packaging/fnos/readonly-https-candidate.service'
 
 
@@ -500,8 +502,35 @@ class Runner(object):
 
 # ---------------- HTTP (TLS verified, no redirects) ----------------
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, context, connect_ipv4, leaf_sha256):
+        super().__init__(context=context)
+        self.connect_ipv4 = connect_ipv4
+        self.leaf_sha256 = leaf_sha256
+
+    def https_open(self, req):
+        address, expected_leaf = self.connect_ipv4, self.leaf_sha256
+
+        class Connection(http.client.HTTPSConnection):
+            def connect(self):
+                self._create_connection = lambda addr, *args, **options: socket.create_connection(
+                    (address, addr[1]), *args, **options)
+                super().connect()
+                leaf = self.sock.getpeercert(binary_form=True)
+                if not leaf or hashlib.sha256(leaf).hexdigest() != expected_leaf:
+                    self.close()
+                    raise ssl.SSLError('gateway_tls_leaf_mismatch')
+
+        return self.do_open(Connection, req, context=self._context)
+
+
 class HTTP(object):
-    def __init__(self, base, ca_file=None):
+    def __init__(self, base, ca_file=None, connect_ipv4=None, leaf_sha256=None):
         require(isinstance(base, str) and base.startswith(('http://', 'https://')), 'access_base_required')
         self.base = base.rstrip('/')
         require(self.base == base, 'access_base_trailing_slash_rejected')
@@ -512,12 +541,18 @@ class HTTP(object):
             self.context.verify_mode = ssl.CERT_REQUIRED
         else:
             require(ca_file is None, 'ca_file_requires_https')
+        require(connect_ipv4 is None or self.context is not None and isinstance(leaf_sha256, str)
+                and HEX64.fullmatch(leaf_sha256), 'pinned_address_requires_https_leaf')
+        https = (PinnedHTTPSHandler(self.context, connect_ipv4, leaf_sha256) if connect_ipv4
+                 else urllib.request.HTTPSHandler(context=self.context))
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(), https)
 
     def request(self, method, path, payload=None, headers=None, cookie=None, timeout=30):
         require(path.startswith('/'), 'request_path_required')
         url = self.base + path
         body = None
         merged = {'Accept': 'application/json'}
+        merged['Origin'] = self.base
         if headers:
             merged.update(headers)
         if payload is not None:
@@ -525,10 +560,9 @@ class HTTP(object):
             merged['Content-Type'] = 'application/json'
         if cookie:
             merged['Cookie'] = cookie
-        merged['Origin'] = self.base
         request = urllib.request.Request(url, data=body, method=method, headers=merged)
         try:
-            with urllib.request.urlopen(request, timeout=timeout, context=self.context) as response:
+            with self.opener.open(request, timeout=timeout) as response:
                 raw = response.read(1 << 20)
                 return response.status, dict(response.headers.items()), raw
         except urllib.error.HTTPError as error:
@@ -571,6 +605,52 @@ def _validate_origin(origin, scope, core_ipv4):
         require(scheme == 'http' and host == core_ipv4 and port == 8080,
                 'acceptance_origin_must_be_core_plaintext')
     return origin
+
+
+def gateway_spec(plan):
+    require(plan.get('scope') == PRODUCTION, 'gateway_installation_not_in_acceptance_scope')
+    identity = plan.get('installation_id')
+    require(isinstance(identity, str) and HEX12.fullmatch(identity), 'installation_id_shape_rejected')
+    values = plan.get('gateway')
+    require(isinstance(values, dict) and set(values) == {
+        'listen_ipv4', 'binary_sha256', 'certificate_sha256', 'leaf_sha256',
+    }, 'gateway_parameters_required')
+    for field in ('binary_sha256', 'certificate_sha256', 'leaf_sha256'):
+        require(isinstance(values[field], str) and HEX64.fullmatch(values[field]), 'gateway_digest_required')
+    try:
+        listen_ip = ipaddress.IPv4Address(values['listen_ipv4'])
+    except (ValueError, TypeError):
+        raise Refused('gateway_lan_ipv4_required') from None
+    lan = any(listen_ip in ipaddress.IPv4Network(block)
+              for block in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+    require(isinstance(values['listen_ipv4'], str) and lan, 'gateway_lan_ipv4_required')
+    core = plan['core_ipv4']
+    require(isinstance(core, str) and re.fullmatch(r'10(?:\.\d{1,3}){3}', core)
+            and all(int(octet) <= 255 for octet in core.split('.')),
+            'private_core_ipv4_required')
+    require(str(listen_ip) != core, 'gateway_must_not_bind_core_ip')
+    origin = _validate_origin(plan['origin'], PRODUCTION, core)
+    port = origin.rsplit(':', 1)[1]
+    require(str(int(port)) == port, 'origin_port_rejected')
+    account = 'ndgweb-' + identity
+    directory = '/etc/ndg/instances/' + identity
+    binary = directory + '/ndg-fnos-https'
+    template = (open(os.path.join(repo_root(), UNIT_TEMPLATE_REL), 'rb').read()).decode()
+    for before, after in (
+        ('User=ndgreadonlyweb\n', 'User=' + account + '\n'),
+        ('Group=ndgreadonlyweb\n', 'Group=' + account + '\n'),
+        ('ExecStart=/var/apps/ndg-readonly-web/cmd/ndg-fnos-https\n',
+         'ExecStart=' + binary + ' --instance ' + identity + '\n'),
+    ):
+        require(template.splitlines(keepends=True).count(before) == 1, 'gateway_unit_template_rejected')
+        template = template.replace('\n' + before, '\n' + after, 1)
+    config = {'listen': str(listen_ip) + ':' + port, 'gateway': {
+        'app_name': account, 'package_user': account, 'package_group': account,
+        'origin': origin, 'upstream': 'http://' + core + ':8080',
+    }}
+    return {'unit_name': 'ndg-readonly-https-' + identity + '.service',
+            'account': account, 'directory': directory, 'config': config, 'unit': template,
+            'session_cookie': 'ndg_' + hashlib.sha256(account.encode()).hexdigest()[:12]}
 
 
 def build_plan(request, acceptance):
@@ -627,12 +707,7 @@ def build_plan(request, acceptance):
     require(isinstance(expected, int) and 1 <= expected <= 1000000, 'expected_scanned_rejected')
     gateway = request.get('gateway')
     if scope == PRODUCTION:
-        require(isinstance(gateway, dict) and set(gateway) == {'unit_sha256', 'binary_sha256', 'cert', 'key'},
-                'gateway_parameters_required')
-        require(bool(HEX64.match(str(gateway.get('unit_sha256', '')))) and
-                bool(HEX64.match(str(gateway.get('binary_sha256', '')))), 'gateway_digest_required')
-        for field in ('cert', 'key'):
-            strict_path(gateway[field], 'gateway_' + field)
+        spec = gateway_spec(request)
     else:
         require(gateway is None, 'gateway_not_in_acceptance_scope')
     tls_ca = request.get('tls_ca')
@@ -665,6 +740,7 @@ def build_plan(request, acceptance):
         plan['tls_ca'] = tls_ca
     if gateway:
         plan['gateway'] = gateway
+        plan['gateway_spec_sha256'] = digest_of(spec)
     plan['request_sha256'] = hashlib.sha256(canonical(request)).hexdigest()
     plan['plan_digest'] = digest_of({key: value for key, value in plan.items() if key != 'plan_digest'})
     return plan
@@ -683,6 +759,9 @@ def load_plan(path, acceptance):
     require(plan.get('scope') != ACCEPTANCE or acceptance, 'acceptance_scope_requires_explicit_flag')
     for field in ('root', 'parent', 'boundary_root', 'source_a', 'source_b', 'backup_dir'):
         strict_path(plan.get(field, ''), field)
+    require(plan.get('access_base') == plan.get('origin'), 'access_origin_mismatch')
+    if plan['scope'] == PRODUCTION:
+        frozen_gateway_spec(plan)
     return plan
 
 
@@ -798,7 +877,13 @@ class Context(object):
         self.receipt = receipt
         self.runner = runner
         self.journal = Journal(receipt)
-        self.http = HTTP(plan['access_base'], plan.get('tls_ca'))
+        connect_ipv4 = leaf_sha256 = None
+        self.session_cookie = 'ndg_session'
+        if plan['scope'] == PRODUCTION:
+            self.session_cookie = frozen_gateway_spec(plan)['session_cookie']
+            connect_ipv4 = plan['gateway']['listen_ipv4']
+            leaf_sha256 = plan['gateway']['leaf_sha256']
+        self.http = HTTP(plan['access_base'], plan.get('tls_ca'), connect_ipv4, leaf_sha256)
 
     # -- paths --
     def path(self, name):
@@ -850,12 +935,18 @@ class Context(object):
         return records[0]
 
     # -- health / access --
-    def health(self, timeout=120):
+    def core_health(self, timeout=120):
+        origin = self.plan['origin']
+        direct = HTTP('http://' + self.plan['core_ipv4'] + ':8080')
+        return self.health(timeout, direct, {'Host': origin.split('://', 1)[1], 'Origin': origin})
+
+    def health(self, timeout=120, http=None, headers=None):
+        http = http or self.http
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
             try:
-                status, _, _ = self.http.request('GET', '/healthz', timeout=5)
+                status, _, _ = http.request('GET', '/healthz', headers=headers, timeout=5)
                 if status == 200:
                     return True
             except Refused as refusal:
@@ -880,13 +971,18 @@ class Context(object):
                 cookies.load(value)
             except http.cookies.CookieError:
                 continue
-        require('ndg_session' in cookies, 'session_cookie_missing')
+        require(self.session_cookie in cookies, 'session_cookie_missing')
+        session = cookies[self.session_cookie]
+        if self.plan['scope'] == PRODUCTION:
+            require(session['secure'] and session['httponly'] and not session['domain']
+                    and session['path'] == '/' and session['samesite'].lower() == 'strict',
+                    'gateway_session_cookie_scope_rejected')
         try:
             body = json.loads(raw)
         except ValueError:
             raise Refused('login_response_unreadable')
         require(isinstance(body.get('csrf'), str) and len(body['csrf']) >= 32, 'csrf_missing')
-        return 'ndg_session=' + cookies['ndg_session'].value, body['csrf']
+        return self.session_cookie + '=' + session.value, body['csrf']
 
     def snapshot(self, cookie, csrf):
         return http_json(self.http, 'POST', '/api/status', payload={'alias': 'source_a', 'resume': False},
@@ -989,52 +1085,124 @@ def step_init(ctx):
     return {'status': 'PREPARED_NOT_STARTED', 'config_mode': '0700', 'credential_mode': '0600'}
 
 
-def install_new_gateway_unit(runner, unit_dir, raw_unit):
+def install_new_gateway_unit(runner, unit_dir, unit_name, raw_unit):
     load_state = runner.must(
-        ['systemctl', 'show', '--property=LoadState', '--value', SERVICE_UNIT],
+        ['systemctl', 'show', '--property=LoadState', '--value', unit_name],
         timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
     require(load_state == 'not-found', 'gateway_unit_already_exists')
     try:
-        write_new(unit_dir, SERVICE_UNIT, raw_unit, 0o644)
+        write_new(unit_dir, unit_name, raw_unit, 0o644)
     except FileExistsError:
         raise Refused('gateway_unit_already_exists') from None
 
 
-def step_gateway(ctx):
-    plan = ctx.plan
-    require(plan['scope'] == PRODUCTION, 'gateway_installation_not_in_acceptance_scope')
-    gateway = plan['gateway']
-    unit_template = os.path.join(repo_root(), UNIT_TEMPLATE_REL)
-    raw_unit = open(unit_template, 'rb').read()
-    require(hashlib.sha256(raw_unit).hexdigest() == gateway['unit_sha256'], 'gateway_unit_changed')
-    for field, mode in (('cert', 0o644), ('key', 0o600)):
-        info = os.lstat(gateway[field])
-        require(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == mode,
-                f'gateway_{field}_mode_rejected')
-    binary = '/var/apps/ndg-readonly-web/cmd/ndg-fnos-https'
-    info = os.lstat(binary)
-    require(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o111 != 0,
-            'gateway_binary_not_executable')
-    fd = os.open(binary, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+def frozen_gateway_spec(plan):
+    spec = gateway_spec(plan)
+    require(digest_of(spec) == plan.get('gateway_spec_sha256'), 'gateway_spec_changed')
+    return spec
+
+
+def read_gateway_file(directory, name, mode, max_bytes, gid=0):
+    path = os.path.join(directory, name)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_gid == gid
+                and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == mode,
+                'gateway_material_identity_rejected')
+        require(0 < info.st_size <= max_bytes and _no_acl(path), 'gateway_material_rejected')
+        data = handle.read(max_bytes + 1)
+        require(len(data) == info.st_size, 'gateway_material_rejected')
+    return data
+
+
+def gateway_leaf_sha256(pem):
+    match = re.search(rb'-----BEGIN CERTIFICATE-----[\r\n]+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----', pem)
+    require(match is not None, 'gateway_certificate_invalid')
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(match.group().decode())).hexdigest()
+
+
+def checked_gateway_material(plan, spec):
+    import grp
+    import pwd
+    directory = spec['directory']
+    trusted_ancestors(directory, 'gateway_directory')
+    kernel_confined('/', directory, 'gateway_directory')
+    account = spec['account']
     try:
-        binary_digest = hashlib.sha256()
-        while True:
-            block = os.read(fd, 1 << 20)
-            if not block:
-                break
-            binary_digest.update(block)
-    finally:
-        os.close(fd)
-    require(binary_digest.hexdigest() == gateway['binary_sha256'], 'gateway_binary_changed')
-    unit_dir = '/etc/systemd/system'
-    install_new_gateway_unit(ctx.runner, unit_dir, raw_unit)
+        user, group = pwd.getpwnam(account), grp.getgrnam(account)
+    except KeyError:
+        raise Refused('gateway_identity_missing') from None
+    groups = grp.getgrall()
+    require(user.pw_uid > 0 and group.gr_gid > 0 and user.pw_gid == group.gr_gid
+            and user.pw_uid != 10001 and group.gr_gid != 10001
+            and {u.pw_name for u in pwd.getpwall() if u.pw_uid == user.pw_uid or u.pw_gid == group.gr_gid} == {account}
+            and {g.gr_name for g in groups if g.gr_gid == group.gr_gid} == {account}
+            and set(group.gr_mem) <= {account}
+            and all(account not in g.gr_mem for g in groups if g.gr_name != account),
+            'gateway_identity_not_exclusive')
+    config = read_gateway_file(directory, 'https.json', 0o644, 4096)
+    require(config == canonical(spec['config']) + b'\n', 'gateway_config_does_not_match_plan')
+    cert = read_gateway_file(directory, 'tls.crt', 0o644, 65536)
+    require(hashlib.sha256(cert).hexdigest() == plan['gateway']['certificate_sha256'], 'gateway_certificate_changed')
+    require(gateway_leaf_sha256(cert) == plan['gateway']['leaf_sha256'], 'gateway_leaf_does_not_match_plan')
+    binary = read_gateway_file(directory, 'ndg-fnos-https', 0o755, 64 << 20)
+    require(hashlib.sha256(binary).hexdigest() == plan['gateway']['binary_sha256'], 'gateway_binary_changed')
+    # The runtime verifies TLS key ownership/mode, pair and hostname before binding.
+    key_path = os.path.join(directory, 'tls.key')
+    key = os.lstat(key_path)
+    require(stat.S_ISREG(key.st_mode) and key.st_uid == 0 and key.st_gid == group.gr_gid
+            and stat.S_IMODE(key.st_mode) == 0o640 and key.st_nlink == 1 and _no_acl(key_path),
+            'gateway_key_identity_rejected')
+
+
+def step_gateway(ctx):
+    spec = frozen_gateway_spec(ctx.plan)
+    checked_gateway_material(ctx.plan, spec)
+    verify_start(ctx)
+    unit = spec['unit_name']
+    install_new_gateway_unit(ctx.runner, '/etc/systemd/system', unit, spec['unit'].encode())
     ctx.runner.must(['systemctl', 'daemon-reload'], timeout=60, reason='systemd_reload_failed')
-    ctx.runner.must(['systemctl', 'enable', '--now', SERVICE_UNIT], timeout=120, reason='gateway_enable_failed')
-    active = ctx.runner.must(['systemctl', 'is-active', SERVICE_UNIT], timeout=30,
-                             reason='gateway_inactive').decode().strip()
-    require(active == 'active', 'gateway_inactive')
-    ctx.health(timeout=60)
-    return {'service': SERVICE_UNIT, 'state': active}
+    verify_gateway_unit(ctx, spec)
+    try:
+        ctx.runner.must(['systemctl', 'start', unit], timeout=120, reason='gateway_start_failed')
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                verify_gateway(ctx)
+                break
+            except (Refused, OSError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
+    except (Refused, OSError):
+        # The exact new fragment was confirmed before we attempted start.
+        # Keep its file and the journal for inspection, but close its listener.
+        verify_gateway_unit(ctx, spec)
+        ctx.runner.must(['systemctl', 'stop', unit], timeout=60, reason='gateway_stop_failed')
+        raise
+    return {'service': unit, 'state': 'active', 'boot_enable': 'separate_host_step'}
+
+
+def planned_bind_sources(plan):
+    return {'/data': os.path.join(plan['root'], 'state'),
+            '/config': os.path.join(plan['root'], 'config'),
+            '/sources/source_a': plan['source_a'], '/sources/source_b': plan['source_b']}
+
+
+def verify_core_binding(plan, record):
+    mounts = {mount.get('Destination'): mount for mount in record.get('Mounts', []) or []}
+    require(set(mounts) == set(BIND_TARGETS), 'container_bind_set_mismatch')
+    sources = planned_bind_sources(plan)
+    for target, read_only in BIND_TARGETS.items():
+        require(mounts[target].get('Type') == 'bind' and mounts[target].get('Source') == sources[target],
+                'container_bind_source_mismatch')
+        require(bool(mounts[target].get('RW')) is not read_only, 'container_bind_mode_mismatch')
+    networks = (record.get('NetworkSettings') or {}).get('Networks') or {}
+    require(len(networks) == 1, 'single_container_network_required')
+    attached = next(iter(networks.values()))
+    require(attached.get('NetworkID') == plan['network_id'] and attached.get('IPAddress') == plan['core_ipv4'],
+            'core_network_binding_mismatch')
 
 
 def step_start(ctx):
@@ -1043,6 +1211,13 @@ def step_start(ctx):
     assert_mounts_stable(ctx)
     config = ctx.resolved_config()
     verify_mounts_payload(config, prepared)
+    variables = config['services']['core']
+    require({v['target']: v['source'] for v in variables['volumes']} == planned_bind_sources(plan),
+            'compose_bind_source_mismatch')
+    require(set(variables['networks']) == {'core'} and
+            variables['networks']['core'].get('ipv4_address') == plan['core_ipv4'] and
+            config['networks']['core']['name'] == plan['network_id'], 'compose_network_binding_mismatch')
+
     network = ctx.network()
     require(str(network.get('Id', '')) == plan['network_id'], 'network_identity_mismatch')
     require(network.get('Internal') is True, 'internal_network_required')
@@ -1057,19 +1232,14 @@ def step_start(ctx):
     gateway_address = (network.get('IPAM', {}) or {}).get('Config', [{}])[0].get('Gateway')
     require(str(address) != str(gateway_address), 'core_ipv4_must_not_be_network_gateway')
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
-    ctx.health(timeout=180)
+    ctx.core_health(timeout=180)
     record = ctx.inspect_container()
     expected_image = ctx.recorded('image.json')['image_id']
     require(record.get('Image', '') == expected_image, 'container_image_mismatch')
     require(str((record.get('Config', {}) or {}).get('User', '')) == '10001:10001', 'container_user_mismatch')
     require((record.get('HostConfig', {}) or {}).get('ReadonlyRootfs') is True, 'container_root_not_readonly')
     require(not (record.get('HostConfig', {}) or {}).get('PortBindings'), 'container_publishes_ports')
-    mounts = {mount.get('Destination'): mount for mount in record.get('Mounts', []) or []}
-    require(set(mounts) == set(BIND_TARGETS), 'container_bind_set_mismatch')
-    for target, read_only in BIND_TARGETS.items():
-        require(bool(mounts[target].get('RW')) is not read_only, 'container_bind_mode_mismatch')
-    networks = ((record.get('NetworkSettings', {}) or {}).get('Networks') or {})
-    require(len(networks) == 1, 'single_container_network_required')
+    verify_core_binding(plan, record)
     ctx.record('container.json', {'id': record['Id'], 'image': record.get('Image'),
                                   'network': plan['network_id'], 'ipv4': plan['core_ipv4']})
     return {'container': record['Id'][:12], 'health': 'ok', 'network': plan['network_id'][:12]}
@@ -1229,7 +1399,7 @@ def step_upgrade(ctx):
     require(count == 1, 'compose_image_binding_not_unique')
     atomic_write(ctx.path('compose.yaml'), replaced.encode(), 0o644)
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
-    ctx.health(timeout=180)
+    ctx.core_health(timeout=180)
     upgraded = ctx.inspect_container()
     require(upgraded.get('Image') == candidate_id, 'upgrade_image_mismatch')
     return {'candidate': candidate[:19] + '…', 'container': upgraded['Id'][:12]}
@@ -1254,7 +1424,7 @@ def step_rollback(ctx):
     require(actual == expected, 'restored_state_differs_from_backup')
     atomic_write(ctx.path('compose.yaml'), original, 0o644)
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
-    ctx.health(timeout=180)
+    ctx.core_health(timeout=180)
     record = ctx.inspect_container()
     require(record.get('Image') == plan['pins']['amd64_config'], 'rollback_image_mismatch')
     return {'state_preserved_at': failed.replace(plan['root'] + '/', ''),
@@ -1296,7 +1466,7 @@ def step_reboot(ctx):
     require(policy == 'unless-stopped', 'restart_policy_must_survive_reboot')
     before = ctx.recorded('access.json')['snapshot']
     ctx.runner.must(['docker', 'restart', record['Id']], timeout=180, reason='container_restart_failed')
-    ctx.health(timeout=180)
+    ctx.core_health(timeout=180)
     cookie, csrf = ctx.login()
     after = ctx.snapshot(cookie, csrf)
     http_json(ctx.http, 'POST', '/api/logout', payload={}, cookie=cookie, csrf=csrf)
@@ -1335,12 +1505,64 @@ def verify_init(ctx):
     return {'layout': 'verified'}
 
 
+def verify_gateway_unit(ctx, spec):
+    unit = spec['unit_name']
+    expected = '/etc/systemd/system/' + unit
+    fragment = ctx.runner.must(['systemctl', 'show', '--property=FragmentPath', '--value', unit],
+                               timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
+    dropins = ctx.runner.must(['systemctl', 'show', '--property=DropInPaths', '--value', unit],
+                              timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
+    require(fragment == expected and not dropins
+            and read_gateway_file('/etc/systemd/system', unit, 0o644, 16384) == spec['unit'].encode(),
+            'gateway_loaded_unit_mismatch')
+
+
+def gateway_main_pid(ctx, unit):
+    raw = ctx.runner.must(['systemctl', 'show', '--property=MainPID', '--value', unit],
+                          timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
+    require(bool(re.fullmatch(r'[1-9][0-9]{0,9}', raw)), 'gateway_main_pid_missing')
+    return raw
+
+
+def verify_gateway_listener(spec, pid):
+    address, port = spec['config']['listen'].split(':')
+    socket_key = socket.inet_aton(address)[::-1].hex().upper() + ':' + format(int(port), '04X')
+    proc = '/proc/' + pid
+    binary = os.stat(spec['directory'] + '/ndg-fnos-https', follow_symlinks=False)
+    executing = os.stat(proc + '/exe')
+    require((binary.st_dev, binary.st_ino) == (executing.st_dev, executing.st_ino), 'gateway_executable_mismatch')
+    inodes = set()
+    with open(proc + '/net/tcp', encoding='ascii') as records:
+        for row in records:
+            fields = row.split()
+            if len(fields) >= 10 and fields[1] == socket_key and fields[3] == '0A':
+                inodes.add('socket:[' + fields[9] + ']')
+    require(len(inodes) == 1, 'gateway_listener_identity_missing')
+    for name in os.listdir(proc + '/fd'):
+        try:
+            if os.readlink(proc + '/fd/' + name) in inodes:
+                return
+        except FileNotFoundError:
+            continue
+    raise Refused('gateway_listener_not_owned_by_unit')
+
+
 def verify_gateway(ctx):
-    active = ctx.runner.must(['systemctl', 'is-active', SERVICE_UNIT], timeout=30,
+    spec = frozen_gateway_spec(ctx.plan)
+    unit = spec['unit_name']
+    verify_gateway_unit(ctx, spec)
+    active = ctx.runner.must(['systemctl', 'is-active', unit], timeout=30,
                              reason='gateway_inactive').decode().strip()
     require(active == 'active', 'gateway_inactive')
-    ctx.health(timeout=60)
-    return {'service': SERVICE_UNIT, 'state': active}
+    pid = gateway_main_pid(ctx, unit)
+    verify_gateway_listener(spec, pid)
+    # The gateway's UI loads even if its upstream is down. Require the
+    # allowlisted session endpoint to return the core's unauthenticated 401.
+    status, _, _ = ctx.http.request('GET', '/api/session', timeout=10)
+    require(status == 401, 'gateway_upstream_unavailable')
+    require(pid == gateway_main_pid(ctx, unit), 'gateway_main_pid_changed')
+    verify_gateway_listener(spec, pid)
+    return {'service': unit, 'state': active}
 
 
 def verify_start(ctx):
@@ -1348,7 +1570,10 @@ def verify_start(ctx):
     record = ctx.inspect_container()
     require(record.get('Image') == ctx.recorded('image.json')['image_id'], 'container_image_mismatch')
     require((record.get('State', {}) or {}).get('Running') is True, 'core_not_running')
-    ctx.health(timeout=60)
+    current = ctx.recorded('container.json')
+    require(record['Id'] == current['id'], 'core_container_changed')
+    verify_core_binding(ctx.plan, record)
+    ctx.core_health(timeout=60)
     return {'container': record['Id'][:12], 'health': 'ok'}
 
 
@@ -1381,14 +1606,14 @@ def verify_upgrade(ctx):
     candidate_id = str(records[0].get('Id', ''))
     record = ctx.inspect_container()
     require(record.get('Image') == candidate_id, 'upgrade_image_mismatch')
-    ctx.health(timeout=60)
+    ctx.core_health(timeout=60)
     return {'candidate': candidate[:19] + '…'}
 
 
 def verify_rollback(ctx):
     record = ctx.inspect_container()
     require(record.get('Image') == ctx.recorded('image.json')['image_id'], 'rollback_image_mismatch')
-    ctx.health(timeout=60)
+    ctx.core_health(timeout=60)
     return {'container': record['Id'][:12], 'image': 'original'}
 
 
@@ -1470,6 +1695,8 @@ def run(plan_path, receipt, steps, acceptance, execute, reconcile=None):
     for step in requested:
         for prerequisite in STEP_PREREQS[step]:
             require(state.get(prerequisite) == 'ok', 'previous_step_incomplete')
+        if plan['scope'] == PRODUCTION and step in ('browser', 'access', 'gui'):
+            require(state.get('gateway') == 'ok', 'previous_step_incomplete')
         if state.get(step) == 'ok':
             ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl')))
             detail = STEPS[step][1](ctx)
