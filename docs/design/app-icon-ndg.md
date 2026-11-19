@@ -1,9 +1,18 @@
 # NDG app icon
 
-The canonical Wails raster asset is `cmd/ndg-desktop/build/appicon.png`. It replaces the framework's default W with the exact uppercase letters **NDG**: white lettering on a blue rounded tile, transparent outside the tile. This is a source-asset update for future builds; existing v0.5.0-beta.11 Tag, DMG and signatures are immutable and unchanged.
+The canonical Wails raster asset is `cmd/ndg-desktop/build/appicon.png`, generated deterministically from `cmd/ndg-desktop/build/appicon.svg`. It shows the exact uppercase letters **NDG** in white on a flat brand-blue `#0071e3` rounded tile, transparent outside the tile. This is a source-asset update for future builds; the published v0.5.0-beta.11 Tag, DMG and signatures are immutable and unchanged.
 
-Created with the built-in image_gen tool on 2026-10-12 at the user's request. No customer data or third-party reference artwork was used. Original generated PNG is retained locally. The committed 1254×1254 RGBA source is square; pinned Wails v2.13's standard icns encoder generates the 1024/512/256/128/64/32 variants from it. No Python image manipulation or release asset replacement was used.
+## Source of truth
 
-Prompt: “Production macOS desktop app icon for NDG, a local NAS data governance workbench. Transparent square canvas outside a centered blue rounded-square tile, restrained gentle gradient, subtle shadow. Center exactly the uppercase letters NDG (N D G), bold white geometric sans-serif on one line, readable at small sizes. No W, extra marks, illustration, small text or watermark.”
+`appicon.svg` is 1254×1254, tile corner radius 330 (26.3%, the same ratio as the website header mark), lettering `Helvetica Neue` bold 350px centred on the canvas. The PNG is rendered from that SVG at 1:1 with no image model involved, so the artwork can be reproduced or corrected by editing two numbers.
 
-Validation: source alpha/dimensions inspected; generated artwork visually checked for exact lettering; Wails desktop packaging and the extracted bundle icns checked separately. Build/check results are recorded on the PR. This does not constitute a new signed release or App Store submission.
+Derived copies share the same master and must not be redrawn separately:
+
+- `cmd/ndg-desktop/frontend/src/web/ndg-icon.png` (64×64, in-app web favicon)
+- `packaging/fnos/ndg-readonly-test/app/ui/images/icon_256.png` and `icon_64.png` (fnOS research package)
+
+## History
+
+The 2026-10-12 asset was an image-model rendering with a gradient tile and a soft shadow. On 2026-11-20 it was superseded so that the app icon, the repository README and the official website all show the same flat blue `NDG` mark. The gradient version is no longer referenced anywhere and is not tracked.
+
+Validation: alpha and 1254×1254 dimensions inspected; lettering checked for exact spacing and optical centring (white bounding box centred at 627,627 on the 1254 canvas); 112px and 64px downscales checked for legibility. Wails packaging and the extracted bundle icns are checked separately on the build PR. This does not constitute a new signed release or App Store submission.
