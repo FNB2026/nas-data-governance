@@ -59,10 +59,12 @@ def cli(*argv, timeout=1200):
     return json.loads(completed.stdout)
 
 
-def refusal(*argv, timeout=1200):
+def refusal(*argv, timeout=1200, label=''):
     completed = run([sys.executable, '-B', str(HELPER), *argv], timeout=timeout, check=False)
     if completed.returncode == 0:
-        raise RuntimeError('expected a typed refusal, got success')
+        raise RuntimeError((label + ': ' if label else '') +
+                           'expected a typed refusal, got success: ' +
+                           completed.stdout.decode('utf-8', 'replace')[:300])
     payload = json.loads(completed.stderr.decode('utf-8', 'replace'))
     if payload.get('result') != 'REFUSED' or not payload.get('reason'):
         raise RuntimeError('refusal was not machine-readable: ' + str(payload)[:300])
@@ -298,7 +300,8 @@ def main():
         path = probe_dir / 'request.json'
         path.write_text(json.dumps(probe))
         path.chmod(0o600)
-        got = refusal('plan', str(path), '--receipt', str(probe_dir / 'receipt'), '--acceptance')
+        got = refusal('plan', str(path), '--receipt', str(probe_dir / 'receipt'), '--acceptance',
+                      label=label)
         assert got == reason, (label, got)
     checks.append('candidate_source_rules_refuse_before_execution')
 
