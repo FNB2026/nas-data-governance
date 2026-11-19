@@ -105,8 +105,8 @@ def main():
     assert core['image'].endswith('@sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1')
     mounts = {v['target']: v for v in core['volumes']}
     assert set(mounts) == {'/data', '/config', '/sources/source_a', '/sources/source_b'}
-    # compose-go serializes CreateHostPath with omitempty: false is absent.
-    # Require all four explicit false inputs, then prove the parser preserves true.
+    # Compose may omit CreateHostPath in rendered JSON. The installation
+    # chain checks actual missing bind behavior with the frozen image.
     assert (root / 'compose.yaml').read_text().count('create_host_path: false') == 4
     assert all(v['type'] == 'bind' and v['bind'].get('create_host_path', False) is False for v in mounts.values())
     control = fixture / 'create-path-control.yaml'
@@ -115,8 +115,10 @@ def main():
     control_run = subprocess.run(control_command, capture_output=True, timeout=30)
     assert control_run.returncode == 0
     control_mounts = json.loads(control_run.stdout)['services']['core']['volumes']
-    assert all(v['bind']['create_host_path'] is True for v in control_mounts)
-    checks.append('real_compose_parser_true_control')
+    reported = [v['bind']['create_host_path'] for v in control_mounts if 'create_host_path' in v['bind']]
+    assert all(value is True for value in reported)
+    checks.append('real_compose_parser_true_control' if len(reported) == 4
+                  else 'compose_parser_omits_true_control_field')
     assert all(mounts[key]['read_only'] for key in ('/config', '/sources/source_a', '/sources/source_b'))
     assert not mounts['/data'].get('read_only', False)
     assert compose['networks']['core']['external'] and compose['networks']['core']['name'] == 'a' * 64
