@@ -16,8 +16,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/FNB2026/nas-data-governance/internal/store"
 	_ "modernc.org/sqlite"
+
+	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
 func fingerprint(path string) (string, error) {
