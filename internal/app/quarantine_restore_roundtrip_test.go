@@ -495,14 +495,11 @@ func TestQuarantineRestoreRoundTrip_EndToEnd(t *testing.T) {
 			DryRun:         false,
 			Retention:      25 * time.Hour,
 		})
-		if err != nil {
-			t.Fatal(err)
+		if err == nil || summary.LifecycleErr == nil {
+			t.Fatal("an uncertain failed action must return a recovery error")
 		}
 		if summary.Executed != 0 {
 			t.Fatalf("a failed plan must not count as executed: %#v", summary)
-		}
-		if summary.LifecycleErr == nil {
-			t.Fatal("an uncertain failed action must leave recovery required")
 		}
 		// Action A can be restored while action B still lacks durable
 		// proof of cleanup. Preserve the plan and its recovery lock.
