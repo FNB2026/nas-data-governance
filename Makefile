@@ -1,4 +1,4 @@
-.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test fnos-lifecycle-test fnos-install-chain-test container-evidence-test nas-smoke-test nas-namespace-model-test
+.PHONY: build test fmt vet public-check release-check release clean-dist frontend-test frontend-build frontend-check desktop desktop-dev desktop-build wails-check wails-version-check version-check desktop-sign desktop-dmg desktop-notarize desktop-release desktop-verify sbom fnos-check fnos-test fnos-lifecycle-test fnos-install-chain-test container-evidence-test nas-smoke-test nas-namespace-model-test
 
 # VERSION is the single source of truth, read from the VERSION file.
 # CLI builds fall back to git describe for legacy compatibility.
@@ -56,7 +56,7 @@ vet:
 public-check:
 	./scripts/check-public-boundary.sh
 
-release-check: public-check
+release-check: public-check wails-version-check
 	@test -s LICENSE || (echo "release-check: root LICENSE is required" >&2; exit 1)
 	@test -s LICENSE-DOCS.md || (echo "release-check: LICENSE-DOCS.md is required" >&2; exit 1)
 	@test -s NOTICE || (echo "release-check: NOTICE is required" >&2; exit 1)
@@ -102,11 +102,11 @@ frontend-build:
 frontend-check: frontend-test frontend-build
 
 # ---- Desktop (Wails) targets ----
-# Wails CLI v2.13.0 is the fixed toolchain version. Do NOT use @latest.
-# Install: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+# The Wails CLI is pinned to the same version as the library in go.mod.
+# Do NOT use @latest, and bump both together.
 
 DESKTOP_DIR = cmd/ndg-desktop
-WAILS_VERSION := v2.13.0
+WAILS_VERSION := v2.17.1
 
 # wails-check verifies that the Wails CLI in PATH matches the pinned version.
 # All desktop targets depend on this to prevent version drift.
@@ -123,6 +123,35 @@ wails-check:
 		exit 1; \
 	fi
 	@echo "wails-check: OK — $(WAILS_VERSION)"
+
+# wails-version-check keeps the module requirement, the CLI pin above and every
+# workflow install line on one version. wails-check only proves which CLI is in
+# PATH at build time; it cannot see that CI installs something else, so a green
+# desktop build could still come from a library and CLI that disagree.
+wails-version-check:
+	@lib="$$(awk '$$1 == "github.com/wailsapp/wails/v2" { print $$2; exit }' go.mod)"; \
+	if [ -z "$$lib" ]; then \
+		echo "wails-version-check: go.mod has no wails/v2 requirement" >&2; exit 1; \
+	fi; \
+	if [ "$$lib" != "$(WAILS_VERSION)" ]; then \
+		echo "wails-version-check: go.mod requires $$lib but WAILS_VERSION is $(WAILS_VERSION)" >&2; \
+		exit 1; \
+	fi; \
+	installs=0; \
+	for file in .github/workflows/ci.yml .github/workflows/release.yml; do \
+		for ref in $$(grep -o 'wails@v[0-9][0-9.]*' "$$file" | sed 's/.*wails@//' | sort -u); do \
+			installs=$$((installs + 1)); \
+			if [ "$$ref" != "$(WAILS_VERSION)" ]; then \
+				echo "wails-version-check: $$file installs $$ref, expected $(WAILS_VERSION)" >&2; \
+				exit 1; \
+			fi; \
+		done; \
+	done; \
+	if [ "$$installs" -eq 0 ]; then \
+		echo "wails-version-check: no wails CLI install line found in the workflows" >&2; \
+		exit 1; \
+	fi; \
+	echo "wails-version-check: go.mod, Makefile and workflows agree on $(WAILS_VERSION)"
 
 # version-check runs the release consistency script (allows untagged builds).
 version-check:
