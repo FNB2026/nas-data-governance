@@ -136,6 +136,12 @@ jobs:
             | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
           golangci-lint run --timeout=5m ./...
 
+      - name: Build a schema-11 database with the SQLite driver it shipped with
+        run: ./scripts/qa/make-legacy-database.sh /tmp/ndg-legacy/legacy.db
+
+      - name: Verify the legacy database opens and migrates under the current driver
+        run: NDG_COMPAT_DB=/tmp/ndg-legacy/legacy.db go test ./internal/store -run TestLegacySchemaElevenDatabaseUpgrades -v
+
       - name: Run tests with race detector and coverage
         run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
 
