@@ -100,6 +100,9 @@ jobs:
       - name: Check version consistency
         run: make version-check
 
+      - name: Check Wails CLI version consistency
+        run: make wails-version-check
+
       - name: Run version mapping tests
         run: ./scripts/release/test-version-mapping.sh
 
@@ -204,17 +207,17 @@ jobs:
           cache: npm
           cache-dependency-path: cmd/ndg-desktop/frontend/package-lock.json
 
-      - name: Install Wails CLI v2.13.0
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+      - name: Install Wails CLI v2.17.1
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 
       - name: Verify Wails version
         run: |
           actual="$(wails version 2>/dev/null | head -1 | tr -d '[:space:]')"
-          if [ "$actual" != "v2.13.0" ]; then
-            echo "FAIL — wails version is '$actual', expected 'v2.13.0'" >&2
+          if [ "$actual" != "v2.17.1" ]; then
+            echo "FAIL — wails version is '$actual', expected 'v2.17.1'" >&2
             exit 1
           fi
-          echo "OK — wails v2.13.0"
+          echo "OK — wails v2.17.1"
 
       - name: Install frontend dependencies
         working-directory: cmd/ndg-desktop/frontend
