@@ -1,12 +1,12 @@
 # NDG official website
 
-Canonical: https://ndg.fnbapp.net. Typo alias https://ngd.fnbapp.net issues a 308 redirect.
+Canonical: https://ndg.fnbapp.net. Typo alias https://ngd.fnbapp.net issues a 308 redirect. Keep links and public release claims aligned with the root README, current immutable GitHub Releases and the website.
 
 Cloudflare Worker name: `ndg-official-site`. The root FNB website is independent and must remain unchanged.
 
 ## Editing
 
-`index.html` holds product copy, release links, and static markup. `style.css` contains the original light, Apple-inspired UI. `privacy.html` is a site-only privacy notice; `favicon.svg` is not Apple's branding. `worker-template.mjs` implements routing and headers. `build.mjs` combines these files into one deployable Worker module without npm dependencies.
+`index.html` holds product copy, release links and static markup. The header and footer use the original NDG **blue (#0071e3) tile with the full white `NDG` letters**, followed by an aligned two-line brand label. `style.css` contains the original light, Apple-inspired UI. `privacy.html` is a site-only privacy notice; `favicon.svg` uses the same three-letter logo and is not Apple's branding. `worker-template.mjs` implements routing and headers. `build.mjs` combines these files into one deployable Worker module without npm dependencies.
 
 ### Validate locally (Node.js 22)
 
@@ -24,7 +24,7 @@ PRs only build/test. Pushing merged changes under `website/**` or the workflow t
 
 **One-time secret required:** Create a Cloudflare API token with Workers Scripts Edit for the relevant Cloudflare account; add it to GitHub Actions secret `NDG_CLOUDFLARE_API_TOKEN`, preferably in GitHub environment `ndg-website-production`. Restrict the environment to the `main` branch and configure approval as appropriate. Do not store global API keys in source or logs. `NDG_CLOUDFLARE_ACCOUNT_ID` is nonsecret account metadata.
 
-Until the secret and environment exist, **automatic deployment is configured but not operational**. The Cloudflare account connector does not transfer its login token into GitHub Actions.
+Once the environment secret has been configured, the next guarded `main` push triggers a deploy. **Do not claim production auto-deployment is verified until its actual GitHub Actions deploy job passes.** The Cloudflare account connector does not transfer its login token into GitHub Actions.
 
 ## Release accuracy and smoke testing
 
