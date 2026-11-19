@@ -1,7 +1,7 @@
 name: fnOS Web candidate
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/linux-governance-executor]
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
             architecture: arm64
             machine: aarch64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -88,6 +88,26 @@ jobs:
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/packaging/test-fnos-install-chain.py | tee /tmp/ndg-cgi-candidate/install-chain-proof.json
           cd /tmp/ndg-cgi-candidate
           sha256sum install-chain-proof.json >> SHA256SUMS
+      - name: Trust the throwaway local registry used only for the upgrade candidate
+        if: matrix.architecture == 'amd64'
+        shell: bash
+        run: |
+          sudo -n mkdir -p /etc/docker
+          echo '{"insecure-registries":["127.0.0.1:5000"]}' | sudo -n tee /etc/docker/daemon.json >/dev/null
+          sudo -n systemctl restart docker
+          for attempt in $(seq 1 30); do
+            if docker info >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo 'docker daemon did not return after the registry trust reload' >&2
+          exit 1
+      - name: Real upgrade and rollback chain against a second candidate (amd64, not NAS acceptance)
+        if: matrix.architecture == 'amd64'
+        shell: bash
+        run: |
+          sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/packaging/test-fnos-upgrade-chain.py | tee /tmp/ndg-cgi-candidate/upgrade-chain-proof.json
+          cd /tmp/ndg-cgi-candidate
+          sha256sum upgrade-chain-proof.json >> SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ndg-cgi-candidate-${{ matrix.architecture }}
