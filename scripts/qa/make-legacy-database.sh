@@ -13,7 +13,7 @@ OUT=${1:-/tmp/ndg-legacy/legacy.db}
 LEGACY_COMMIT=${NDG_LEGACY_COMMIT:-356383115f43c5d75ed2827cf7520d3172ae055f}
 EXPECTED_LAYOUT=${NDG_LEGACY_LAYOUT:-e177d2a1ec16d33cd96eed49a70082c8b25a10c5b6b72ca7e4c7e5138f811af5}
 
-ROOT=$(git rev-parse --show-toplevel)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 GENERATOR="$ROOT/scripts/qa/compatgen/main.go"
 if [[ ! -f "$GENERATOR" ]]; then
   echo "make-legacy-database: generator missing at $GENERATOR" >&2
@@ -25,7 +25,8 @@ if ! git -C "$ROOT" cat-file -e "$LEGACY_COMMIT^{commit}" 2>/dev/null; then
 fi
 
 # Resolve the output path before any directory change, so the fixture always
-# lands where the caller asked for it.
+# lands where the caller asked for it. A relative argument stays relative to
+# the caller's directory, not to the legacy worktree.
 OUTPUT_DIR=$(dirname "$OUT")
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
