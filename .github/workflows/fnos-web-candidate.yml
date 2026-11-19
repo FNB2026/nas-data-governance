@@ -3,6 +3,14 @@ on:
   pull_request:
     branches: [main, codex/linux-governance-executor]
   workflow_dispatch:
+    inputs:
+      frozen_systemd_proof:
+        description: >-
+          Run the one-time frozen systemd proof as well. It downloads the
+          artifact from run 38842292321, whose 30-day retention has expired;
+          enable only after a fresh frozen candidate exists.
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -116,7 +124,12 @@ jobs:
   frozen-systemd-proof:
     # One-time frozen-candidate evidence, not a permanent dependency on an
     # expiring Actions artifact. Future skips mean NOT_RUN for this proof.
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'codex/fnos-web-entry'
+    # A manual run has to ask for it explicitly: the artifact it downloads has
+    # already passed its retention window, so running the proof unconditionally
+    # on every dispatch only produced a guaranteed red job.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.frozen_systemd_proof)
+      || github.event.pull_request.head.ref == 'codex/fnos-web-entry'
     permissions:
       contents: read
       actions: read
