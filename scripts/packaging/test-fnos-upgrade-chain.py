@@ -222,6 +222,19 @@ def main():
     checks.append('second_candidate_index_built_and_read_back')
     print(json.dumps({'stage': 'candidate', **candidate}, sort_keys=True), file=sys.stderr)
 
+    # The docker driver leaves the built image in the local store, so the
+    # missing-candidate refusal would silently become a successful upgrade.
+    # Remove every local reference and prove it is gone before the chain runs;
+    # the candidate is pulled back from the registry right before the upgrade.
+    for reference in (CANDIDATE_REF,
+                      CANDIDATE_REPO + '@' + candidate['index'],
+                      CANDIDATE_REPO + '@' + candidate['amd64_manifest']):
+        run(['docker', 'rmi', '-f', reference], timeout=120, check=False)
+    absent = run(['docker', 'image', 'inspect', CANDIDATE_REPO + '@' + candidate['index']],
+                 timeout=60, check=False)
+    assert absent.returncode != 0, 'candidate image survived local removal'
+    checks.append('candidate_absent_before_the_refusal_probe')
+
     fixture = Path('/var/lib') / ('ndg-upgrade-' + secrets.token_hex(12))
     fixture.mkdir(mode=0o700)
     for name in ('parent', 'source_a', 'source_b', 'backups'):
