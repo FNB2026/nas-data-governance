@@ -9,7 +9,7 @@
 body{background:#fff;color:#1d1d1f;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:-.012em;line-height:1.7}
 .topbar{height:64px;background:rgba(255,255,255,.86);border-bottom:1px solid rgba(0,0,0,.065);backdrop-filter:saturate(180%) blur(22px)}
 .brand-name{color:#1d1d1f}.brand-sub{color:#86868b}.mark{background:#1d1d1f;border:0;color:white;border-radius:10px}.nav{color:#515154}.nav a:hover{color:#0071e3}.nav .nav-cta{border-radius:22px;background:#0071e3;color:#fff;font-weight:640}.nav .nav-cta:hover{background:#0077ed;color:#fff}
-.hero{padding:100px 0 105px}.eyebrow,.overline{color:#0066cc}.eyebrow:before{background:#0071e3}h1{font-size:clamp(44px,4.8vw,69px);font-weight:760;letter-spacing:-.062em;line-height:1.17}h1 em,.statement em{color:#0071e3}.lead{color:#6e6e73;font-size:17px;line-height:1.98}
+.hero{padding:100px 0 105px}.eyebrow,.overline{color:#0066cc}.eyebrow:before{background:#0071e3}h1{font-size:clamp(38px,4.3vw,55px);font-weight:760;letter-spacing:-.062em;line-height:1.17}h1 em,.statement em{color:#0071e3}.lead{color:#6e6e73;font-size:17px;line-height:1.98}
 .btn{border-radius:100px;border-color:#d2d2d7;padding:12px 22px;font-weight:660}.btn.primary{background:#0071e3;border-color:#0071e3;color:white}.btn.primary:hover{background:#0077ed}.btn.secondary{background:#fff;color:#0066cc}.btn.secondary:hover{background:#f5f5f7}.mini-note{color:#86868b}.mini-note span{color:#515154}
 .halo{background:radial-gradient(circle at 50% 48%,rgba(0,113,227,.13),transparent 69%)}.demo{background:linear-gradient(155deg,#fff,#f7faff);border-color:#e5e5ec;box-shadow:0 35px 82px rgba(37,54,98,.11);border-radius:24px;transform:rotate(1deg)}
 .demo-head{border-bottom-color:#e9e9ed;color:#1d1d1f}.lights i{background:#d2d2d7}.lights i:first-child{background:#56bba1}.demo-label{color:#0071e3}.filename{color:#1d1d1f}.filehint,.file-card p,.demodisc{color:#86868b}
@@ -27,3 +27,11 @@ body{background:#fff;color:#1d1d1f;font-family:-apple-system,BlinkMacSystemFont,
 .privacy-page{color:#1d1d1f;background:#fff}.privacy-page main{max-width:760px;margin:auto;padding:90px 24px}.privacy-page main>a,.privacy-page main a{color:#0066cc}.privacy-page main h1{font-size:43px}.privacy-page main h2{font-size:22px;margin-top:34px}.privacy-page main p,.privacy-page main li{font-size:15px;color:#6e6e73;line-height:1.95}.privacy-page main small{color:#86868b}
 a:focus-visible{outline:3px solid #0071e3;outline-offset:4px}
 @media(max-width:620px){.hero{padding:58px 0 61px}.demo{transform:none}.section{padding:73px 0}.section h2{font-size:clamp(31px,8vw,39px)}.feature{min-height:auto}.version{min-height:248px}.nav .nav-cta{padding:8px 12px}.privacy-page main{padding:68px 24px}}
+
+/* Official NDG wordmark — blue tile, white full letters, aligned wordmark text. */
+.brand{display:inline-flex;align-items:center;gap:12px;white-space:nowrap;min-width:0}
+.brand .mark{display:inline-flex;align-items:center;justify-content:center;flex:none;width:auto;min-width:58px;height:38px;padding:0 11px;border:0;border-radius:10px;background:#0071e3;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;font-size:13px;font-weight:800;letter-spacing:.055em;line-height:1;box-shadow:none}
+.brand-text{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;min-width:0;gap:4px;line-height:1}
+.brand .brand-name{display:block;margin:0;color:#1d1d1f;font-size:17px;font-weight:750;letter-spacing:.035em;line-height:1.05}
+.brand .brand-sub{display:block;margin:0;color:#86868b;font-size:9px;font-weight:530;letter-spacing:.08em;line-height:1.15}
+@media(max-width:620px){.brand{gap:9px}.brand .mark{min-width:52px;height:34px;padding:0 9px;font-size:12px}.brand .brand-name{font-size:15px}.brand .brand-sub{font-size:8px;letter-spacing:.035em}.topbar .shell{gap:10px}}

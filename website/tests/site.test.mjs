@@ -10,6 +10,8 @@ test("canonical homepage keeps releases and security boundaries", async () => {
   assert.match(html, /v0\.5\.0-docker-preview\.1/);
   assert.match(html, /永久清理/);
   assert.match(html, /style\.css/);
+  assert.equal((html.match(/class="mark" aria-hidden="true">NDG<\/span>/g) || []).length, 2);
+  assert.equal((html.match(/class="brand-text"/g) || []).length, 2);
   assert.match(response.headers.get("Content-Security-Policy"), /style-src 'self'/);
 });
 test("light style and privacy are present", async () => {
@@ -19,6 +21,11 @@ test("light style and privacy are present", async () => {
   assert.match(css, /Light v2/);
   assert.match(css, /background:#fff/);
   assert.match(css, /#0071e3/);
+  assert.match(css, /Official NDG wordmark/);
+  assert.match(css, /\.brand \.brand-sub\{display:block/);
+  const favicon = await (await visit("https://ndg.fnbapp.net/favicon.svg")).text();
+  assert.match(favicon, /NDG<\/text>/);
+  assert.match(favicon, /fill="#0071e3"/);
   const privacy = await visit("https://ndg.fnbapp.net/privacy");
   assert.equal(privacy.status, 200);
   assert.match(await privacy.text(), /隐私说明/);
