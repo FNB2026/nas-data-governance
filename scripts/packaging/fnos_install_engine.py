@@ -137,7 +137,8 @@ def verify_image_record(record):
     # somewhere else. Pin the config digest too, so the value used by
     # step_rollback (a constant) and verify_rollback (the recorded value) cannot
     # diverge without failing here first.
-    require(image_id == PINS['amd64_config'], 'image_config_digest_must_match_pinned_index')
+    require(image_id == PINS['amd64_config'],
+            'image_config_digest_mismatch_actual_' + image_id.split(':', 1)[-1][:12])
     require(str(record.get('Architecture', '')) == 'amd64', 'acceptance_evidence_is_amd64_only')
     return {'image_id': image_id, 'pinned_repo_digest': matched[0], 'architecture': 'amd64',
             'oci_index': PINS['oci_index'], 'amd64_config': PINS['amd64_config']}
