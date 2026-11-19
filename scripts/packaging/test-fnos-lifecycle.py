@@ -37,7 +37,7 @@ ENGINE = HERE / 'fnos_install_engine.py'
 INDEX = 'sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1'
 CONFIG = 'sha256:2c38ca9493ccebc74cdf0cc84fb23e8a4c59babb1660d4892a2f9a50c12a96d4'
 NETWORK = 'b' * 64
-IMAGE_ID = 'sha256:' + '1' * 64
+IMAGE_ID = CONFIG
 CORE_IP = '10.253.188.2'
 
 sys.path.insert(0, str(HERE))
@@ -169,6 +169,11 @@ def evidence_matrix(tmp, checks):
                                              'gateway_installed': False})
     good = write(tmp / 'image.json', image_record([f'registry.example/ndg@{INDEX}']))
     ok('image_pinned', 'verify-image', good)
+    ok('index_identity', 'verify-image',
+       write(tmp / 'index-identity.json', image_record([f'registry.example/ndg@{INDEX}'], image_id=INDEX)))
+    refused('wrong_image_id', 'image_identity_not_bound_to_pinned_index', 'verify-image',
+            write(tmp / 'wrong-id.json', image_record([f'registry.example/ndg@{INDEX}'],
+                                                       image_id='sha256:' + '1' * 64)))
     checks.append('image_digest_pinned_accepts')
 
     refused('tag_only_identity', 'repo_digest_required_without_tag_identity', 'verify-image',
