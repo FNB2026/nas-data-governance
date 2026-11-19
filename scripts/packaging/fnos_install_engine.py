@@ -988,6 +988,17 @@ def step_init(ctx):
     return {'status': 'PREPARED_NOT_STARTED', 'config_mode': '0700', 'credential_mode': '0600'}
 
 
+def install_new_gateway_unit(runner, unit_dir, raw_unit):
+    load_state = runner.must(
+        ['systemctl', 'show', '--property=LoadState', '--value', SERVICE_UNIT],
+        timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
+    require(load_state == 'not-found', 'gateway_unit_already_exists')
+    try:
+        write_new(unit_dir, SERVICE_UNIT, raw_unit, 0o644)
+    except FileExistsError:
+        raise Refused('gateway_unit_already_exists') from None
+
+
 def step_gateway(ctx):
     plan = ctx.plan
     require(plan['scope'] == PRODUCTION, 'gateway_installation_not_in_acceptance_scope')
@@ -1015,7 +1026,7 @@ def step_gateway(ctx):
         os.close(fd)
     require(binary_digest.hexdigest() == gateway['binary_sha256'], 'gateway_binary_changed')
     unit_dir = '/etc/systemd/system'
-    atomic_write(os.path.join(unit_dir, SERVICE_UNIT), raw_unit, 0o644)
+    install_new_gateway_unit(ctx.runner, unit_dir, raw_unit)
     ctx.runner.must(['systemctl', 'daemon-reload'], timeout=60, reason='systemd_reload_failed')
     ctx.runner.must(['systemctl', 'enable', '--now', SERVICE_UNIT], timeout=120, reason='gateway_enable_failed')
     active = ctx.runner.must(['systemctl', 'is-active', SERVICE_UNIT], timeout=30,

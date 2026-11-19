@@ -583,6 +583,32 @@ def preflight_matrix(base, checks):
     checks.append('preflight_flags_unusable_paths_without_failing')
 
 
+def gateway_unit_matrix(base, checks):
+    class UnitState:
+        def __init__(self, state):
+            self.state = state
+
+        def must(self, argv, **_kwargs):
+            assert argv == ['systemctl', 'show', '--property=LoadState', '--value', engine.SERVICE_UNIT]
+            return self.state
+
+    unit = base / engine.SERVICE_UNIT
+    for state, existing in ((b'loaded', False), (b'not-found', True)):
+        if existing:
+            unit.write_bytes(b'original unit')
+        try:
+            engine.install_new_gateway_unit(UnitState(state), base, b'new unit')
+        except engine.Refused as exc:
+            assert str(exc) == 'gateway_unit_already_exists'
+        else:
+            raise AssertionError('gateway installer accepted an occupied unit name')
+        if existing:
+            assert unit.read_bytes() == b'original unit'
+        else:
+            assert not unit.exists()
+    checks.append('gateway_refuses_loaded_or_existing_unit')
+
+
 def main():
     checks = []
     tmp = Path(tempfile.mkdtemp(prefix='ndg-lifecycle-proof-'))
@@ -602,6 +628,7 @@ def main():
     fsbase.mkdir(mode=0o700)
     filesystem_matrix(fsbase, checks)
     runner_matrix(tmp, checks)
+    gateway_unit_matrix(tmp, checks)
     pfbase = tmp / 'preflight'
     pfbase.mkdir(mode=0o700)
     preflight_matrix(pfbase, checks)

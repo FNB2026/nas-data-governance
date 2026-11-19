@@ -501,17 +501,24 @@ func TestQuarantineRestoreRoundTrip_EndToEnd(t *testing.T) {
 		if summary.Executed != 0 {
 			t.Fatalf("a failed plan must not count as executed: %#v", summary)
 		}
-		if summary.LifecycleErr != nil {
-			t.Fatalf("a fully rolled-back plan must not demand recovery: %v", summary.LifecycleErr)
+		if summary.LifecycleErr == nil {
+			t.Fatal("an uncertain failed action must leave recovery required")
 		}
-		// The rollback is durably terminal: the plan reaches ROLLED_BACK in
-		// the store, so no recovery lock stays engaged on this plan.
+		// Action A can be restored while action B still lacks durable
+		// proof of cleanup. Preserve the plan and its recovery lock.
 		durablePlan, err := env.st.GetPlan(ctx, planID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if durablePlan.State != domain.PlanRolledBack {
-			t.Fatalf("durable plan after mid-flight rollback: %s", durablePlan.State)
+		if durablePlan.State != domain.PlanExecuting {
+			t.Fatalf("durable plan after uncertain failure: %s", durablePlan.State)
+		}
+		if err := env.st.CompareAndSwapPlanState(ctx, planID, domain.PlanExecuting, domain.PlanRolledBack); err == nil {
+			t.Fatal("direct transition accepted a failed action without rollback evidence")
+		}
+		results := executor.NewForRecovery().Recover(ctx, env.st)
+		if len(results) != 1 || results[0].Action != executor.RecoverySkipped || len(results[0].Errors) == 0 {
+			t.Fatal("recovery did not preserve the uncertain plan")
 		}
 		// Both source files are back where they were, byte for byte.
 		if got := sha256File(t, aPath); got != sha256Bytes(t, []byte(payloadA)) {

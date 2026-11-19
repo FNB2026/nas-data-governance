@@ -86,8 +86,13 @@ func TestExecutionLockScope_OwnershipTruth(t *testing.T) {
 		t.Fatalf("scope bound to %q, store path %q", scope.BoundStorePath(), stA.Path())
 	}
 
-	// Release is idempotent and permanent.
+	// Release is idempotent and invalidates all copies of the scope.
+	alias := *scope
 	scope.Release()
+	if alias.Owns() || alias.Covers(stA) {
+		t.Fatal("a copy of a released scope must stop claiming ownership")
+	}
+	alias.Release()
 	scope.Release()
 	if scope.Owns() {
 		t.Fatal("ownership must end at the first release")
