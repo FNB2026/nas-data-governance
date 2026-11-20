@@ -8,7 +8,7 @@ COPY schemas ./schemas
 RUN CGO_ENABLED=0 go build -trimpath -o /out/ndg-quarantine-candidate ./cmd/ndg-quarantine-candidate
 FROM scratch
 ARG SOURCE_SHA
-LABEL org.opencontainers.image.revision=$SOURCE_SHA com.ndg.channel="quarantine-integration"
+LABEL org.opencontainers.image.revision=$SOURCE_SHA com.ndg.channel="dual-purge-integration"
 COPY --from=build /out/ndg-quarantine-candidate /ndg-quarantine-candidate
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /licenses/
 USER 10001:10001

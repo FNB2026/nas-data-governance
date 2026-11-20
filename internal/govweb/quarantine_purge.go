@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/FNB2026/nas-data-governance/internal/managedworker"
 )
@@ -68,4 +69,38 @@ func validQuarantineOp(op string) bool {
 		return true
 	}
 	return false
+}
+
+type SourcePurgeClient interface {
+	CallSource(context.Context, managedworker.Request) (managedworker.SourcePurgeResult, string, error)
+}
+
+func (s *Server) handleSourcePurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.TLS == nil || s.sourcePurge == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"reason": "SOURCE_DIRECT_PURGE_UNAVAILABLE"})
+		return
+	}
+	s.guarded(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"reason": "INVALID_REQUEST"})
+			return
+		}
+		request, err := managedworker.DecodeRequest(raw)
+		if err != nil || !strings.HasPrefix(request.Op, "SOURCE_DIRECT_PURGE_") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"reason": "INVALID_REQUEST"})
+			return
+		}
+		plan, reason, err := s.sourcePurge.CallSource(r.Context(), request)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"reason": "WORKER_RESULT_UNAVAILABLE"})
+			return
+		}
+		if reason != "" {
+			writeJSON(w, http.StatusConflict, map[string]any{"plan": plan, "reason": reason})
+			return
+		}
+		writeJSON(w, http.StatusOK, plan)
+	})(w, r)
 }

@@ -4,19 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/managedfs"
 )
 
-type quarantineResponse struct {
-	Plan   QuarantinePurgeResult `json:"plan"`
-	Reason string                `json:"reason,omitempty"`
+type purgeResponse[T any] struct {
+	Plan   T      `json:"plan"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ServeQuarantinePurge is the explicit quarantine service for the Unix worker.
 // It accepts only a connection admitted by Listener.Accept.
-func (c *Conn) ServeQuarantinePurge(ctx context.Context, service *QuarantinePurge) error {
+func (c *Conn) ServeQuarantinePurge(ctx context.Context, service *QuarantinePurge, source ...*SourcePurge) error {
 	if c == nil || c.conn == nil || c.peer.UID == 0 || c.peer.GID == 0 || service == nil {
 		return ErrUnauthorized
 	}
@@ -25,9 +26,13 @@ func (c *Conn) ServeQuarantinePurge(ctx context.Context, service *QuarantinePurg
 		return ErrProtocol
 	}
 	request, err := c.ReadRequest()
-	response := quarantineResponse{}
+	response := purgeResponse[any]{}
 	if err == nil {
-		response.Plan, err = service.dispatch(ctx, request)
+		if strings.HasPrefix(request.Op, "SOURCE_DIRECT_PURGE_") && len(source) == 1 && source[0] != nil {
+			response.Plan, err = source[0].dispatch(ctx, request)
+		} else {
+			response.Plan, err = service.dispatch(ctx, request)
+		}
 	}
 	switch {
 	case err == nil:

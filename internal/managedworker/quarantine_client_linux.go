@@ -33,6 +33,27 @@ func (c QuarantineClient) Call(ctx context.Context, op, item, plan, digest, conf
 	default:
 		return empty, "", ErrProtocol
 	}
+	return callWorkerPurge[QuarantinePurgeResult](ctx, c, message)
+}
+
+func (c QuarantineClient) CallSource(ctx context.Context, request Request) (SourcePurgeResult, string, error) {
+	if !sourcePurgeOp(request.Op) {
+		return SourcePurgeResult{}, "", ErrProtocol
+	}
+	message := make(map[string]string, len(request.Fields)+1)
+	message["op"] = request.Op
+	for key := range request.Fields {
+		value, err := request.String(key)
+		if err != nil {
+			return SourcePurgeResult{}, "", err
+		}
+		message[key] = value
+	}
+	return callWorkerPurge[SourcePurgeResult](ctx, c, message)
+}
+
+func callWorkerPurge[T any](ctx context.Context, c QuarantineClient, message map[string]string) (T, string, error) {
+	var empty T
 	if c.Worker.UID == 0 || c.Worker.GID == 0 || !filepath.IsAbs(c.RunDir) || filepath.Clean(c.RunDir) != c.RunDir {
 		return empty, "", ErrIsolation
 	}
@@ -78,7 +99,7 @@ func (c QuarantineClient) Call(ctx context.Context, op, item, plan, digest, conf
 	if _, err := io.ReadFull(conn, raw); err != nil {
 		return empty, "", ErrProtocol
 	}
-	var response quarantineResponse
+	var response purgeResponse[T]
 	if json.Unmarshal(raw, &response) != nil {
 		return empty, "", ErrProtocol
 	}

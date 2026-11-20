@@ -49,6 +49,10 @@ func runWorker(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
+	source, err := managedworker.NewSourcePurge(project, "/source")
+	if err != nil {
+		return err
+	}
 	server, err := managedworker.Listen(layout, workerSubject, []managedworker.Subject{webSubject})
 	if err != nil {
 		return err
@@ -67,7 +71,7 @@ func runWorker(ctx context.Context) (result error) {
 			}
 			return err
 		}
-		_ = conn.ServeQuarantinePurge(ctx, purge)
+		_ = conn.ServeQuarantinePurge(ctx, purge, source)
 	}
 	return nil
 }
@@ -77,10 +81,11 @@ func runWeb(ctx context.Context) error {
 		return err
 	}
 	addr := "10.254.140.2:8443"
+	client := managedworker.QuarantineClient{RunDir: "/run/ndg-worker", Worker: workerSubject}
 	web, err := govweb.New(govweb.Config{
 		Addr: addr, LANAllowlist: []string{"10.254.140.2/32"}, RequireTLS: true,
 		CredentialPath: "/config/token", Backing: govweb.ClosedBacking{},
-		QuarantinePurge: managedworker.QuarantineClient{RunDir: "/run/ndg-worker", Worker: workerSubject},
+		QuarantinePurge: client, SourcePurge: client,
 	})
 	if err != nil {
 		return err
