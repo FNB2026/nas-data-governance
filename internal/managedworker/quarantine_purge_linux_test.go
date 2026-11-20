@@ -11,18 +11,30 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/govweb"
+	"github.com/FNB2026/nas-data-governance/internal/managedfs"
 	"github.com/FNB2026/nas-data-governance/internal/managedworker"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
-func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
+type quarantinePurgeFixture struct {
+	base, root, path, sentinel, database string
+	raw                                  []byte
+	store                                *store.SQLiteStore
+	service                              *managedworker.QuarantinePurge
+	itemID                               string
+}
+
+func newQuarantinePurgeFixture(t *testing.T) quarantinePurgeFixture {
+	t.Helper()
 	if os.Geteuid() == 0 || os.Getegid() == 0 {
 		t.Skip("worker runs as a non-root account")
 	}
@@ -75,6 +87,14 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return quarantinePurgeFixture{base, root, path, sentinel, database, raw, st, svc, items[0].ID}
+}
+
+func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
+	fixture := newQuarantinePurgeFixture(t)
+	base, path, sentinel, database := fixture.base, fixture.path, fixture.sentinel, fixture.database
+	raw, st, svc := fixture.raw, fixture.store, fixture.service
+	ctx := context.Background()
 	runDir := filepath.Join(base, "run")
 	stateDir := filepath.Join(base, "state")
 	for _, dir := range []string{runDir, stateDir} {
@@ -146,7 +166,7 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 		}
 		return result
 	}
-	p := post(map[string]string{"op": "QUARANTINE_PURGE_PLAN", "item_id": items[0].ID}, http.StatusOK)
+	p := post(map[string]string{"op": "QUARANTINE_PURGE_PLAN", "item_id": fixture.itemID}, http.StatusOK)
 	if p.State != "DRAFT" {
 		t.Fatal("plan did not start in draft")
 	}
@@ -188,8 +208,145 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 	if err != nil || receipt.State != "PURGED" || receipt.Digest != p.Digest {
 		t.Fatal("persisted plan did not confirm deletion", err)
 	}
-	item, err := reopened.GetQuarantineItem(ctx, items[0].ID)
+	item, err := reopened.GetQuarantineItem(ctx, fixture.itemID)
 	if err != nil || item.Status != domain.QuarantinePurged {
 		t.Fatal("quarantine item did not transition", err)
 	}
+}
+
+// This invokes the committed store and filesystem operations in a disposable
+// child process and reopens the SQLite files under the same dedicated user.
+func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
+	for _, cut := range []string{"before_claim", "after_claim", "after_filesystem_commit", "after_database_commit"} {
+		t.Run(cut, func(t *testing.T) {
+			f := newQuarantinePurgeFixture(t)
+			ctx := context.Background()
+			p, err := f.service.Plan(ctx, f.itemID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.service.Approve(ctx, p.ID, p.Digest); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.service.DryRun(ctx, p.ID, p.Digest); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(exe, "-test.run=^TestQuarantinePurgeDatabaseKillChild$")
+			cmd.Env = append(os.Environ(), "NDG_TEST_PURGE_CUT="+cut, "NDG_TEST_PURGE_DB="+f.database,
+				"NDG_TEST_PURGE_PLAN="+p.ID)
+			out, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+				t.Fatalf("expected real SIGKILL, got %v %s", err, out)
+			}
+			st, err := store.Open(ctx, f.database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			plan, err := st.ReadDualPurgePlan(ctx, p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, err := st.GetQuarantineItem(ctx, f.itemID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			caps, err := st.GovernanceCapabilities(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantState := "EXECUTING"
+			if cut == "before_claim" {
+				wantState = "DRY_RUN"
+			}
+			if cut == "after_database_commit" {
+				wantState = "PURGED"
+			}
+			if plan.State != wantState || plan.Digest != p.Digest ||
+				(item.Status == domain.QuarantinePurged) != (wantState == "PURGED") ||
+				caps.RecoveryLockActive != (wantState == "EXECUTING") {
+				t.Fatal("inconsistent restored SQLite lifecycle")
+			}
+			removed := cut == "after_filesystem_commit" || cut == "after_database_commit"
+			for file, absent := range map[string]bool{f.path: removed,
+				filepath.Join(f.root, ".ndg-purge-stage", "receipt-"+p.ID): !removed} {
+				_, err := os.Lstat(file)
+				if (absent && !errors.Is(err, os.ErrNotExist)) || (!absent && err != nil) {
+					t.Fatalf("filesystem did not reflect interrupted phase: %v", err)
+				}
+			}
+			if got, err := os.ReadFile(f.sentinel); err != nil || string(got) != string(f.raw) {
+				t.Fatal("outside sentinel changed")
+			}
+		})
+	}
+}
+
+func TestQuarantinePurgeDatabaseKillChild(t *testing.T) {
+	cut := os.Getenv("NDG_TEST_PURGE_CUT")
+	if cut == "" {
+		return
+	}
+	database := os.Getenv("NDG_TEST_PURGE_DB")
+	if !strings.HasPrefix(database, filepath.Join(os.TempDir(), "TestQuarantinePurgePersistsAcrossDatabaseProcessKill")) ||
+		filepath.Base(database) != "test.db" {
+		t.Fatal("subprocess requires its dedicated synthetic fixture")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	plan, err := st.ReadDualPurgePlan(ctx, os.Getenv("NDG_TEST_PURGE_PLAN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := st.GetQuarantineItem(ctx, plan.SubjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := func(phase string) {
+		if phase != cut {
+			return
+		}
+		if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release, err := st.AcquireExecutionLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	stop("before_claim")
+	if err := st.AdvanceQuarantinePurge(ctx, plan, item, "EXECUTING", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	stop("after_claim")
+	var proof struct{ Target managedfs.PurgeTarget }
+	root := filepath.Join(filepath.Dir(database), "q")
+	if json.Unmarshal([]byte(plan.EvidenceJSON), &proof) != nil || proof.Target.Relative != "synthetic-file" {
+		t.Fatal("missing synthetic target")
+	}
+	result, err := managedfs.ExecutePurgeTransaction(ctx, managedfs.PurgeTransaction{
+		ID: plan.ID, ApprovalSHA256: plan.Digest, RootPath: root, Target: proof.Target,
+	})
+	if err != nil || result.State != "PURGED" {
+		t.Fatal("synthetic filesystem commit failed", err)
+	}
+	stop("after_filesystem_commit")
+	if err := st.FinishQuarantinePurge(ctx, plan, item, result.State, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	stop("after_database_commit")
+	t.Fatal("subprocess did not reach kill point")
 }
