@@ -108,6 +108,9 @@ func (s *SQLiteStore) AdvanceQuarantinePurge(ctx context.Context, p DualPurgePla
 			return err
 		}
 	}
+	if !time.Now().UTC().Before(p.ExpiresAt) {
+		return ErrGovernanceRejected
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE dual_purge_plans SET state = ?, updated_at = ?
 		WHERE id = ? AND operation = ? AND subject_id = ? AND digest = ? AND evidence_json = ? AND state = ? AND expires_at = ?`,
 		next, formatTime(now), p.ID, p.Operation, p.SubjectID, p.Digest, p.EvidenceJSON, p.State, formatTime(p.ExpiresAt))

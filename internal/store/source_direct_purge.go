@@ -133,6 +133,11 @@ func (s *SQLiteStore) AdvanceSourcePurge(ctx context.Context, plan DualPurgePlan
 			return ErrGovernanceRejected
 		}
 	}
+	// The policy snapshot may scan many indexed members and rules. The
+	// submission timestamp cannot authorize a claim after that work.
+	if !time.Now().UTC().Before(plan.ExpiresAt) {
+		return ErrGovernanceRejected
+	}
 	if err := updateSourcePurge(ctx, tx, plan, next, now); err != nil {
 		return err
 	}
