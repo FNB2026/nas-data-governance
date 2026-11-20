@@ -125,6 +125,24 @@ lookup under rename and mount/unmount races, define forced-unmount behavior and
 returned-attribute support, and demonstrate same-device and file mounts. Merely
 adding more checks to the component chain does not establish that connection.
 
+## Phase 2 mount transition evidence
+
+On macOS 27.0.1 (26A434), the extended disposable probe sampled an ordinary
+directory and file, attached the read-only fixture over the directory, then
+detached it and sampled the original objects again. The sampled root identity
+matched at all three points. The ordinary directory and file identities and
+the directory mount status matched before attachment and after detachment.
+During the mounted interval, the same complete relative lookup with
+`O_NOFOLLOW_ANY | O_RESOLVE_BENEATH` opened the fixture on a different device
+and FSID and read the fixture bytes. The mount status was different during
+that interval.
+
+This is a deterministic attach → lookup → detach observation. A protocol
+that samples only before and after the lookup cannot distinguish this sequence
+from one without the intervening mount. The probe uses independent opens
+on each sample and does not prove continuous root binding, same-device mount
+handling or cancellation under concurrent changes. Darwin P0 remains blocked.
+
 ## Required adversarial matrix before any minimal reader implementation
 
 1. Positive: disposable regular files, nested ordinary directories, known SHA-256,
