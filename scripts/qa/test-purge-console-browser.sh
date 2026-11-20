@@ -17,13 +17,16 @@ Path('browser-config.json').write_text(json.dumps({
 }))
 scenario = Path(sys.argv[2]).read_text()
 args = [Path('client-token').read_text().strip(), Path('item').read_text().strip()]
-Path('browser-flow.js').write_text('async page => (' + scenario + ')(page, ...' + json.dumps(args) + ')')
+for phase in ('prepare-source', 'confirm-source', 'prepare-quarantine', 'verify-reload'):
+    Path(phase + '.js').write_text('async page => (' + scenario + ')(page, ...' + json.dumps([*args, phase]) + ')')
 PY
 "${pw[@]}" open about:blank --browser chrome --config browser-config.json >browser-open.log 2>&1 || {
   printf 'Browser startup failed\n' >&2
   exit 1
 }
-"${pw[@]}" run-code --filename browser-flow.js >browser-flow.log 2>&1 || {
+run_phase() {
+  if "${pw[@]}" run-code --filename "$1.js" >browser-flow.log 2>&1; then return; fi
+  printf 'Browser phase %s failed\n' "$1" >&2
   # Do not echo the CLI transcript, which contains the fixture credential.
   python3 - <<'PY'
 import re
@@ -38,8 +41,32 @@ if '### Error' in lines:
 else:
     print('Playwright scenario failed before reporting a browser error')
 PY
-  exit 1
+  return 1
 }
+confirm_prompt() {
+  local phrase
+  phrase="$(python3 - "$1" <<'PYCODE'
+import re
+import sys
+from pathlib import Path
+log = Path('browser-flow.log').read_text()
+matches = re.findall(r'^' + sys.argv[1] + r' [a-f0-9]{64}(?="\])', log, re.MULTILINE)
+if '### Modal state' not in log or len(matches) != 1:
+    raise SystemExit('Expected exactly one confirmation dialog')
+print(matches[0])
+PYCODE
+)"
+  "${pw[@]}" dialog-accept "$phrase" >/dev/null
+}
+run_phase prepare-source
+"${pw[@]}" dialog-accept '错误确认' >/dev/null
+run_phase confirm-source
+confirm_prompt 永久删除
+run_phase prepare-quarantine
+confirm_prompt 永久清理
+run_phase verify-reload
+grep -Fx '"NDG browser verification complete"' browser-flow.log >/dev/null
+
 assert_fixture_file() {
   local expected="$1" file="$2" actual
   if sudo -n test -f "$file"; then actual=present; else actual=absent; fi
