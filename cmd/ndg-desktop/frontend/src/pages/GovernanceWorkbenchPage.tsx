@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGovernanceWorkbench } from "../hooks/useGovernanceWorkbench";
 import { DECISIONS, OUTCOME_LABELS, decisionLabel, filterScope, reasonLabel, type DecisionKind } from "../lib/governance";
 import { formatBytes } from "../lib/utils";
@@ -15,6 +15,7 @@ import "../governance.css";
 export default function GovernanceWorkbenchPage({ onNavigate }: { onNavigate?: (route: AppRoute) => void }) {
   const flow = useGovernanceWorkbench();
   const { context, query, page, selection, preview, result, caps } = flow;
+  const previewTrigger = useRef<HTMLButtonElement>(null);
   const [search, setSearch] = useState("");
   const [storage, setStorage] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("");
@@ -91,12 +92,12 @@ export default function GovernanceWorkbenchPage({ onNavigate }: { onNavigate?: (
       <h3>为显式选择记录决定</h3><label>主要决定<select value={kind} disabled={locked} onChange={(event) => { setKind(event.target.value as DecisionKind); flow.invalidatePreview(); }}>{DECISIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <p className="muted">{DECISIONS.find((item) => item.value === kind)?.explanation}</p><label>备注（可选，不写入普通日志）<textarea value={context.pathPrivacyMode ? "" : reason} maxLength={1000} disabled={locked || context.pathPrivacyMode} onChange={(event) => { setReason(event.target.value); flow.invalidatePreview(); }} /></label>
       {context.pathPrivacyMode && reason.trim() && <p role="status">隐私模式隐藏了备注。请关闭隐私模式核对，或<button type="button" className="secondary btn-sm" disabled={locked} onClick={() => { setReason(""); flow.invalidatePreview(); }}>清除隐藏备注</button>后再预览。</p>}
-      <div className="gov-actions"><button type="button" disabled={locked || !selection.size || !caps.can_preview || flow.loading || (context.pathPrivacyMode && !!reason.trim())} onClick={() => void flow.makePreview(kind, reason.trim())}>{selection.size === 1 ? "预览这一组决定" : "预览批量决定"}</button><span className="muted">无选择或安全接口不可用时不能提交。</span></div>
+      <div className="gov-actions"><button ref={previewTrigger} type="button" disabled={locked || !selection.size || !caps.can_preview || flow.loading || (context.pathPrivacyMode && !!reason.trim())} onClick={() => void flow.makePreview(kind, reason.trim())}>{selection.size === 1 ? "预览这一组决定" : "预览批量决定"}</button><span className="muted">无选择或安全接口不可用时不能提交。</span></div>
       <p className="muted">关系标记继续兼容旧互斥枚举；不会自动归档，也不认证真实备份。历史指定保留记录仍可查看，批量不覆盖该类型。</p>
     </section>
     {result && <section className="card gov-outcomes" aria-label="批次回执" aria-live="polite"><h3>逐组回执：{result.status === "COMPLETE" ? "已核对终态" : result.status === "CANCELLED" ? "已取消（已记录项不会撤销）" : "尚未确认结束"}</h3><p>已记录 {result.counts.saved} · 未变化 {result.counts.unchanged} · 冲突 {result.counts.conflict} · 阻断 {result.counts.blocked} · 失败 {result.counts.failed}；合计 {result.counts.total} 组。未批准、未执行。</p><ol>{result.items.map((item, index) => <li key={item.group_id}>组 {index + 1}：{OUTCOME_LABELS[item.status] || "未知状态，需要核对"}{item.reason_code ? "；" + reasonLabel(item.reason_code) : ""}</li>)}</ol><p>{result.status === "IN_PROGRESS" ? "批次未结束，全部选择和原请求仍保留。请查询回执，不要创建新批次。" : "成功项已从选择中移除；未成功项保留。请重新载入、重新选择变化项后再预览，不自动重放整批。"}</p><button type="button" className="secondary" onClick={exportSummary}>导出脱敏摘要</button></section>}
     <section className="card gov-followup"><h3>需要具体文件操作时</h3><p>记录“制定处理方案”仅保存意图。创建草案、人工复核、审批、Dry Run 和执行仍分别处理；当前没有批量批准或批量执行快捷入口。</p><div className="gov-actions"><button type="button" className="secondary" disabled={!onNavigate} onClick={() => onNavigate?.("governance-review")}>查看单计划复核（兼容入口）</button><button type="button" className="secondary" disabled={!onNavigate} onClick={() => onNavigate?.("audit-recovery")}>审计与恢复</button><button type="button" className="secondary" disabled={!onNavigate || !context.capabilities.can_execute_quarantine} onClick={() => onNavigate?.("execution-center")}>任务中心（仍需单独确认）</button></div><p className="muted">当前版本不支持永久清理；切换页面不提供审批或解除恢复锁的授权。</p></section>
-    {preview && <GovernancePreview note={context.pathPrivacyMode ? null : flow.previewIntent?.note ?? ""} preview={preview} selection={selection} kind={flow.previewIntent?.kind ?? kind} canRecord={flow.canCommit} busy={flow.operation === "commit" || flow.operation === "receipt"} canQueryReceipt={flow.canQueryReceipt} onQueryReceipt={() => void flow.queryReceipt()} ambiguous={flow.hasAmbiguousSubmission} onClose={flow.closePreview} onCommit={() => void flow.commit()} />}
+    {preview && <GovernancePreview returnFocusRef={previewTrigger} note={context.pathPrivacyMode ? null : flow.previewIntent?.note ?? ""} preview={preview} selection={selection} kind={flow.previewIntent?.kind ?? kind} canRecord={flow.canCommit} busy={flow.operation === "commit" || flow.operation === "receipt"} canQueryReceipt={flow.canQueryReceipt} onQueryReceipt={() => void flow.queryReceipt()} ambiguous={flow.hasAmbiguousSubmission} onClose={flow.closePreview} onCommit={() => void flow.commit()} />}
     <GovernanceBatchHistory expectedScope={caps.project_scope} refreshSignal={result ? result.batch_id + ":" + result.status + ":" + result.counts.saved : ""} />
   </div>;
 }
