@@ -389,7 +389,9 @@ def run_matrix(base, checks):
             '--plan', plan_path, '--receipt', str(receipt), '--steps', 'start', '--execute',
             '--acceptance')
     plan = json.loads(Path(plan_path).read_text())
-    with engine.installation_execution_lock(plan):
+    with engine.installation_execution_lock(plan) as lock_fd:
+        runner = engine.Runner(lock_fd=lock_fd)
+        runner.must([sys.executable, '-c', 'import os, sys; os.fstat(int(sys.argv[1]))', str(lock_fd)])
         refused('concurrent_lifecycle_run', 'installation_execution_busy', 'run',
                 '--plan', plan_path, '--receipt', str(receipt), '--steps', 'init', '--execute',
                 '--acceptance')
@@ -416,6 +418,15 @@ def run_matrix(base, checks):
         assert [entry['phase'] for entry in journal] == ['start', 'failed']
         assert journal[-1]['detail']['reason'] == reason
     checks.append('real_refusal_journaled_and_exit_nonzero')
+    other_receipt = base / 'secondary-receipt'
+    other_receipt.mkdir(mode=0o700)
+    other_authorization = write(other_receipt / 'authorization.json',
+                                json.loads((receipt / 'authorization.json').read_text()))
+    os.chmod(other_authorization, 0o600)
+    refused('second_receipt_cannot_replace_journal', 'installation_journal_binding_changed', 'run',
+            '--plan', plan_path, '--receipt', str(other_receipt), '--steps', 'compat', '--execute',
+            '--acceptance')
+    checks.append('installation_lock_binds_original_journal')
 
     # A tampered plan must not authorize anything.
     tampered = json.loads((receipt / 'plan.json').read_text())
@@ -439,6 +450,13 @@ def run_matrix(base, checks):
         handle.write(engine.canonical({'seq': 0, 'at': 'now', 'step': 'access', 'phase': 'start'}) + b'\n')
         handle.flush()
         os.fsync(handle.fileno())
+    pending = engine.Journal(str(receipt))
+    pending.append('upgrade', 'start', {})
+    refused('interrupted_mutation_blocks_other_step', 'manual_reconciliation_required', 'run',
+            '--plan', plan_path, '--receipt', str(receipt), '--steps', 'access', '--execute',
+            '--acceptance')
+    pending.append('upgrade', 'failed', {'reason': 'synthetic_test_resolution'})
+    checks.append('interrupted_mutation_blocks_other_step')
     refused('interrupted_step_needs_human', 'manual_reconciliation_required', 'run',
             '--plan', plan_path, '--receipt', str(receipt), '--steps', 'access', '--execute',
             '--acceptance')

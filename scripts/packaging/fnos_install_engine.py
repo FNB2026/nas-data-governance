@@ -74,7 +74,7 @@ STEP_PREREQS = {
     'upgrade': ['backup'], 'rollback': ['backup'],
     'uninstall': ['start', 'backup'], 'reboot': ['access'],
 }
-MUTATING = {'init', 'gateway', 'start', 'backup', 'upgrade', 'rollback', 'uninstall'}
+MUTATING = {'init', 'gateway', 'start', 'backup', 'upgrade', 'rollback', 'uninstall', 'reboot'}
 # Steps whose mutation is either idempotent or fully described by a
 # side-effect-free postcheck; only these may be reconciled after a crash.
 # A healthy endpoint cannot prove that an interrupted gateway install owns it.
@@ -526,8 +526,9 @@ def assert_argv(argv):
 class Runner(object):
     """Runs argv lists only. Recording every action keeps the receipt auditable."""
 
-    def __init__(self, record_path=None, env=None):
+    def __init__(self, record_path=None, env=None, *, lock_fd=None):
         self.record_path = record_path
+        self.pass_fds = () if lock_fd is None else (lock_fd,)
         self.env = env or {'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                            'LC_ALL': 'C', 'HOME': '/'}
         self.actions = []
@@ -542,7 +543,7 @@ class Runner(object):
                 os.fsync(handle.fileno())
         try:
             completed = subprocess.run(tokens, stdin=subprocess.DEVNULL, capture_output=True,
-                                       timeout=timeout, shell=False, env=self.env, cwd='/')
+                                       timeout=timeout, shell=False, env=self.env, cwd='/', pass_fds=self.pass_fds)
         except FileNotFoundError:
             raise Refused('command_unavailable')
         except subprocess.TimeoutExpired:
@@ -1565,14 +1566,13 @@ def uninstall_gateway(ctx, *, stop=False):
         return ctx.runner.must(['systemctl', 'show', '--property=' + name, '--value', unit],
                                timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
 
-    if read_property('LoadState') == 'not-found':
-        return
-    verify_gateway_unit(ctx, spec)
-    require(read_property('UnitFileState') == 'disabled', 'uninstall_gateway_must_be_disabled')
-    if stop and read_property('ActiveState') != 'inactive':
-        ctx.runner.must(['systemctl', 'stop', unit], timeout=60, reason='gateway_stop_failed')
-    require(read_property('ActiveState') == 'inactive' and read_property('MainPID') == '0',
-            'uninstall_gateway_still_running')
+    if read_property('LoadState') != 'not-found':
+        verify_gateway_unit(ctx, spec)
+        require(read_property('UnitFileState') == 'disabled', 'uninstall_gateway_must_be_disabled')
+        if stop and read_property('ActiveState') != 'inactive':
+            ctx.runner.must(['systemctl', 'stop', unit], timeout=60, reason='gateway_stop_failed')
+    require(read_property('ActiveState') == 'inactive' and read_property('MainPID') == '0'
+            and read_property('Job') in ('', '0'), 'uninstall_gateway_still_running')
 
 
 def step_uninstall(ctx):
@@ -1848,7 +1848,7 @@ def installation_execution_lock(plan):
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise Refused('installation_execution_busy') from None
-            yield
+            yield fd
         finally:
             os.close(fd)
 
@@ -1856,7 +1856,7 @@ def installation_execution_lock(plan):
 def run(plan_path, receipt, steps, acceptance, execute, reconcile=None):
     require(execute, 'explicit_execute_required')
     plan = load_plan(plan_path, acceptance)
-    private_dir(receipt, 'receipt')
+    receipt_id = private_dir(receipt, 'receipt')
     authorization = load_authorization(receipt)
     require(authorization['plan_digest'] == plan['plan_digest'], 'authorization_plan_mismatch')
     if steps:
@@ -1868,22 +1868,36 @@ def run(plan_path, receipt, steps, acceptance, execute, reconcile=None):
     missing = [step for step in requested if step not in authorization['steps']]
     require(not missing, 'step_not_authorized')
     require(reconcile is None or reconcile in authorization['steps'], 'step_not_authorized')
-    with installation_execution_lock(plan):
-        return run_locked(plan, receipt, requested, reconcile)
+    with installation_execution_lock(plan) as lock_fd:
+        # The same installation must not receive a second execution journal
+        # that could hide a mutation left pending by the original process.
+        binding = canonical({'receipt': receipt_id, 'plan_digest': plan['plan_digest']})
+        recorded_binding = os.pread(lock_fd, len(binding) + 1, 0)
+        if recorded_binding:
+            require(recorded_binding == binding, 'installation_journal_binding_changed')
+        else:
+            require(os.pwrite(lock_fd, binding, 0) == len(binding), 'installation_journal_binding_incomplete')
+            os.fsync(lock_fd)
+        return run_locked(plan, receipt, requested, reconcile, lock_fd)
 
 
-def run_locked(plan, receipt, requested, reconcile):
+def run_locked(plan, receipt, requested, reconcile, lock_fd):
     journal = Journal(receipt)
     state = journal.state()
+    interrupted = {step for step in MUTATING if state.get(step) == 'start'}
+    if interrupted:
+        target = reconcile or (requested[0] if len(requested) == 1 else None)
+        require(interrupted == {target}, 'manual_reconciliation_required')
+    ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl'), lock_fd=lock_fd))
     if reconcile:
         require(reconcile in STEP_ORDER, 'run_step_unknown')
         require(state.get(reconcile) == 'start', 'reconciliation_requires_interrupted_step')
         require(reconcile in RECONCILABLE, 'step_not_reconcilable')
-        ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl')))
         try:
             detail = STEPS[reconcile][1](ctx)
         except Refused as refusal:
-            journal.append(reconcile, 'failed', {'reconcile': str(refusal)})
+            if reconcile not in MUTATING:
+                journal.append(reconcile, 'failed', {'reconcile': str(refusal)})
             raise
         journal.append(reconcile, 'reconciled_ok', detail)
         return {'result': 'RECONCILED', 'step': reconcile, 'detail': detail}
@@ -1893,13 +1907,11 @@ def run_locked(plan, receipt, requested, reconcile):
         if plan['scope'] == PRODUCTION and step in ('browser', 'access', 'gui'):
             require(state.get('gateway') == 'ok', 'previous_step_incomplete')
         if state.get(step) == 'ok':
-            ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl')))
             detail = STEPS[step][1](ctx)
             journal.append(step, 'skip', detail)
             continue
         if state.get(step) == 'start':
             require(step in RECONCILABLE, 'manual_reconciliation_required')
-            ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl')))
             try:
                 detail = STEPS[step][1](ctx)
             except Refused:
@@ -1908,13 +1920,14 @@ def run_locked(plan, receipt, requested, reconcile):
             state[step] = 'ok'
             continue
         journal.append(step, 'start', {'scope': plan['scope']})
-        ctx = Context(plan, receipt, Runner(os.path.join(receipt, 'actions.jsonl')))
         try:
             detail = STEPS[step][0](ctx)
             journal.append(step, 'ok', detail)
             state[step] = 'ok'
         except Refused as refusal:
-            journal.append(step, 'failed', {'reason': str(refusal)})
+            # A timeout can leave work running inside Docker or systemd.
+            if step not in MUTATING or str(refusal) != 'command_timed_out':
+                journal.append(step, 'failed', {'reason': str(refusal)})
             raise
     return {'result': 'CHAIN_STEPS_COMPLETE', 'steps': requested, 'scope': plan['scope']}
 
