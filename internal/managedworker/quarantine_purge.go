@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -202,13 +201,56 @@ func (s *QuarantinePurge) DryRun(ctx context.Context, id, digest string) (Quaran
 }
 
 func (s *QuarantinePurge) Execute(ctx context.Context, id, digest string, confirmed bool) (QuarantinePurgeResult, error) {
-	result, err := s.advance(ctx, id, digest, "DRY_RUN", "EXECUTING", confirmed)
-	if errors.Is(err, managedfs.ErrRecoveryRequired) {
-		return result, managedfs.ErrRecoveryRequired
-	}
-	return result, err
+	return s.advance(ctx, id, digest, "DRY_RUN", "EXECUTING", confirmed)
 }
 
 func (s *QuarantinePurge) Recover(ctx context.Context, id, digest string) (QuarantinePurgeResult, error) {
 	return s.advance(ctx, id, digest, "EXECUTING", "RECOVER", false)
+}
+
+func (s *QuarantinePurge) Receipt(ctx context.Context, id, digest string) (QuarantinePurgeResult, error) {
+	if !opaqueID(id) || !opaqueID(digest) {
+		return QuarantinePurgeResult{}, ErrAuthorization
+	}
+	p, err := s.project.ReadDualPurgePlan(ctx, id)
+	if err != nil || p.Operation != store.QuarantinePurge || p.Digest != digest ||
+		evidenceDigest([]byte(p.EvidenceJSON)) != digest {
+		return QuarantinePurgeResult{}, ErrAuthorization
+	}
+	return quarantineResult(p), nil
+}
+
+func (s *QuarantinePurge) dispatch(ctx context.Context, req Request) (QuarantinePurgeResult, error) {
+	if req.Op == "QUARANTINE_PURGE_PLAN" {
+		item, err := req.String("item_id")
+		if err != nil {
+			return QuarantinePurgeResult{}, err
+		}
+		return s.Plan(ctx, item)
+	}
+	id, err := req.OpaqueID("plan_id")
+	if err != nil {
+		return QuarantinePurgeResult{}, err
+	}
+	digest, err := req.OpaqueID("digest")
+	if err != nil {
+		return QuarantinePurgeResult{}, err
+	}
+	switch req.Op {
+	case "QUARANTINE_PURGE_APPROVE":
+		return s.Approve(ctx, id, digest)
+	case "QUARANTINE_PURGE_DRY_RUN":
+		return s.DryRun(ctx, id, digest)
+	case "QUARANTINE_PURGE_EXECUTE":
+		confirmation, err := req.String("confirmation")
+		if err != nil || confirmation != "永久清理 "+id {
+			return QuarantinePurgeResult{}, ErrAuthorization
+		}
+		return s.Execute(ctx, id, digest, true)
+	case "QUARANTINE_PURGE_RECOVER":
+		return s.Recover(ctx, id, digest)
+	case "QUARANTINE_PURGE_RECEIPT":
+		return s.Receipt(ctx, id, digest)
+	}
+	return QuarantinePurgeResult{}, ErrProtocol
 }
