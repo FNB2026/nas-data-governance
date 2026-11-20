@@ -22,6 +22,7 @@ Design rules enforced here and asserted by the tests:
     the step declares an idempotent postcheck that actually passes.
   * Refusals carry stable tokens and never echo private paths.
 """
+from contextlib import contextmanager
 import datetime
 import hashlib
 import http.client
@@ -256,28 +257,45 @@ def trusted_ancestors(path, label):
     return 'ownership_verified_root'
 
 
+def confined_open(root_fd, relative, flags, reason):
+    require(sys.platform == 'linux' and os.uname().machine in ('x86_64', 'aarch64'),
+            'kernel_confinement_unavailable')
+    import ctypes
+
+    class OpenHow(ctypes.Structure):
+        _fields_ = [('flags', ctypes.c_uint64), ('mode', ctypes.c_uint64),
+                    ('resolve', ctypes.c_uint64)]
+
+    beneath_no_symlinks_no_xdev = 0x08 | 0x04 | 0x01
+    how = OpenHow(flags | os.O_CLOEXEC, 0, beneath_no_symlinks_no_xdev)
+    fd = ctypes.CDLL(None, use_errno=True).syscall(437, root_fd, os.fsencode(relative),
+                                                   ctypes.byref(how), ctypes.sizeof(how))
+    require(fd >= 0, reason)
+    return fd
+
+
+@contextmanager
+def confined_directory(boundary, path, label):
+    strict_path(boundary, label)
+    strict_path(path, label)
+    require(os.path.commonpath([boundary, path]) == boundary, f'{label}_outside_boundary_rejected')
+    boundary_fd = os.open(boundary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        fd = confined_open(boundary_fd, os.path.relpath(path, boundary), os.O_RDONLY | os.O_DIRECTORY,
+                           f'{label}_nested_mount_or_alias_rejected')
+        try:
+            yield fd
+        finally:
+            os.close(fd)
+    finally:
+        os.close(boundary_fd)
+
+
 def kernel_confined(boundary, path, label):
-    """openat2(BENEATH|NO_SYMLINKS|NO_XDEV) proves containment and no nested mount."""
     if sys.platform != 'linux':
         return 'kernel_confinement_not_applicable'
-    import ctypes
-    fd_boundary = os.open(boundary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        relative = os.path.relpath(path, boundary)
-        require(relative != '..' and not relative.startswith('../'), f'{label}_outside_boundary_rejected')
-
-        class How(ctypes.Structure):
-            _fields_ = [('flags', ctypes.c_uint64), ('mode', ctypes.c_uint64),
-                        ('resolve', ctypes.c_uint64)]
-
-        how = How(os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, 0, 0x08 | 0x04 | 0x01)
-        fd = ctypes.CDLL(None, use_errno=True).syscall(437, fd_boundary, relative.encode(),
-                                                       ctypes.byref(how), ctypes.sizeof(how))
-        require(fd >= 0, f'{label}_nested_mount_or_alias_rejected')
-        os.close(fd)
-    finally:
-        os.close(fd_boundary)
-    return 'kernel_confinement_verified'
+    with confined_directory(boundary, path, label):
+        return 'kernel_confinement_verified'
 
 
 def assert_mounts_stable(ctx):
@@ -289,6 +307,7 @@ def assert_mounts_stable(ctx):
             info = os.lstat(ctx.plan[label])
         except OSError:
             raise Refused('source_identity_unavailable')
+        kernel_confined(ctx.plan['boundary_root'], ctx.plan[label], label)
         expected = recorded['identities'][label]
         require((info.st_dev, info.st_ino) == (expected['device'], expected['inode']),
                 'mount_identity_changed')
@@ -371,85 +390,106 @@ def atomic_write(path, data, mode):
     sync_dir(directory)
 
 
-def manifest(root, label='manifest'):
-    strict_path(root, label)
-    require(os.path.isdir(root) and not os.path.islink(root), f'{label}_directory_required')
+def tree_entries(root_fd, directory='.'):
+    # Resolve every descendant from the original root. A retained child FD
+    # could otherwise lead outside the root after an intervening rename.
+    fd = confined_open(root_fd, directory, os.O_RDONLY | os.O_DIRECTORY, 'tree_mount_or_alias_rejected')
+    try:
+        names = sorted(os.listdir(fd))
+    finally:
+        os.close(fd)
+    children = []
+    for name in names:
+        relative = name if directory == '.' else os.path.join(directory, name)
+        fd = confined_open(root_fd, relative, os.O_PATH, 'tree_mount_or_alias_rejected')
+        try:
+            info = os.fstat(fd)
+            if stat.S_ISDIR(info.st_mode):
+                children.append(relative)
+                yield relative, info, None
+            else:
+                require(stat.S_ISREG(info.st_mode), 'non_regular_file_rejected')
+                # The kernel FD refers to the regular inode that was just
+                # inspected. Reopening the source pathname would race.
+                with open(f'/proc/self/fd/{fd}', 'rb') as reader:
+                    yield relative, info, reader
+        finally:
+            os.close(fd)
+    for child in children:
+        yield from tree_entries(root_fd, child)
+
+
+def manifest(root, label='manifest', *, boundary=None):
     entries = []
-    for current, directories, files in os.walk(root, followlinks=False):
-        directories.sort()
-        files.sort()
-        for name in directories:
-            path = os.path.join(current, name)
-            require(not os.path.islink(path), 'symlink_in_tree_rejected')
-        for name in files:
-            path = os.path.join(current, name)
-            info = os.lstat(path)
-            require(stat.S_ISREG(info.st_mode), 'non_regular_file_rejected')
+    with confined_directory(boundary or root, root, label) as root_fd:
+        for path, info, reader in tree_entries(root_fd):
+            if reader is None:
+                continue
             require(info.st_size <= (1 << 31), 'file_too_large_for_manifest')
             digest = hashlib.sha256()
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-            try:
-                while True:
-                    block = os.read(fd, 1 << 20)
-                    if not block:
-                        break
-                    digest.update(block)
-            finally:
-                os.close(fd)
-            entries.append({'path': os.path.relpath(path, root), 'sha256': digest.hexdigest(),
-                            'size': info.st_size, 'mode': format(stat.S_IMODE(info.st_mode), '04o'),
+            for block in iter(lambda: reader.read(1 << 20), b''):
+                digest.update(block)
+            entries.append({'path': path, 'sha256': digest.hexdigest(), 'size': info.st_size,
+                            'mode': format(stat.S_IMODE(info.st_mode), '04o'),
                             'uid': info.st_uid, 'gid': info.st_gid})
             require(len(entries) <= 20000, 'manifest_entry_limit_exceeded')
     require(entries, 'empty_tree_rejected')
     return entries
 
 
-def copy_tree(source, destination, uid=None, gid=None):
-    strict_path(source, 'copy_source')
-    require(not os.path.exists(destination), 'copy_destination_must_not_exist')
-    ensure_dir(destination, 0o700, uid, gid)
-    source_info = os.lstat(source)
-    os.chmod(destination, stat.S_IMODE(source_info.st_mode))
-    for current, directories, files in os.walk(source, followlinks=False):
-        directories.sort()
-        files.sort()
-        relative = os.path.relpath(current, source)
-        target_dir = destination if relative == '.' else os.path.join(destination, relative)
-        for name in directories:
-            path = os.path.join(current, name)
-            info = os.lstat(path)
-            require(not stat.S_ISLNK(info.st_mode), 'symlink_in_tree_rejected')
-            child = os.path.join(target_dir, name)
-            ensure_dir(child, stat.S_IMODE(info.st_mode), uid if uid is not None else info.st_uid,
-                       gid if gid is not None else info.st_gid)
-        for name in files:
-            path = os.path.join(current, name)
-            info = os.lstat(path)
-            require(stat.S_ISREG(info.st_mode), 'non_regular_file_rejected')
-            target = os.path.join(target_dir, name)
-            fd_in = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-            try:
-                fd_out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+def copy_tree(source, destination, uid=None, gid=None, *, boundary=None):
+    import shutil
+
+    strict_path(destination, 'copy_destination')
+    require(os.path.commonpath([source, destination]) not in (source, destination),
+            'copy_source_destination_overlap')
+    destination_parent, destination_name = os.path.split(destination)
+    with confined_directory(boundary or source, source, 'copy_source') as root_fd, \
+            confined_directory(boundary or destination_parent, destination_parent,
+                               'copy_destination') as parent_fd:
+        require(not os.path.lexists(destination), 'copy_destination_must_not_exist')
+        os.mkdir(destination_name, 0o700, dir_fd=parent_fd)
+        destination_fd = confined_open(parent_fd, destination_name, os.O_RDONLY | os.O_DIRECTORY,
+                                       'copy_destination_mount_or_alias_rejected')
+        try:
+            if uid is not None:
+                os.fchown(destination_fd, uid, gid if gid is not None else uid)
+            os.fchmod(destination_fd, stat.S_IMODE(os.fstat(root_fd).st_mode))
+            for path, info, reader in tree_entries(root_fd):
+                parent, name = os.path.split(path)
+                output_parent = confined_open(destination_fd, parent or '.', os.O_RDONLY | os.O_DIRECTORY,
+                                              'copy_destination_mount_or_alias_rejected')
                 try:
-                    with os.fdopen(fd_out, 'wb', closefd=False) as handle:
-                        while True:
-                            block = os.read(fd_in, 1 << 20)
-                            if not block:
-                                break
-                            handle.write(block)
-                        handle.flush()
-                    os.fchmod(fd_out, stat.S_IMODE(info.st_mode))
-                    os.fchown(fd_out, uid if uid is not None else info.st_uid,
-                              gid if gid is not None else info.st_gid)
-                    os.fsync(fd_out)
+                    mode = stat.S_IMODE(info.st_mode)
+                    owner = uid if uid is not None else info.st_uid
+                    group = gid if gid is not None else info.st_gid
+                    if reader is None:
+                        os.mkdir(name, 0o700, dir_fd=output_parent)
+                        child = confined_open(output_parent, name, os.O_RDONLY | os.O_DIRECTORY,
+                                              'copy_destination_mount_or_alias_rejected')
+                        try:
+                            os.fchown(child, owner, group)
+                            os.fchmod(child, mode)
+                            os.fsync(child)
+                        finally:
+                            os.close(child)
+                    else:
+                        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+                        fd = os.open(name, flags, 0o600, dir_fd=output_parent)
+                        with os.fdopen(fd, 'wb') as output:
+                            shutil.copyfileobj(reader, output, length=1 << 20)
+                            output.flush()
+                            os.fchown(output.fileno(), owner, group)
+                            os.fchmod(output.fileno(), mode)
+                            os.fsync(output.fileno())
+                            require(stat.S_IMODE(os.fstat(output.fileno()).st_mode) == mode, 'copy_mode_not_applied')
+                    os.fsync(output_parent)
                 finally:
-                    os.close(fd_out)
-            finally:
-                os.close(fd_in)
-            after = os.lstat(target)
-            require(stat.S_IMODE(after.st_mode) == stat.S_IMODE(info.st_mode), 'copy_mode_not_applied')
-    for current, _, _ in os.walk(destination, topdown=False):
-        sync_dir(current)
+                    os.close(output_parent)
+            os.fsync(destination_fd)
+            os.fsync(parent_fd)
+        finally:
+            os.close(destination_fd)
 
 
 # ---------------- argv-only runner ----------------
@@ -667,6 +707,13 @@ def gateway_spec(plan):
             'session_cookie': 'ndg_' + hashlib.sha256(account.encode()).hexdigest()[:12]}
 
 
+def verify_backup_location(boundary, installation_root, source_a, source_b, backup_dir):
+    require(os.path.commonpath([boundary, backup_dir]) == boundary, 'backup_dir_outside_boundary_rejected')
+    for protected in (installation_root, source_a, source_b):
+        require(os.path.commonpath([backup_dir, protected]) not in (backup_dir, protected),
+                'backup_dir_rejected')
+
+
 def build_plan(request, acceptance):
     require(isinstance(request, dict), 'request_object_required')
     unknown = set(request) - (PLAN_FIELDS - {'schema', 'project', 'request_sha256', 'root'})
@@ -696,9 +743,6 @@ def build_plan(request, acceptance):
     require(source_a != source_b, 'overlapping_sources_rejected')
     require(os.path.commonpath([source_a, source_b]) not in (source_a, source_b),
             'overlapping_sources_rejected')
-    require(backup_dir != parent and os.path.commonpath([backup_dir, source_a]) != backup_dir and
-            os.path.commonpath([backup_dir, source_b]) != backup_dir, 'backup_dir_rejected')
-    require(os.path.commonpath([boundary, backup_dir]) == boundary, 'backup_dir_outside_boundary_rejected')
     trusted_ancestors(boundary, 'boundary_root')
     trusted_ancestors(parent, 'parent')
     for label, path in (('source_a', source_a), ('source_b', source_b)):
@@ -747,6 +791,7 @@ def build_plan(request, acceptance):
     require(isinstance(network_owned, bool), 'network_owned_boolean_required')
     root = os.path.join(parent, 'ndg-readonly-' + request['installation_id'])
     strict_path(root, 'root')
+    verify_backup_location(boundary, root, source_a, source_b, backup_dir)
     template = os.path.join(repo_root(), TEMPLATE_REL)
     require(os.path.isfile(template), 'compose_template_missing')
     template_bytes = open(template, 'rb').read()
@@ -790,6 +835,7 @@ def load_plan(path, acceptance):
     require(plan.get('scope') != ACCEPTANCE or acceptance, 'acceptance_scope_requires_explicit_flag')
     for field in ('root', 'parent', 'boundary_root', 'source_a', 'source_b', 'backup_dir'):
         strict_path(plan.get(field, ''), field)
+    verify_backup_location(*(plan[field] for field in ('boundary_root', 'root', 'source_a', 'source_b', 'backup_dir')))
     require(plan.get('access_base') == plan.get('origin'), 'access_origin_mismatch')
     if plan.get('candidate_repo') is not None:
         require(isinstance(plan['candidate_repo'], str) and
@@ -1058,7 +1104,7 @@ def step_sources(ctx):
         require(stat.S_ISDIR(info.st_mode), 'directory_required')
         identities[label] = {'device': info.st_dev, 'inode': info.st_ino,
                              'mode': format(stat.S_IMODE(info.st_mode), '04o'), 'uid': info.st_uid}
-    baseline = {label: manifest(plan[label], label) for label in ('source_a', 'source_b')}
+    baseline = {label: manifest(plan[label], label, boundary=plan['boundary_root']) for label in ('source_a', 'source_b')}
     ctx.record('sources.json', {'identities': identities, 'baseline': baseline,
                                 'kernel_confinement': confined})
     return {'trusted_ancestors': trusted_ancestors(plan['boundary_root'], 'boundary_root'),
@@ -1316,7 +1362,7 @@ def step_access(ctx):
     require(int(snapshot.get('scanned', 0)) >= expected, 'scan_did_not_cover_sources')
     baseline = ctx.recorded('sources.json')['baseline']
     for label, path in (('source_a', ctx.plan['source_a']), ('source_b', ctx.plan['source_b'])):
-        require(manifest(path, label) == baseline[label], 'source_mutated_by_scan')
+        require(manifest(path, label, boundary=ctx.plan['boundary_root']) == baseline[label], 'source_mutated_by_scan')
     http_json(ctx.http, 'POST', '/api/logout', payload={}, cookie=cookie, csrf=csrf)
     ctx.record('access.json', {'snapshot': snapshot, 'version': version.get('version')})
     return {'scanned': snapshot.get('scanned'), 'checkpoint': snapshot.get('checkpoint'),
@@ -1394,16 +1440,20 @@ def _quick_check(path):
 def step_backup(ctx):
     plan = ctx.plan
     assert_mounts_stable(ctx)
+    verify_backup_location(*(plan[field] for field in ('boundary_root', 'root', 'source_a', 'source_b', 'backup_dir')))
+    require(not os.path.lexists(plan['backup_dir']), 'backup_directory_must_be_new')
+    backup_parent = os.path.dirname(plan['backup_dir'])
+    trusted_ancestors(backup_parent, 'backup_parent')
+    kernel_confined(plan['boundary_root'], backup_parent, 'backup_parent')
     record = ctx.inspect_container()
     require((record.get('State', {}) or {}).get('Running') is True, 'core_must_be_running_before_cold_backup')
     ctx.runner.must(['docker', 'container', 'stop', record['Id']], timeout=180, reason='container_stop_failed')
     stopped = ctx.inspect_container(record['Id'])
     require((stopped.get('State', {}) or {}).get('Running') is False, 'container_still_running')
-    require(not os.path.exists(plan['backup_dir']), 'backup_directory_must_be_new')
     ensure_dir(plan['backup_dir'], 0o700, os.geteuid(), os.getegid())
     target = os.path.join(plan['backup_dir'], 'state')
-    copy_tree(ctx.path('state'), target, 10001, 10001)
-    files = manifest(target, 'backup')
+    copy_tree(ctx.path('state'), target, 10001, 10001, boundary=plan['boundary_root'])
+    files = manifest(target, 'backup', boundary=ctx.plan['boundary_root'])
     for entry in files:
         if entry['path'].endswith('.db'):
             _quick_check(os.path.join(target, entry['path']))
@@ -1458,7 +1508,7 @@ def step_upgrade(ctx):
 def step_rollback(ctx):
     plan = ctx.plan
     receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
-    verify_backup_payload(receipt)
+    verify_backup(ctx)
     assert_mounts_stable(ctx)
     record = ctx.inspect_container()
     if (record.get('State', {}) or {}).get('Running'):
@@ -1467,8 +1517,9 @@ def step_rollback(ctx):
     original = open(ctx.receipt_path('compose-before-upgrade.yaml'), 'rb').read()
     failed = ctx.path('state') + '.failed-' + utcnow().replace(':', '').replace('-', '')
     os.rename(ctx.path('state'), failed)
-    copy_tree(os.path.join(receipt['backup_dir'], 'state'), ctx.path('state'), 10001, 10001)
-    restored = manifest(ctx.path('state'), 'restored')
+    copy_tree(os.path.join(receipt['backup_dir'], 'state'), ctx.path('state'), 10001, 10001,
+              boundary=plan['boundary_root'])
+    restored = manifest(ctx.path('state'), 'restored', boundary=plan['boundary_root'])
     expected = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in receipt['files']]
     actual = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in restored]
     require(actual == expected, 'restored_state_differs_from_backup')
@@ -1501,9 +1552,9 @@ def step_uninstall(ctx):
         ctx.runner.must(['docker', 'network', 'rm', plan['network_id']], timeout=120,
                         reason='network_rm_failed')
     for label, path in (('source_a', plan['source_a']), ('source_b', plan['source_b'])):
-        require(manifest(path, label) == baseline[label], 'uninstall_mutated_sources')
+        require(manifest(path, label, boundary=ctx.plan['boundary_root']) == baseline[label], 'uninstall_mutated_sources')
     receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
-    backup = manifest(os.path.join(receipt['backup_dir'], 'state'), 'backup')
+    backup = manifest(os.path.join(receipt['backup_dir'], 'state'), 'backup', boundary=ctx.plan['boundary_root'])
     require([{'path': e['path'], 'sha256': e['sha256']} for e in backup] ==
             [{'path': e['path'], 'sha256': e['sha256']} for e in receipt['files']],
             'uninstall_mutated_backup')
@@ -1531,7 +1582,7 @@ def step_reboot(ctx):
 def verify_sources(ctx):
     recorded = ctx.recorded('sources.json')
     for label in ('source_a', 'source_b'):
-        require(manifest(ctx.plan[label], label) == recorded['baseline'][label], 'source_mutated')
+        require(manifest(ctx.plan[label], label, boundary=ctx.plan['boundary_root']) == recorded['baseline'][label], 'source_mutated')
     return {'mounts': assert_mounts_stable(ctx)}
 
 
@@ -1640,8 +1691,9 @@ def verify_access(ctx):
 def verify_backup(ctx):
     receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
     verify_backup_payload(receipt)
+    require(receipt['backup_dir'] == ctx.plan['backup_dir'], 'backup_plan_location_mismatch')
     target = os.path.join(receipt['backup_dir'], 'state')
-    current = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in manifest(target, 'backup')]
+    current = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in manifest(target, 'backup', boundary=ctx.plan['boundary_root'])]
     expected = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in receipt['files']]
     require(current == expected, 'backup_manifest_changed')
     for entry in receipt['files']:
@@ -1677,7 +1729,7 @@ def verify_uninstall(ctx):
     require(not remaining, 'core_container_still_present')
     baseline = ctx.recorded('sources.json')['baseline']
     for label, path in (('source_a', ctx.plan['source_a']), ('source_b', ctx.plan['source_b'])):
-        require(manifest(path, label) == baseline[label], 'uninstall_mutated_sources')
+        require(manifest(path, label, boundary=ctx.plan['boundary_root']) == baseline[label], 'uninstall_mutated_sources')
     require(os.path.isdir(ctx.path('state')), 'uninstall_must_keep_state')
     return {'container_removed': True, 'sources_unchanged': True}
 

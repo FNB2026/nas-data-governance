@@ -325,6 +325,16 @@ def plan_matrix(base, checks):
             variant(parent=request['source_a']), '--receipt', str(receipt), '--acceptance')
     refused('overlapping_sources', 'overlapping_sources_rejected', 'plan',
             variant(source_b=request['source_a']), '--receipt', str(receipt), '--acceptance')
+    backup_paths = [
+        base / 'source_a' / 'new-backup',
+        base / 'source_b' / 'new-backup',
+        base / 'parent' / ('ndg-readonly-' + request['installation_id']) / 'state' / 'new-backup',
+        base / 'parent',
+    ]
+    for index, path in enumerate(backup_paths):
+        refused(f'backup_overlap_{index}', 'backup_dir_rejected', 'plan',
+                variant(backup_dir=str(path)), '--receipt', str(receipt), '--acceptance')
+    checks.append('backup_paths_disjoint_from_installation_and_sources')
     link = base / 'source-link'
     link.symlink_to(base / 'source_a')
     refused('symlinked_source', 'source_a_symlink_component_rejected', 'plan',
@@ -445,21 +455,22 @@ def filesystem_matrix(base, checks):
     (tree / 'nested' / 'empty').write_bytes(b'')
     os.chmod(tree / 'nested' / 'empty', 0o640)
 
-    copied = base / 'copy'
-    engine.copy_tree(str(tree), str(copied))
-    assert engine.manifest(str(tree)) == engine.manifest(str(copied)), 'copy must preserve every byte and mode'
-    checks.append('copy_tree_preserves_bytes_modes_and_odd_names')
+    if sys.platform == 'linux':
+        copied = base / 'copy'
+        engine.copy_tree(str(tree), str(copied))
+        assert engine.manifest(str(tree)) == engine.manifest(str(copied)), 'copy must preserve every byte and mode'
+        checks.append('copy_tree_preserves_bytes_modes_and_odd_names')
 
-    link = tree / 'link'
-    link.symlink_to(tree / 'a file with spaces.txt')
-    try:
-        engine.manifest(str(tree))
-    except engine.Refused as refusal:
-        assert str(refusal) == 'non_regular_file_rejected'
-    else:
-        raise AssertionError('symlink in tree must be refused')
-    link.unlink()
-    checks.append('tree_symlink_refused')
+        link = tree / 'link'
+        link.symlink_to(tree / 'a file with spaces.txt')
+        try:
+            engine.manifest(str(tree))
+        except engine.Refused as refusal:
+            assert str(refusal) == 'tree_mount_or_alias_rejected'
+        else:
+            raise AssertionError('symlink in tree must be refused')
+        link.unlink()
+        checks.append('tree_symlink_refused')
 
     # umask must not be able to filter the intended modes.
     previous = os.umask(0o777)

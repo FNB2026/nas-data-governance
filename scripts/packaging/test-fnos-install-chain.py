@@ -21,6 +21,8 @@ import secrets
 import subprocess
 import sys
 
+import fnos_install_engine as engine
+
 HELPER = Path(__file__).with_name('fnos-install-lifecycle.py')
 INDEX = 'sha256:49dada73f1eb9cc74485ed5d0b92023d7cb4c3df462d03e105f00158b91668e1'
 IMAGE = 'ghcr.io/fnb2026/ndg-readonly-preview@' + INDEX
@@ -138,6 +140,32 @@ def verify_missing_bind_policy(fixture, installation_id):
             assert not source.exists() and b'bind source path does not exist' in probe.stderr
 
 
+def verify_nested_bind_refused(fixture):
+    tree, other = fixture / 'mount-source', fixture / 'mount-outside'
+    tree.mkdir(mode=0o700)
+    other.mkdir(mode=0o700)
+    mountpoint = tree / 'nested'
+    mountpoint.mkdir(mode=0o700)
+    (other / 'synthetic.txt').write_text('must stay outside the tree')
+    run(['mount', '--bind', str(other), str(mountpoint)], timeout=30)
+    try:
+        assert mountpoint.stat().st_dev == tree.stat().st_dev
+        operations = (
+            lambda: engine.manifest(str(tree)),
+            lambda: engine.copy_tree(str(tree), str(fixture / 'refused-copy')),
+        )
+        for operation in operations:
+            try:
+                operation()
+            except engine.Refused as error:
+                assert str(error) == 'tree_mount_or_alias_rejected'
+            else:
+                raise AssertionError('same-device bind mount traversal must refuse')
+        assert not (fixture / 'refused-copy' / 'nested' / 'synthetic.txt').exists()
+    finally:
+        run(['umount', str(mountpoint)], timeout=30)
+
+
 def main():
     checks = []
     preconditions()
@@ -162,6 +190,8 @@ def main():
     baseline = {'source_a': tree_digest(fixture / 'source_a'),
                 'source_b': tree_digest(fixture / 'source_b')}
     checks.append('fixture_created_with_known_source_bytes')
+    verify_nested_bind_refused(fixture)
+    checks.append('same_device_nested_bind_refused_by_manifest_and_copy')
 
     installation_id = secrets.token_hex(6)
     third = 100 + int(installation_id[:2], 16) % 100
