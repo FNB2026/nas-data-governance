@@ -346,6 +346,26 @@ def main():
     assert json.loads((receipt / 'backup-receipt.json').read_text())['files'], 'backup receipt is empty'
     checks.append('cold_backup_taken_before_upgrade')
 
+    # An interrupted backup is valid only with the matching rollback snapshot.
+    journal = engine.Journal(str(receipt))
+    journal.append('backup', 'start', {'fixture': 'interrupted backup'})
+    compose_snapshot = receipt / 'compose-before-upgrade.yaml'
+    original_snapshot = compose_snapshot.read_bytes()
+    compose_snapshot.unlink()
+    for restore in (None, b'corrupted fixture'):
+        if restore is not None:
+            compose_snapshot.write_bytes(restore)
+        reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
+                         '--reconcile', 'backup', '--execute', '--acceptance')
+        assert reason == ('backup_compose_missing_or_unconfined' if restore is None else 'backup_compose_changed')
+        assert journal.state()['backup'] == 'start'
+    compose_snapshot.write_bytes(original_snapshot)
+    compose_snapshot.chmod(0o600)
+    recovered = cli('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
+                    '--reconcile', 'backup', '--execute', '--acceptance')
+    assert recovered['result'] == 'RECONCILED'
+    checks.append('backup_reconcile_requires_verified_rollback_snapshot')
+
     # --- refusal: the candidate is not in the local store yet ---
     before_refusal = json.loads(run(['docker', 'container', 'inspect', container_name], timeout=60).stdout)[0]
     reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),

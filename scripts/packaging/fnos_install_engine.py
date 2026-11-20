@@ -1450,6 +1450,22 @@ def _quick_check(path):
     require(rows and all(row[0] == 'ok' for row in rows), 'sqlite_quick_check_ok_required')
 
 
+def read_bound_compose(directory_fd, name, expected_sha256):
+    fd = confined_open(directory_fd, name, os.O_RDONLY | os.O_NONBLOCK, 'backup_compose_missing_or_unconfined')
+    with os.fdopen(fd, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_size <= 65536, 'backup_compose_invalid')
+        data = handle.read(65537)
+    require(hashlib.sha256(data).hexdigest() == expected_sha256, 'backup_compose_changed')
+    return data
+
+
+def read_backup_compose(ctx):
+    directory, name = os.path.split(ctx.receipt_path('compose-before-upgrade.yaml'))
+    with confined_directory(directory, directory, 'backup_receipt') as directory_fd:
+        return read_bound_compose(directory_fd, name, ctx.plan['template_sha256'])
+
+
 def step_backup(ctx):
     plan = ctx.plan
     assert_mounts_stable(ctx)
@@ -1458,6 +1474,8 @@ def step_backup(ctx):
     backup_parent = os.path.dirname(plan['backup_dir'])
     trusted_ancestors(backup_parent, 'backup_parent')
     kernel_confined(plan['boundary_root'], backup_parent, 'backup_parent')
+    with confined_directory(plan['boundary_root'], plan['root'], 'backup_root') as root_fd:
+        original = read_bound_compose(root_fd, 'compose.yaml', plan['template_sha256'])
     record = ctx.inspect_container()
     require((record.get('State', {}) or {}).get('Running') is True, 'core_must_be_running_before_cold_backup')
     ctx.runner.must(['docker', 'container', 'stop', record['Id']], timeout=180, reason='container_stop_failed')
@@ -1475,10 +1493,9 @@ def step_backup(ctx):
                 'backup_dir': plan['backup_dir'], 'files': files,
                 'container': record['Id'], 'created_at': utcnow()}
     verify_backup_payload(evidence)
+    atomic_write(ctx.receipt_path('compose-before-upgrade.yaml'), original, 0o600)
     atomic_write(ctx.receipt_path('backup-receipt.json'),
-                 (json.dumps(evidence, indent=1, sort_keys=True) + '\n').encode(), 0o600)
-    atomic_write(ctx.receipt_path('compose-before-upgrade.yaml'),
-                 open(ctx.path('compose.yaml'), 'rb').read(), 0o600)
+                 (json.dumps(evidence, indent=2, sort_keys=True) + '\n').encode(), 0o600)
     return {'files': len(files), 'backup': 'verified', 'container_stopped': record['Id'][:12]}
 
 
@@ -1498,6 +1515,7 @@ def step_upgrade(ctx):
     plan = ctx.plan
     candidate = plan.get('candidate_image')
     require(candidate, 'candidate_image_required')
+    verify_backup(ctx)
     reference = candidate_reference(plan)
     records = ctx.runner.json(['docker', 'image', 'inspect', reference])
     require(isinstance(records, list) and len(records) == 1, 'candidate_inspect_single_record_required')
@@ -1526,12 +1544,12 @@ def step_rollback(ctx):
         os.close(state_fd)
         receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
         verify_backup(ctx)
+        original = read_backup_compose(ctx)
         assert_mounts_stable(ctx)
         record = ctx.inspect_container()
         if (record.get('State', {}) or {}).get('Running'):
             ctx.runner.must(['docker', 'container', 'stop', record['Id']], timeout=180,
                             reason='container_stop_failed')
-        original = open(ctx.receipt_path('compose-before-upgrade.yaml'), 'rb').read()
         failed = 'state.failed-' + utcnow().replace(':', '').replace('-', '') + '-' + secrets.token_hex(4)
         state_fd = confined_open(root_fd, 'state', os.O_RDONLY | os.O_DIRECTORY, 'rollback_state_mount_rejected')
         try:
@@ -1733,6 +1751,7 @@ def verify_access(ctx):
 
 
 def verify_backup(ctx):
+    read_backup_compose(ctx)
     receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
     verify_backup_payload(receipt)
     require(receipt['backup_dir'] == ctx.plan['backup_dir'], 'backup_plan_location_mismatch')
