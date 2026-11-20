@@ -26,7 +26,7 @@ func legacyGovernanceDatabase(t *testing.T, broken bool) string {
 		t.Fatal(e)
 	}
 	if broken {
-		if _, e = db.Exec(`CREATE TABLE governance_outcomes(broken TEXT)`); e != nil {
+		if _, e = db.Exec(`CREATE TABLE authorization_audit(broken TEXT)`); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -89,21 +89,17 @@ func TestGovernanceMigrationFailureRollsBackAdditiveIncrement(t *testing.T) {
 	if !reflect.DeepEqual(before, databaseEvidence(t, path)) {
 		t.Fatal("public preflight changed unsupported layout")
 	}
-	// Separately exercise the additive migration transaction itself. The
-	// public opener refuses this deliberately corrupted test-only layout.
+	// Init exercises the complete migration sequence. Open refuses the
+	// deliberate schema-13 fault before entering that sequence.
 	db, e := sql.Open("sqlite", path)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer db.Close()
-	conn, e := db.Conn(context.Background())
-	if e != nil {
-		t.Fatal("fault fixture connection")
-	}
-	if e = applyGovernanceMigration(context.Background(), conn); e == nil {
+	s := &SQLiteStore{db: db}
+	if e = s.Init(context.Background()); e == nil {
 		t.Fatal("fault migration succeeded")
 	}
-	conn.Close()
 	var n int
 	for _, q := range []string{`SELECT COUNT(*) FROM pragma_table_info('group_decisions') WHERE name='revision'`, `SELECT COUNT(*) FROM schema_migrations WHERE version=12`, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='governance_project'`} {
 		if db.QueryRow(q).Scan(&n) != nil || n != 0 {
@@ -113,6 +109,17 @@ func TestGovernanceMigrationFailureRollsBackAdditiveIncrement(t *testing.T) {
 	if db.QueryRow(`SELECT COUNT(*) FROM group_decisions WHERE (decision_type='PRIMARY_RETENTION' AND retained_file_id=42) OR decision_type='FUTURE_HISTORICAL'`).Scan(&n) != nil || n != 2 {
 		t.Fatal("legacy records changed on migration failure")
 	}
+	if _, e = db.Exec(`DROP TABLE authorization_audit`); e != nil {
+		t.Fatal(e)
+	}
+	if e = db.Close(); e != nil {
+		t.Fatal(e)
+	}
+	reopened, e := Open(context.Background(), path)
+	if e != nil {
+		t.Fatal("legacy database cannot reopen after the fault is removed", e)
+	}
+	defer reopened.Close()
 }
 
 func TestUnknownFutureSchemaRejectedBeforeDatabaseMutation(t *testing.T) {

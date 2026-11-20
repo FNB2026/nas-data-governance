@@ -11,10 +11,10 @@ func TestSchemaLayoutFrozenIdentity(t *testing.T) {
 	ctx := context.Background()
 	current := newTestStore(t)
 	h, e := schemaLayoutFingerprint(ctx, current.db)
-	if e != nil || h != governanceSchema12Layout {
+	if e != nil || h != authorizationAudit13Layout {
 		t.Fatal("current fingerprint drift")
 	}
-	t.Log("schema12", h)
+	t.Log("schema13", h)
 	db, e := sql.Open("sqlite", filepath.Join(t.TempDir(), "frozen-legacy.db"))
 	if e != nil {
 		t.Fatal("frozen fixture")

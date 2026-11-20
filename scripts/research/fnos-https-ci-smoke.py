@@ -19,15 +19,23 @@ import time
 import traceback
 
 
-def main():
+def exercise(binary, instance=None):
     assert os.geteuid() == 0
     assert os.environ.get('GITHUB_ACTIONS') == 'true'
     assert os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
-    assert len(sys.argv) == 2
-    binary = Path(sys.argv[1]).resolve(strict=True)
-    assert binary.is_file()
-    app = Path('/var/apps/ndg-readonly-web')
-    name = 'ndghttpsci'
+    assert not Path('/usr/trim').exists(), 'never run this proof on fnOS'
+    if instance:
+        app = Path('/etc/ndg/instances') / instance
+        name = 'ndgweb-' + instance
+        app_name = name
+        hostname, port = 'ndg-instance.invalid', 24484
+    else:
+        app = Path('/var/apps/ndg-readonly-web')
+        name = 'ndghttpsci'
+        app_name = 'ndg-readonly-web'
+        hostname, port = 'ndg.invalid', 24483
+    base_url = f'https://{hostname}:{port}'
+    runtime_binary = app / 'ndg-fnos-https' if instance else binary
     assert not app.exists() and not app.is_symlink()
     try:
         pwd.getpwnam(name)
@@ -43,7 +51,8 @@ def main():
         raise AssertionError('test group exists')
     used = {u.pw_uid for u in pwd.getpwall()} | {g.gr_gid for g in grp.getgrall()}
     uid = next(n for n in range(21000, 22000) if n not in used)
-    group_created = user_created = app_created = parent_created = False
+    group_created = user_created = app_created = False
+    created_parents = []
     process = None
     original_inode = None
 
@@ -54,7 +63,8 @@ def main():
         return subprocess.Popen([
             '/usr/bin/setpriv', '--reuid='+str(uid), '--regid='+str(uid),
             '--clear-groups', '--no-new-privs', '--bounding-set=-all',
-            '--inh-caps=-all', '--ambient-caps=-all', str(binary),
+            '--inh-caps=-all', '--ambient-caps=-all', str(runtime_binary),
+            *(['--instance', instance] if instance else []),
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def refused():
@@ -73,31 +83,37 @@ def main():
         command('/usr/sbin/useradd', '--uid', str(uid), '--gid', name,
                 '--no-create-home', '--shell', '/usr/sbin/nologin', name)
         user_created = True
-        if not app.parent.exists():
-            app.parent.mkdir(mode=0o755)
-            app.parent.chmod(0o755)
-            parent_created = True
+        parents = (app.parent.parent, app.parent) if instance else (app.parent,)
+        for parent in parents:
+            if not parent.exists():
+                parent.mkdir(mode=0o755)
+                parent.chmod(0o755)
+                created_parents.append(parent)
         app.mkdir(mode=0o755)
         app.chmod(0o755)
         app_created = True
         original_inode = app.stat().st_ino
-        meta = app/'cmd'
-        meta.mkdir(mode=0o755)
-        meta.chmod(0o755)
+        if instance:
+            shutil.copyfile(binary, runtime_binary)
+            runtime_binary.chmod(0o755)
+        meta = app if instance else app/'cmd'
+        if not instance:
+            meta.mkdir(mode=0o755)
+            meta.chmod(0o755)
         cfg = meta/'https.json'
         cert = meta/'tls.crt'
         key = meta/'tls.key'
-        cfg.write_text(json.dumps({
-            'gateway': {'app_name': 'ndg-readonly-web',
-                        'origin': 'https://ndg.invalid:24483',
+        payload = {
+            'gateway': {'app_name': app_name, 'origin': base_url,
                         'upstream': 'http://10.98.45.2:8080',
                         'package_user': name, 'package_group': name},
-            'listen': '127.0.0.1:24483',
-        })+'\n')
+            'listen': f'127.0.0.1:{port}',
+        }
+        cfg.write_text(json.dumps(payload)+'\n')
         cfg.chmod(0o644)
         command('/usr/bin/openssl', 'req', '-x509', '-newkey', 'ec',
                 '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
-                '-subj', '/CN=ndg.invalid', '-addext', 'subjectAltName=DNS:ndg.invalid',
+                '-subj', '/CN='+hostname, '-addext', 'subjectAltName=DNS:'+hostname,
                 '-keyout', str(key), '-out', str(cert))
         os.chown(key, 0, uid)
         key.chmod(0o640)
@@ -110,10 +126,10 @@ def main():
         context = ssl.create_default_context(cafile=str(cert))
         # DNS name verification and chain validation remain enabled. The test
         # client dials only loopback and supplies its generated certificate name.
-        def request(host='ndg.invalid:24483', path='/'):
-            raw = socket.create_connection(('127.0.0.1', 24483), timeout=2)
-            tls = context.wrap_socket(raw, server_hostname='ndg.invalid')
-            conn = http.client.HTTPConnection('ndg.invalid', 24483, timeout=2)
+        def request(host=f'{hostname}:{port}', path='/'):
+            raw = socket.create_connection(('127.0.0.1', port), timeout=2)
+            tls = context.wrap_socket(raw, server_hostname=hostname)
+            conn = http.client.HTTPConnection(hostname, port, timeout=2)
             conn.sock = tls
             try:
                 conn.request('GET', path, headers={'Host': host,
@@ -134,12 +150,29 @@ def main():
         else:
             raise AssertionError('startup timeout')
         assert status == 200 and b'NDG' in body
-        assert request('wrong.invalid:24483')[0] == 403
+        if instance:
+            sys.dont_write_bytecode = True
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'packaging'))
+            import fnos_install_engine as engine
+            engine.verify_gateway_listener({'directory': str(app), 'config': payload}, str(process.pid))
+            fingerprint = engine.gateway_leaf_sha256(cert.read_bytes())
+            client = engine.HTTP(base_url, str(cert), '127.0.0.1', fingerprint)
+            pinned_status, _, pinned_body = client.request('GET', '/', timeout=3)
+            assert pinned_status == 200 and b'NDG' in pinned_body
+            bad_pin = engine.HTTP(base_url, str(cert), '127.0.0.1', '0' * 64)
+            try:
+                bad_pin.request('GET', '/', timeout=3)
+            except engine.Refused as error:
+                assert str(error) == 'access_unreachable'
+            else:
+                raise AssertionError('unbound TLS leaf accepted')
+        assert request(f'wrong.invalid:{port}')[0] == 403
         for route in ['/api/purge/execute', '/api/restore/execute', '/api/quarantine/execute']:
             status, body = request(path=route)
             assert status == 403 and body == b'{"error":"request_rejected"}'
-        with socket.create_connection(('127.0.0.1', 24483), timeout=2) as plain:
-            plain.sendall(b'GET / HTTP/1.1\r\nHost: ndg.invalid:24483\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n')
+        with socket.create_connection(('127.0.0.1', port), timeout=2) as plain:
+            plain.sendall((f'GET / HTTP/1.1\r\nHost: {hostname}:{port}\r\n'
+                           'X-Forwarded-Proto: https\r\nConnection: close\r\n\r\n').encode())
             assert plain.recv(4096).startswith(b'HTTP/1.0 400')
         assert process.poll() is None
         tasks = list(Path('/proc', str(process.pid), 'task').iterdir())
@@ -181,6 +214,12 @@ def main():
         refused()
         cfg.unlink()
         (meta/'https.original').rename(cfg)
+        if instance:
+            original = cfg.read_bytes()
+            payload['gateway']['app_name'] = 'ndg-other-instance'
+            cfg.write_text(json.dumps(payload)+'\n')
+            refused()
+            cfg.write_bytes(original)
         assert before == snapshot()
     finally:
         if process is not None and process.poll() is None:
@@ -205,11 +244,17 @@ def main():
             else:
                 assert group.gr_gid == uid
                 command('/usr/sbin/groupdel', name)
-        if parent_created:
-            app.parent.rmdir()
+        for parent in reversed(created_parents):
+            parent.rmdir()
 
+def main():
+    assert len(sys.argv) == 2
+    binary = Path(sys.argv[1]).resolve(strict=True)
+    assert binary.is_file()
+    exercise(binary)
+    exercise(binary, 'acde00000001')
     print(json.dumps({'scope': 'GITHUB_HOSTED_SYNTHETIC_NATIVE_HTTPS_ONLY',
-        'result': 'PASS', 'non_root_real_tls': True, 'startup_refusals': 5,
+        'result': 'PASS', 'non_root_real_tls': True, 'startup_refusals': 11, 'legacy_and_instance_mode': True,
         'nas_runtime_acceptance': 'NOT_RUN'}))
 
 

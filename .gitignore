@@ -52,3 +52,7 @@ cmd/ndg-mas-phase1a/
 # Separate read-only Web adapter build output.
 /internal/apihttp/webdist/*
 !/internal/apihttp/webdist/index.html
+
+# Python bytecode from -B deployments
+__pycache__/
+*.pyc
