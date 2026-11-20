@@ -42,8 +42,6 @@ services:
         target: /config
         read_only: true
         bind: {create_host_path: false}
-    ports:
-      - "127.0.0.1:18443:8443"
     networks:
       web:
         ipv4_address: 10.254.140.2

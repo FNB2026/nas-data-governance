@@ -21,8 +21,8 @@ go run ./scripts/qa/quarantine-candidate-fixture "$fixture" > "$fixture/item"
   printf '%s' 'ndg-gov-'
   openssl rand -hex 32
 } > "$fixture/config/token"
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
-  -addext subjectAltName=IP:127.0.0.1 -keyout "$fixture/config/tls.key" -out "$fixture/config/tls.crt" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=10.254.140.2 \
+  -addext subjectAltName=IP:10.254.140.2 -keyout "$fixture/config/tls.key" -out "$fixture/config/tls.crt" >/dev/null 2>&1
 cp "$fixture/config/token" "$fixture/client-token"
 cp "$fixture/config/tls.crt" "$fixture/client.crt"
 printf 'protected synthetic sentinel\n' > "$fixture/sentinel"
@@ -46,10 +46,11 @@ import urllib.request
 
 base = Path(sys.argv[1])
 tls = ssl.create_default_context(cafile=str(base / 'client.crt'))
-url = 'https://127.0.0.1:18443'
+url = 'https://10.254.140.2:8443'
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=tls))
 for _ in range(30):
     try:
-        urllib.request.urlopen(url + '/gov/capabilities', context=tls, timeout=2).close()
+        opener.open(url + '/gov/capabilities', timeout=2).close()
     except urllib.error.HTTPError as e:
         if e.code == 401:
             break
@@ -65,7 +66,7 @@ def request(payload, expected=200):
                                  json.dumps(payload).encode(),
                                  {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token})
     try:
-        with urllib.request.urlopen(req, context=tls, timeout=15) as result:
+        with opener.open(req, timeout=15) as result:
             assert result.status == expected
             return json.load(result)
     except urllib.error.HTTPError as err:
@@ -92,3 +93,4 @@ worker_id="$("${compose[@]}" ps -q worker)"
 test "$(docker inspect --format '{{json .Mounts}}' "$web_id" | python3 -c 'import json,sys; print(sorted(m["Destination"] for m in json.load(sys.stdin)))')" = "['/config', '/run/ndg-worker']"
 test "$(docker inspect --format '{{.HostConfig.NetworkMode}} {{.Config.User}}' "$worker_id")" = 'none 10002:10002'
 test "$(docker inspect --format '{{.Config.User}}' "$web_id")" = '10001:10001'
+test -z "$(docker port "$web_id")"
