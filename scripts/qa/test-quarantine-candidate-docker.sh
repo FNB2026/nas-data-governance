@@ -15,7 +15,13 @@ cleanup() {
 trap cleanup EXIT
 mkdir -m 0700 "$fixture"/{state,quarantine,source,config}
 mkdir -m 0755 "$fixture/run"
-mkdir -m 0700 "$fixture"/{quarantine,source}/.ndg-purge-stage
+mkdir -m 0700 "$fixture"/{quarantine,source}/.ndg-purge-stage "$fixture/source/temp"
+printf 'stage metadata stays outside the scanner index\n' > "$fixture/source/.ndg-purge-stage/synthetic-marker"
+for group in one two stale; do
+  for role in remove keeper; do
+    printf '%%PDF-1.7\nsynthetic source group %s\n' "$group" > "$fixture/source/temp/${group}-${role}.pdf"
+  done
+done
 go run ./scripts/qa/quarantine-candidate-fixture "$fixture" > "$fixture/item"
 {
   printf '%s' 'ndg-gov-'
@@ -34,6 +40,15 @@ export NDG_CANDIDATE_SOURCE="$fixture/source"
 export NDG_CANDIDATE_WEB_CONFIG="$fixture/config" NDG_CANDIDATE_QUARANTINE="$fixture/quarantine"
 : "${NDG_QUARANTINE_IMAGE:?build candidate image first}"
 : "${NDG_PURGE_CLI:?build candidate CLI first}"
+# Run the shipping scanner and analyzer against the same path the Worker
+# will open. The ingestion process sees the source volume read-only.
+: "${NDG_SCAN_IMAGE:?build native scanner image first}"
+scan_tool=(docker run --rm --network none --read-only --cap-drop ALL
+  --security-opt no-new-privileges --user 10002:10002
+  --mount "type=bind,src=$fixture/source,dst=/ndg-volume,readonly"
+  --mount "type=bind,src=$fixture/state,dst=/state" "$NDG_SCAN_IMAGE")
+"${scan_tool[@]}" scan --root /ndg-volume --storage candidate-volume --db /state/project.db --out /state/index.jsonl >&2
+"${scan_tool[@]}" analyze --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
 "${compose[@]}" up -d --no-build --pull never >/dev/null
 python3 -B - "$fixture" "${compose[@]}" <<'PY'
 import hashlib
@@ -69,7 +84,7 @@ with opener.open(url + '/gov/purge-console.js', timeout=5) as js:
     assert js.headers.get_content_type() == 'text/javascript'
     assert b'SOURCE_DIRECT_PURGE_LIST' in js.read()
 token = (base / 'client-token').read_text().strip()
-item_id, source_one, keeper_one, source_two, keeper_two, source_stale, keeper_stale = (base / 'item').read_text().splitlines()
+item_id = (base / 'item').read_text().strip()
 def request(payload, expected=200, route='/gov/quarantine-purge'):
     req = urllib.request.Request(url + route,
                                  json.dumps(payload).encode(),
@@ -113,7 +128,7 @@ def source_request(op, expected=200, **fields):
     return request({'op': 'SOURCE_DIRECT_PURGE_' + op, **fields}, expected, '/gov/source-direct-purge')
 
 def source_plan(target, keeper, expected=200):
-    return source_request('PLAN', expected, storage_id='synthetic-local', target_id=target, keeper_id=keeper)
+    return source_request('PLAN', expected, storage_id='candidate-volume', target_id=target, keeper_id=keeper)
 
 def source_act(p, op, expected=200, **fields):
     return source_request(op, expected, plan_id=p['id'], digest=p['digest'], **fields)
@@ -121,7 +136,14 @@ def source_act(p, op, expected=200, **fields):
 choices = source_request('LIST')['choices']
 cli = [os.environ['NDG_PURGE_CLI'], '-ca-file', str(base / 'client.crt'), '-token-file', str(base / 'client-token')]
 assert json.loads(subprocess.check_output(cli + ['-action', 'list']))['choices'] == choices
-assert {c['file_id'] for c in choices} == {source_one, keeper_one, source_two, keeper_two, source_stale, keeper_stale}
+ids = {c['path']: c['file_id'] for c in choices}
+assert set(ids) == {f'/ndg-volume/temp/{g}-{r}.pdf' for g in ('one', 'two', 'stale') for r in ('remove', 'keeper')}
+assert len(set(ids.values())) == 6
+def file_id(group, role):
+    return ids[f'/ndg-volume/temp/{group}-{role}.pdf']
+source_one, keeper_one = file_id('one', 'remove'), file_id('one', 'keeper')
+source_two, keeper_two = file_id('two', 'remove'), file_id('two', 'keeper')
+source_stale, keeper_stale = file_id('stale', 'remove'), file_id('stale', 'keeper')
 source_plan(source_one, source_one, 409)
 p1 = source_plan(source_one, keeper_one)
 p2 = source_plan(source_two, keeper_two)
@@ -134,7 +156,7 @@ source_act(p2, 'DRY_RUN')
 source_act(p2, 'EXECUTE', 409, confirmation='永久删除 ' + p1['id'])
 source_act(p3, 'APPROVE')
 source_act(p3, 'DRY_RUN')
-stale_path = str(base / 'source' / 'stale-remove.txt')
+stale_path = str(base / 'source' / 'temp' / 'stale-remove.pdf')
 subprocess.run(['sudo', '-n', 'tee', stale_path], input=b'changed after dry run', stdout=subprocess.DEVNULL, check=True)
 source_act(p3, 'EXECUTE', 409, confirmation='永久删除 ' + p3['id'])
 assert source_act(p3, 'RECEIPT')['state'] == 'DRY_RUN'
@@ -145,18 +167,26 @@ for p in (p1, p2):
     assert source_act(p, 'RECEIPT')['state'] == 'PURGED'
     source_act(p, 'EXECUTE', 409, confirmation='永久删除 ' + p['id'])
 for name in ('one', 'two'):
-    assert subprocess.run(['sudo', '-n', 'test', '-e', str(base / 'source' / (name + '-remove.txt'))]).returncode == 1
-    keeper = subprocess.check_output(['sudo', '-n', 'cat', str(base / 'source' / (name + '-keeper.txt'))])
-    assert keeper == ('synthetic source group ' + name + '\n').encode()
+    assert subprocess.run(['sudo', '-n', 'test', '-e', str(base / 'source' / 'temp' / (name + '-remove.pdf'))]).returncode == 1
+    keeper = subprocess.check_output(['sudo', '-n', 'cat', str(base / 'source' / 'temp' / (name + '-keeper.pdf'))])
+    assert keeper == ('%PDF-1.7\nsynthetic source group ' + name + '\n').encode()
 assert hashlib.sha256((base / 'sentinel').read_bytes()).hexdigest() == (base / 'sentinel.sha').read_text().split()[0]
+def readonly_query(query, *args):
+    python = ("import json,sqlite3,sys; db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); "
+              "print(json.dumps(db.execute(sys.argv[2],sys.argv[3:]).fetchall()))")
+    return json.loads(subprocess.check_output(['sudo','-n','python3','-c',python,str(base/'state'/'project.db'),
+                                               query,*args], text=True))
+assert readonly_query("SELECT kind,root_path FROM storages WHERE id=?", "candidate-volume") == [["filesystem", "/ndg-volume"]]
+assert readonly_query("SELECT status FROM scan_checkpoints WHERE storage_id=?", "candidate-volume") == [["completed"]]
+assert readonly_query("SELECT COUNT(*) FROM file_instances WHERE storage_id=?", "candidate-volume") == [[6]]
+assert readonly_query("SELECT COUNT(*) FROM file_formats JOIN file_instances ON file_id=file_instances.id WHERE storage_id=?", "candidate-volume") == [[6]]
+assert readonly_query("SELECT file_status FROM file_instances WHERE id=?", source_one) == [["missing"]]
+assert readonly_query("SELECT file_status FROM file_instances WHERE id=?", keeper_one) == [["active"]]
 def audit_states(purge_plan):
     # Read the Worker-owned synthetic SQLite database as root on this
     # disposable runner. Inspect only stable codes and opaque plan IDs.
     query = ("SELECT detail FROM authorization_audit WHERE plan_id=? ORDER BY id")
-    python = ("import sqlite3,sys; db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); "
-              "print(','.join(r[0] for r in db.execute(sys.argv[2],(sys.argv[3],))))")
-    return subprocess.check_output(['sudo','-n','python3','-c',python,str(base/'state'/'project.db'),
-                                    query,purge_plan['id']], text=True).strip()
+    return ','.join(row[0] for row in readonly_query(query, purge_plan['id']))
 expected = 'DRAFT,APPROVED,DRY_RUN,EXECUTING,PURGED'
 for p in (plan, p1, p2):
     assert audit_states(p) == expected
@@ -165,7 +195,7 @@ for p, mode in ((plan, 'quarantine'), (p1, 'source')):
     receipt = subprocess.check_output(cli + ['-mode', mode, '-action', 'receipt', '-plan-id', p['id'], '-digest', p['digest']])
     assert json.loads(receipt)['state'] == 'PURGED'
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
-                  'verified_keepers': 2, 'independent_approval_and_confirmation': True,
+                  'native_scan_analyze_project_verified': True, 'verified_keepers': 2, 'independent_approval_and_confirmation': True,
                   'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'tls_cli_receipts_verified': True, 'plan_and_dry_run_required': True,
                   'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY

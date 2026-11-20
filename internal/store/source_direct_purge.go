@@ -35,7 +35,7 @@ func readSourcePurgeFacts(ctx context.Context, r governanceReader, storageID str
 	var started, status string
 	err := r.QueryRowContext(ctx, `SELECT s.root_path, c.id, c.started_at, c.updated_at, c.status
 		FROM storages s JOIN scan_checkpoints c ON c.storage_id = s.id
-		WHERE s.id = ? AND s.kind = 'local' ORDER BY c.id DESC LIMIT 1`, storageID).
+		WHERE s.id = ? AND s.kind IN ('local','filesystem') ORDER BY c.id DESC LIMIT 1`, storageID).
 		Scan(&facts.RootPath, &facts.Generation, &started, &facts.GenerationTime, &status)
 	if err != nil || status != "completed" {
 		return facts, ErrGovernanceRejected
@@ -219,7 +219,7 @@ func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([
 		d.context_json,m.format_json
 		FROM storages s JOIN file_instances f ON f.storage_id=s.id
 		JOIN directory_contexts d ON d.file_id=f.id JOIN file_formats m ON m.file_id=f.id
-		WHERE s.root_path=? AND s.kind='local' AND f.file_status='active'
+		WHERE s.root_path=? AND s.kind IN ('local','filesystem') AND f.file_status='active'
 		AND f.physical_reliable=1 AND f.link_count=1 AND length(f.content_sha256)=64
 		AND NOT EXISTS(SELECT 1 FROM protected_paths p WHERE p.storage_id=s.id)
 		AND NOT EXISTS(SELECT 1 FROM quarantine_items q WHERE q.source_path=f.path AND COALESCE(q.hold_reason,'')<>'')

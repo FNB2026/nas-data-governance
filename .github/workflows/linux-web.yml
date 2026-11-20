@@ -39,6 +39,8 @@ jobs:
           source_sha="$(git rev-parse HEAD)"
           export NDG_QUARANTINE_IMAGE="ndg-dual-purge-integration:$source_sha"
           docker build --build-arg SOURCE_SHA="$source_sha" -f packaging/docker/Dockerfile.quarantine-candidate -t "$NDG_QUARANTINE_IMAGE" .
+          export NDG_SCAN_IMAGE="ndg-project-ingest:$source_sha"
+          docker build --target scanner -f packaging/docker/Dockerfile.quarantine-candidate -t "$NDG_SCAN_IMAGE" .
           mkdir -m 700 /tmp/ndg-dual-purge-integration
           export NDG_PURGE_CLI=/tmp/ndg-dual-purge-integration/ndg-private-purge
           CGO_ENABLED=0 go build -trimpath -o "$NDG_PURGE_CLI" ./cmd/ndg-private-purge

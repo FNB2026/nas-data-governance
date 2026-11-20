@@ -19,8 +19,8 @@ services:
         target: /quarantine
         bind: {create_host_path: false}
       - type: bind
-        source: ${NDG_CANDIDATE_SOURCE:?provide an isolated Worker-owned synthetic source directory}
-        target: /source
+        source: ${NDG_CANDIDATE_SOURCE:?provide an isolated Worker-owned source directory}
+        target: /ndg-volume
         bind: {create_host_path: false}
       - type: bind
         source: ${NDG_CANDIDATE_RUN:?provide an exclusive socket directory}

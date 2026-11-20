@@ -6,7 +6,16 @@ COPY cmd/ndg-quarantine-candidate ./cmd/ndg-quarantine-candidate
 COPY internal ./internal
 COPY schemas ./schemas
 RUN CGO_ENABLED=0 go build -trimpath -o /out/ndg-quarantine-candidate ./cmd/ndg-quarantine-candidate
-FROM scratch
+FROM build AS ingest-build
+COPY cmd/nas-governance ./cmd/nas-governance
+RUN CGO_ENABLED=0 go build -trimpath -o /out/nas-governance ./cmd/nas-governance
+
+FROM scratch AS scanner
+COPY --from=ingest-build /out/nas-governance /nas-governance
+USER 10002:10002
+ENTRYPOINT ["/nas-governance"]
+
+FROM scratch AS candidate
 ARG SOURCE_SHA
 LABEL org.opencontainers.image.revision=$SOURCE_SHA com.ndg.channel="dual-purge-integration"
 COPY --from=build /out/ndg-quarantine-candidate /ndg-quarantine-candidate

@@ -49,7 +49,7 @@ func runWorker(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	source, err := managedworker.NewSourcePurge(project, "/source")
+	source, err := managedworker.NewSourcePurge(project, "/ndg-volume")
 	if err != nil {
 		return err
 	}
