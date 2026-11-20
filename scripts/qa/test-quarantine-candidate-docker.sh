@@ -50,6 +50,10 @@ scan_tool=(docker run --rm --network none --read-only --cap-drop ALL
 "${scan_tool[@]}" scan --root /ndg-volume --storage candidate-volume --db /state/project.db --out /state/index.jsonl >&2
 "${scan_tool[@]}" analyze --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
 "${compose[@]}" up -d --no-build --pull never >/dev/null
+if [[ "${NDG_TEST_PURGE_BROWSER:-}" == 1 ]]; then
+  bash scripts/qa/test-purge-console-browser.sh "$fixture"
+  exit
+fi
 python3 -B - "$fixture" "${compose[@]}" <<'PY'
 import hashlib
 import json
