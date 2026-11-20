@@ -42,10 +42,20 @@ type sourcePurgeEvidence struct {
 }
 
 type SourcePurgeResult struct {
-	ID, StorageID, Digest, State, TargetPath, KeeperPath, ContentSHA256 string
-	TargetID, KeeperID, Size                                            int64
-	Role                                                                domain.DirectoryRole
-	ExpiresAt, UpdatedAt                                                time.Time
+	ID            string                    `json:"id"`
+	StorageID     string                    `json:"storage_id"`
+	Digest        string                    `json:"digest"`
+	State         string                    `json:"state"`
+	TargetPath    string                    `json:"target_path"`
+	KeeperPath    string                    `json:"keeper_path"`
+	ContentSHA256 string                    `json:"sha256"`
+	TargetID      int64                     `json:"target_id,string"`
+	KeeperID      int64                     `json:"keeper_id,string"`
+	Size          int64                     `json:"size"`
+	Role          domain.DirectoryRole      `json:"role"`
+	ExpiresAt     time.Time                 `json:"expires_at"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
+	Choices       []store.SourcePurgeChoice `json:"choices,omitempty"`
 }
 
 func sourcePurgeResult(p store.DualPurgePlan, proof sourcePurgeEvidence) SourcePurgeResult {
@@ -219,7 +229,7 @@ func (s *SourcePurge) finish(ctx context.Context, p store.DualPurgePlan, proof s
 
 func sourcePurgeOp(op string) bool {
 	switch op {
-	case "SOURCE_DIRECT_PURGE_PLAN", "SOURCE_DIRECT_PURGE_APPROVE", "SOURCE_DIRECT_PURGE_DRY_RUN",
+	case "SOURCE_DIRECT_PURGE_LIST", "SOURCE_DIRECT_PURGE_PLAN", "SOURCE_DIRECT_PURGE_APPROVE", "SOURCE_DIRECT_PURGE_DRY_RUN",
 		"SOURCE_DIRECT_PURGE_EXECUTE", "SOURCE_DIRECT_PURGE_CANCEL", "SOURCE_DIRECT_PURGE_RECOVER", "SOURCE_DIRECT_PURGE_RECEIPT":
 		return true
 	}
@@ -230,6 +240,10 @@ func (s *SourcePurge) dispatch(ctx context.Context, req Request) (SourcePurgeRes
 	var empty SourcePurgeResult
 	if !sourcePurgeOp(req.Op) {
 		return empty, ErrProtocol
+	}
+	if req.Op == "SOURCE_DIRECT_PURGE_LIST" {
+		choices, err := s.project.SourcePurgeCandidates(ctx, s.root)
+		return SourcePurgeResult{Choices: choices}, err
 	}
 	if req.Op == "SOURCE_DIRECT_PURGE_PLAN" {
 		storageID, storageErr := req.String("storage_id")

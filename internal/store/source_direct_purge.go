@@ -206,3 +206,48 @@ func (f SourcePurgeFacts) SourcePurgeDecision(ruleVersion string) (domain.Direct
 	}
 	return contexts[0].Role, nil
 }
+
+// SourcePurgeCandidates is a bounded display view. Every execution plan
+// independently validates the selected target and keeper against a new snapshot.
+func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([]SourcePurgeChoice, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id,f.id,f.path,f.size,f.content_sha256,
+		COALESCE(d.role,''),COALESCE(d.protected,1),COALESCE(d.privacy_level,'')
+		FROM storages s JOIN file_instances f ON f.storage_id=s.id
+		LEFT JOIN directory_contexts d ON d.file_id=f.id
+		WHERE s.root_path=? AND s.kind='local' AND f.file_status='active'
+		AND f.physical_reliable=1 AND f.link_count=1 AND length(f.content_sha256)=64
+		AND EXISTS(SELECT 1 FROM file_instances k WHERE k.storage_id=f.storage_id
+		AND k.file_status='active' AND k.content_sha256=f.content_sha256 AND k.size=f.size
+		AND k.physical_reliable=1 AND k.link_count=1 AND (k.device<>f.device OR k.inode<>f.inode))
+		ORDER BY f.content_sha256,f.id LIMIT 50`, root)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	choices := make([]SourcePurgeChoice, 0)
+	for rows.Next() {
+		var c SourcePurgeChoice
+		var privacy string
+		var protected bool
+		if err := rows.Scan(&c.StorageID, &c.FileID, &c.Path, &c.Size, &c.SHA256, &c.Role, &protected, &privacy); err != nil {
+			return nil, err
+		}
+		c.Protected = protected || privacy != "normal"
+		if c.Protected {
+			// A sensitive path should never appear in the purge interface.
+			continue
+		}
+		choices = append(choices, c)
+	}
+	return choices, rows.Err()
+}
+
+type SourcePurgeChoice struct {
+	StorageID string               `json:"storage_id"`
+	FileID    int64                `json:"file_id,string"`
+	Path      string               `json:"path"`
+	Size      int64                `json:"size"`
+	SHA256    string               `json:"sha256"`
+	Role      domain.DirectoryRole `json:"role"`
+	Protected bool                 `json:"protected"`
+}

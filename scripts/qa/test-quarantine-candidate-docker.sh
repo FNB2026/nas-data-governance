@@ -108,22 +108,24 @@ def source_plan(target, keeper, expected=200):
     return source_request('PLAN', expected, storage_id='synthetic-local', target_id=target, keeper_id=keeper)
 
 def source_act(p, op, expected=200, **fields):
-    return source_request(op, expected, plan_id=p['ID'], digest=p['Digest'], **fields)
+    return source_request(op, expected, plan_id=p['id'], digest=p['digest'], **fields)
 
+choices = source_request('LIST')['choices']
+assert {c['file_id'] for c in choices} == {source_one, keeper_one, source_two, keeper_two}
 source_plan(source_one, source_one, 409)
 p1 = source_plan(source_one, keeper_one)
 p2 = source_plan(source_two, keeper_two)
-source_act(p1, 'EXECUTE', 409, confirmation='永久删除 ' + p1['ID'])
+source_act(p1, 'EXECUTE', 409, confirmation='永久删除 ' + p1['id'])
 source_act(p1, 'APPROVE')
 source_act(p1, 'DRY_RUN')
 source_act(p2, 'APPROVE')
 source_act(p2, 'DRY_RUN')
-source_act(p2, 'EXECUTE', 409, confirmation='永久删除 ' + p1['ID'])
-assert source_act(p1, 'EXECUTE', confirmation='永久删除 ' + p1['ID'])['State'] == 'PURGED'
-assert source_act(p2, 'EXECUTE', confirmation='永久删除 ' + p2['ID'])['State'] == 'PURGED'
+source_act(p2, 'EXECUTE', 409, confirmation='永久删除 ' + p1['id'])
+assert source_act(p1, 'EXECUTE', confirmation='永久删除 ' + p1['id'])['state'] == 'PURGED'
+assert source_act(p2, 'EXECUTE', confirmation='永久删除 ' + p2['id'])['state'] == 'PURGED'
 for p in (p1, p2):
-    assert source_act(p, 'RECEIPT')['State'] == 'PURGED'
-    source_act(p, 'EXECUTE', 409, confirmation='永久删除 ' + p['ID'])
+    assert source_act(p, 'RECEIPT')['state'] == 'PURGED'
+    source_act(p, 'EXECUTE', 409, confirmation='永久删除 ' + p['id'])
 for name in ('one', 'two'):
     assert subprocess.run(['sudo', '-n', 'test', '-e', str(base / 'source' / (name + '-remove.txt'))]).returncode == 1
     keeper = subprocess.check_output(['sudo', '-n', 'cat', str(base / 'source' / (name + '-keeper.txt'))])

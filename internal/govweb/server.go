@@ -272,6 +272,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/gov/intent", s.handleIntent)
 	mux.HandleFunc("/gov/quarantine-purge", s.handleQuarantinePurge)
 	mux.HandleFunc("/gov/source-direct-purge", s.handleSourcePurge)
+	mux.HandleFunc("/gov/purge-console", s.handlePurgeConsole)
+	mux.HandleFunc("/gov/purge-console.js", s.handlePurgeConsole)
 	return mux
 }
 
