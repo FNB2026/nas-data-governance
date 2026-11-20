@@ -28,16 +28,29 @@ PY
   python3 - <<'PY'
 import re
 from pathlib import Path
-for line in Path('browser-flow.log').read_text().splitlines():
-    if re.match(r'^(Error|TimeoutError):', line):
-        text = re.sub(r'ndg-gov-[0-9a-fA-F]+', '[fixture credential]', line)
-        print(text[:250])
+lines = Path('browser-flow.log').read_text().splitlines()
+if '### Error' in lines:
+    start = lines.index('### Error') + 1
+    for line in lines[start:start + 10]:
+        if line.startswith('### '):
+            break
+        print(re.sub(r'ndg-gov-[0-9a-fA-F]+', '[fixture credential]', line)[:250])
+else:
+    print('Playwright scenario failed before reporting a browser error')
 PY
   exit 1
 }
-test "$(sudo -n test -e source/temp/one-remove.pdf && printf present || printf absent)" = absent
-test "$(sudo -n test -e quarantine/synthetic.txt && printf present || printf absent)" = absent
-sudo -n test -f source/temp/one-keeper.pdf
-sudo -n test -f source/temp/two-remove.pdf
+assert_fixture_file() {
+  local expected="$1" file="$2" actual
+  if sudo -n test -f "$file"; then actual=present; else actual=absent; fi
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'Fixture file %s expected %s but was %s\n' "$file" "$expected" "$actual" >&2
+    return 1
+  fi
+}
+assert_fixture_file absent source/temp/one-remove.pdf
+assert_fixture_file absent quarantine/synthetic.txt
+assert_fixture_file present source/temp/one-keeper.pdf
+assert_fixture_file present source/temp/two-remove.pdf
 sha256sum -c sentinel.sha >&2
 printf '%s\n' '{"real_chrome":true,"source_browser_purge":true,"quarantine_browser_purge":true,"independent_plan_cancellation":true,"receipt_reload_verified":true,"outside_sentinel_unchanged":true}'
