@@ -6,6 +6,10 @@ fixture="$(mktemp -d /tmp/ndg-quarantine-ci-XXXXXXXX)"
 project="ndg-quarantine-ci-${RANDOM}${RANDOM}"
 compose=(docker compose --project-name "$project" -f packaging/docker/compose.quarantine-candidate.yaml)
 cleanup() {
+  local result=$?
+  if (( result != 0 )); then
+    "${compose[@]}" ps --all --format json | python3 -c 'import json,sys; print([(x.get("Service"),x.get("State"),x.get("ExitCode")) for line in sys.stdin if line.strip() for x in [json.loads(line)]])' || true
+  fi
   "${compose[@]}" down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -13,7 +17,10 @@ mkdir -m 0700 "$fixture"/{state,quarantine,config}
 mkdir -m 0755 "$fixture/run"
 mkdir -m 0700 "$fixture/quarantine/.ndg-purge-stage"
 go run ./scripts/qa/quarantine-candidate-fixture "$fixture" > "$fixture/item"
-openssl rand -hex 32 > "$fixture/config/token"
+{
+  printf '%s' 'ndg-gov-'
+  openssl rand -hex 32
+} > "$fixture/config/token"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
   -addext subjectAltName=IP:127.0.0.1 -keyout "$fixture/config/tls.key" -out "$fixture/config/tls.crt" >/dev/null 2>&1
 cp "$fixture/config/token" "$fixture/client-token"
@@ -31,7 +38,6 @@ import hashlib
 import json
 from pathlib import Path
 import ssl
-import sqlite3
 import subprocess
 import sys
 import time

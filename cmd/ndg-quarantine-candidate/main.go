@@ -27,7 +27,7 @@ const (
 var workerSubject = managedworker.Subject{UID: workerUID, GID: workerUID}
 var webSubject = managedworker.Subject{UID: webUID, GID: webUID}
 
-func runWorker(ctx context.Context) error {
+func runWorker(ctx context.Context) (result error) {
 	if err := managedworker.RequireSubject(workerSubject); err != nil {
 		return err
 	}
@@ -39,12 +39,12 @@ func runWorker(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer lease.Release()
+	defer func() { result = errors.Join(result, lease.Release()) }()
 	project, err := store.Open(ctx, filepath.Join(layout.State, "project.db"))
 	if err != nil {
 		return err
 	}
-	defer project.Close()
+	defer func() { result = errors.Join(result, project.Close()) }()
 	purge, err := managedworker.NewQuarantinePurge(project, "/quarantine")
 	if err != nil {
 		return err

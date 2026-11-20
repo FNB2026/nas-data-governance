@@ -121,7 +121,11 @@ func (f *storeFacts) recoveryEvidence(ctx context.Context, facts *Facts) error {
 	if err != nil {
 		return err
 	}
-	if len(ps) > 0 {
+	dualPurge, err := f.store.DualPurgeBusy(ctx)
+	if err != nil {
+		return err
+	}
+	if len(ps) > 0 || dualPurge {
 		facts.RecoveryLockHeld = true
 	}
 	return nil
