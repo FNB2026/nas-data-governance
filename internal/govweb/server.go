@@ -187,11 +187,18 @@ func (c Config) Validate() error {
 
 // Server serves the private governance surface.
 type Server struct {
-	token   string
-	backing Backing
-	mu      sync.Mutex
-	failed  map[string]int
+	token        string
+	backing      Backing
+	mu           sync.Mutex
+	failed       map[string]int
+	failureReset time.Time
 }
+
+const (
+	failureWindow = time.Minute
+	failureLimit  = 5
+	failurePeers  = 1024
+)
 
 // New builds a server from a validated configuration. The credential shape was
 // already checked by Validate, so an unvalidated caller still cannot get past
@@ -218,16 +225,27 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func (s *Server) tooManyFailures(remote string) bool {
+func (s *Server) authStatus(remote string, valid bool, now time.Time) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.failed[remote] >= 5
-}
-
-func (s *Server) noteFailure(remote string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.failed[remote]++
+	if !now.Before(s.failureReset) {
+		clear(s.failed)
+		s.failureReset = now.Add(failureWindow)
+	}
+	failures, tracked := s.failed[remote]
+	if failures >= failureLimit {
+		return http.StatusTooManyRequests
+	}
+	if valid {
+		return http.StatusOK
+	}
+	// At capacity, restrict new failed peers without evicting active limits
+	// or denying a valid credential from an untracked address.
+	if !tracked && len(s.failed) >= failurePeers {
+		return http.StatusTooManyRequests
+	}
+	s.failed[remote] = failures + 1
+	return http.StatusUnauthorized
 }
 
 func (s *Server) authorised(r *http.Request) bool {
@@ -259,13 +277,12 @@ func (s *Server) guarded(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		remote, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if s.tooManyFailures(remote) {
+		switch s.authStatus(remote, s.authorised(r), time.Now()) {
+		case http.StatusTooManyRequests:
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"result": "REFUSED",
 				"reason": "govweb_too_many_failed_attempts"})
 			return
-		}
-		if !s.authorised(r) {
-			s.noteFailure(remote)
+		case http.StatusUnauthorized:
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"result": "REFUSED",
 				"reason": "govweb_unauthenticated"})
 			return

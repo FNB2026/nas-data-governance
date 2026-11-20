@@ -6,8 +6,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // No credential-shaped literal lives in this repository: a source string that
@@ -168,6 +170,36 @@ func TestAuthenticationIsRequiredAndNotCookieBased(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("after 5 failures the surface must answer 429, got %d", last)
+	}
+}
+
+func TestAuthenticationFailureWindowKeepsBoundedPeerState(t *testing.T) {
+	server := mustServer(t, loopbackConfig(t))
+	now := time.Unix(100, 0)
+	for i := 0; i < failureLimit; i++ {
+		if got := server.authStatus("limited-peer", false, now); got != http.StatusUnauthorized {
+			t.Fatalf("failure %d returned %d", i, got)
+		}
+	}
+	for i := 1; i < failurePeers; i++ {
+		if got := server.authStatus(strconv.Itoa(i), false, now); got != http.StatusUnauthorized {
+			t.Fatalf("failed to track peer %d: %d", i, got)
+		}
+	}
+	if got := server.authStatus("new-peer", false, now); got != http.StatusTooManyRequests {
+		t.Fatalf("failed peer at capacity returned %d", got)
+	}
+	if len(server.failed) != failurePeers {
+		t.Fatalf("tracked %d peers, expected %d", len(server.failed), failurePeers)
+	}
+	if got := server.authStatus("new-peer", true, now); got != http.StatusOK {
+		t.Fatalf("valid peer at capacity returned %d", got)
+	}
+	if got := server.authStatus("limited-peer", true, now); got != http.StatusTooManyRequests {
+		t.Fatalf("active limit was evicted: %d", got)
+	}
+	if got := server.authStatus("limited-peer", true, now.Add(failureWindow)); got != http.StatusOK {
+		t.Fatalf("limit did not expire: %d", got)
 	}
 }
 
