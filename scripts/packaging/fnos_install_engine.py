@@ -24,6 +24,7 @@ Design rules enforced here and asserted by the tests:
 """
 from contextlib import contextmanager
 import datetime
+import fcntl
 import hashlib
 import http.client
 import http.cookies
@@ -71,7 +72,7 @@ STEP_PREREQS = {
     'browser': ['start'], 'access': ['start'], 'gui': ['start'],
     'backup': ['access'],
     'upgrade': ['backup'], 'rollback': ['backup'],
-    'uninstall': ['start'], 'reboot': ['access'],
+    'uninstall': ['start', 'backup'], 'reboot': ['access'],
 }
 MUTATING = {'init', 'gateway', 'start', 'backup', 'upgrade', 'rollback', 'uninstall'}
 # Steps whose mutation is either idempotent or fully described by a
@@ -1282,7 +1283,7 @@ def planned_bind_sources(plan):
             '/sources/source_a': plan['source_a'], '/sources/source_b': plan['source_b']}
 
 
-def verify_core_binding(plan, record):
+def verify_core_binding(plan, record, *, allow_stopped=False):
     mounts = {mount.get('Destination'): mount for mount in record.get('Mounts', []) or []}
     require(set(mounts) == set(BIND_TARGETS), 'container_bind_set_mismatch')
     sources = planned_bind_sources(plan)
@@ -1293,7 +1294,9 @@ def verify_core_binding(plan, record):
     networks = (record.get('NetworkSettings') or {}).get('Networks') or {}
     require(len(networks) == 1, 'single_container_network_required')
     attached = next(iter(networks.values()))
-    require(attached.get('NetworkID') == plan['network_id'] and attached.get('IPAddress') == plan['core_ipv4'],
+    stopped = allow_stopped and not (record.get('State') or {}).get('Running')
+    address = attached.get('IPAddress') or ((attached.get('IPAMConfig') or {}).get('IPv4Address') if stopped else None)
+    require(attached.get('NetworkID') == plan['network_id'] and address == plan['core_ipv4'],
             'core_network_binding_mismatch')
 
 
@@ -1552,12 +1555,39 @@ def step_rollback(ctx):
             'container': record['Id'][:12]}
 
 
+def uninstall_gateway(ctx, *, stop=False):
+    if ctx.plan['scope'] != PRODUCTION:
+        return
+    spec = frozen_gateway_spec(ctx.plan)
+    unit = spec['unit_name']
+
+    def read_property(name):
+        return ctx.runner.must(['systemctl', 'show', '--property=' + name, '--value', unit],
+                               timeout=30, reason='gateway_unit_state_unavailable').decode().strip()
+
+    if read_property('LoadState') == 'not-found':
+        return
+    verify_gateway_unit(ctx, spec)
+    require(read_property('UnitFileState') == 'disabled', 'uninstall_gateway_must_be_disabled')
+    if stop and read_property('ActiveState') != 'inactive':
+        ctx.runner.must(['systemctl', 'stop', unit], timeout=60, reason='gateway_stop_failed')
+    require(read_property('ActiveState') == 'inactive' and read_property('MainPID') == '0',
+            'uninstall_gateway_still_running')
+
+
 def step_uninstall(ctx):
     plan = ctx.plan
     baseline = ctx.recorded('sources.json')['baseline']
+    assert_mounts_stable(ctx)
+    verify_backup(ctx)
     record = ctx.inspect_container()
+    labels = (record.get('Config') or {}).get('Labels') or {}
+    require(labels.get('com.ndg.test.nonce') == plan['installation_id'], 'uninstall_container_identity_mismatch')
+    verify_core_binding(plan, record, allow_stopped=True)
+    uninstall_gateway(ctx, stop=True)
     identifier = record['Id']
-    ctx.runner.must(['docker', 'container', 'stop', identifier], timeout=180, reason='container_stop_failed')
+    if (record.get('State') or {}).get('Running'):
+        ctx.runner.must(['docker', 'container', 'stop', identifier], timeout=180, reason='container_stop_failed')
     ctx.runner.must(['docker', 'container', 'rm', identifier], timeout=120, reason='container_rm_failed')
     remaining = ctx.runner.must(['docker', 'container', 'ls', '-a', '--filter',
                                  'label=com.ndg.test.nonce=' + plan['installation_id'],
@@ -1571,11 +1601,7 @@ def step_uninstall(ctx):
                         reason='network_rm_failed')
     for label, path in (('source_a', plan['source_a']), ('source_b', plan['source_b'])):
         require(manifest(path, label, boundary=ctx.plan['boundary_root']) == baseline[label], 'uninstall_mutated_sources')
-    receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
-    backup = manifest(os.path.join(receipt['backup_dir'], 'state'), 'backup', boundary=ctx.plan['boundary_root'])
-    require([{'path': e['path'], 'sha256': e['sha256']} for e in backup] ==
-            [{'path': e['path'], 'sha256': e['sha256']} for e in receipt['files']],
-            'uninstall_mutated_backup')
+    verify_backup(ctx)
     require(os.path.isdir(ctx.path('state')), 'uninstall_must_keep_state')
     return {'container_removed': identifier[:12], 'network_removed': bool(plan['network_owned']),
             'sources_unchanged': True, 'backup_unchanged': True}
@@ -1740,6 +1766,8 @@ def verify_rollback(ctx):
 
 
 def verify_uninstall(ctx):
+    uninstall_gateway(ctx)
+    verify_backup(ctx)
     remaining = ctx.runner.must(['docker', 'container', 'ls', '-a', '--filter',
                                  'label=com.ndg.test.nonce=' + ctx.plan['installation_id'],
                                  '--format', '{{.ID}}'], timeout=60,
@@ -1786,6 +1814,45 @@ STEPS = {
 
 # ---------------- run ----------------
 
+@contextmanager
+def local_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def installation_execution_lock(plan):
+    parent = plan['parent']
+    require(HEX12.fullmatch(plan.get('installation_id', '')) is not None and
+            plan['root'] == os.path.join(parent, 'ndg-readonly-' + plan['installation_id']),
+            'installation_lock_identity_rejected')
+    trusted_ancestors(parent, 'installation_lock_parent')
+    if sys.platform == 'linux':
+        boundary = confined_directory(plan['boundary_root'], parent, 'installation_lock_parent')
+    else:
+        # Offline plan/journal testing on macOS never performs lifecycle mutations.
+        boundary = local_directory(parent)
+    with boundary as parent_fd:
+        name = '.ndg-readonly-' + plan['installation_id'] + '.lock'
+        flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+        fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+        try:
+            info = os.fstat(fd)
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
+                    info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o600,
+                    'installation_lock_identity_rejected')
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Refused('installation_execution_busy') from None
+            yield
+        finally:
+            os.close(fd)
+
+
 def run(plan_path, receipt, steps, acceptance, execute, reconcile=None):
     require(execute, 'explicit_execute_required')
     plan = load_plan(plan_path, acceptance)
@@ -1800,6 +1867,12 @@ def run(plan_path, receipt, steps, acceptance, execute, reconcile=None):
         requested = list(authorization['steps'])
     missing = [step for step in requested if step not in authorization['steps']]
     require(not missing, 'step_not_authorized')
+    require(reconcile is None or reconcile in authorization['steps'], 'step_not_authorized')
+    with installation_execution_lock(plan):
+        return run_locked(plan, receipt, requested, reconcile)
+
+
+def run_locked(plan, receipt, requested, reconcile):
     journal = Journal(receipt)
     state = journal.state()
     if reconcile:

@@ -388,6 +388,13 @@ def run_matrix(base, checks):
     refused('run_requires_authorized_step', 'step_not_authorized', 'run',
             '--plan', plan_path, '--receipt', str(receipt), '--steps', 'start', '--execute',
             '--acceptance')
+    plan = json.loads(Path(plan_path).read_text())
+    with engine.installation_execution_lock(plan):
+        refused('concurrent_lifecycle_run', 'installation_execution_busy', 'run',
+                '--plan', plan_path, '--receipt', str(receipt), '--steps', 'init', '--execute',
+                '--acceptance')
+    assert not (receipt / 'journal.jsonl').exists(), 'lock refusal must not start a journal'
+    checks.append('installation_lock_refuses_another_process_before_journal')
     refused('run_requires_prior_step', 'previous_step_incomplete', 'run',
             '--plan', plan_path, '--receipt', str(receipt), '--steps', 'init', '--execute',
             '--acceptance')

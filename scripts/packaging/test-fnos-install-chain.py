@@ -268,6 +268,11 @@ def main():
                         '{{.Image}} {{.State.Running}}'], timeout=60).stdout.decode().strip()
     binding_before = compose_image_line(fixture / 'parent')
 
+    reason = refusal('run', '--plan', str(receipt / 'plan.json'), '--receipt', str(receipt),
+                     '--steps', 'uninstall', '--execute', '--acceptance')
+    assert reason == 'previous_step_incomplete', reason
+    checks.append('uninstall_requires_backup_before_mutation')
+
     # No second verified candidate image exists, so an in-place upgrade must stay
     # refused: nothing was ever granted, and the tool says so in a typed reason.
     for step in ('upgrade', 'rollback'):
