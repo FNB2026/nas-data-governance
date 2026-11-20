@@ -1,6 +1,7 @@
 package managedworker
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -20,9 +21,28 @@ func DecodeRequest(raw []byte) (Request, error) {
 	if len(raw) == 0 || len(raw) > maxRequestBytes {
 		return Request{}, ErrProtocol
 	}
-	fields := map[string]json.RawMessage{}
-	if json.Unmarshal(raw, &fields) != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') || !json.Valid(raw) {
 		return Request{}, ErrProtocol
+	}
+	fields := map[string]json.RawMessage{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, isKey := token.(string)
+		if err != nil || !isKey {
+			return Request{}, ErrProtocol
+		}
+		// The operation and every authorization field must have one
+		// interpretation. Decoding directly to a map overwrites duplicates.
+		if _, exists := fields[key]; exists {
+			return Request{}, ErrProtocol
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return Request{}, ErrProtocol
+		}
+		fields[key] = value
 	}
 	rawOp, ok := fields["op"]
 	if !ok {

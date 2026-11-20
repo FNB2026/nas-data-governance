@@ -60,6 +60,19 @@ func TestDecodeRequestRefusesPathLikeValueOnAllowedKey(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestRefusesDuplicateKeys(t *testing.T) {
+	for _, raw := range []string{
+		`{"op":"PING","op":"STATUS"}`,
+		`{"op":"RESTORE","plan_id":"first","plan_id":"second"}`,
+		`{"op":"SEAL","authorization_sha256":"first","authorization_sha\u0032\u0035\u0036":"second"}`,
+		`{"op":"INSPECT","inode":12,"inode":12}`,
+	} {
+		if _, err := DecodeRequest([]byte(raw)); !errors.Is(err, ErrProtocol) {
+			t.Fatal("duplicate request field was not refused", err)
+		}
+	}
+}
+
 func TestDecodeRequestRefusesMalformedFrames(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	oversized := `{"op":"PING","pad":"` + strings.Repeat("x", maxRequestBytes) + `"}`
