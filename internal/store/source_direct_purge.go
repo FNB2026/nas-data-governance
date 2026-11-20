@@ -211,9 +211,9 @@ func (f SourcePurgeFacts) SourcePurgeDecision(ruleVersion string) (domain.Direct
 // independently validates the selected target and keeper against a new snapshot.
 func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([]SourcePurgeChoice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT s.id,f.id,f.path,f.size,f.content_sha256,
-		COALESCE(d.role,''),COALESCE(d.protected,1),COALESCE(d.privacy_level,'')
+		d.context_json,m.format_json
 		FROM storages s JOIN file_instances f ON f.storage_id=s.id
-		LEFT JOIN directory_contexts d ON d.file_id=f.id
+		JOIN directory_contexts d ON d.file_id=f.id JOIN file_formats m ON m.file_id=f.id
 		WHERE s.root_path=? AND s.kind='local' AND f.file_status='active'
 		AND f.physical_reliable=1 AND f.link_count=1 AND length(f.content_sha256)=64
 		AND NOT EXISTS(SELECT 1 FROM protected_paths p WHERE p.storage_id=s.id)
@@ -229,16 +229,17 @@ func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([
 	choices := make([]SourcePurgeChoice, 0)
 	for rows.Next() {
 		var c SourcePurgeChoice
-		var privacy string
-		var protected bool
-		if err := rows.Scan(&c.StorageID, &c.FileID, &c.Path, &c.Size, &c.SHA256, &c.Role, &protected, &privacy); err != nil {
+		var directoryJSON, formatJSON string
+		if err := rows.Scan(&c.StorageID, &c.FileID, &c.Path, &c.Size, &c.SHA256, &directoryJSON, &formatJSON); err != nil {
 			return nil, err
 		}
-		c.Protected = protected || privacy != "normal"
-		if c.Protected {
-			// A sensitive path should never appear in the purge interface.
+		var directory domain.DirectoryContext
+		var format domain.FormatInfo
+		if json.Unmarshal([]byte(directoryJSON), &directory) != nil || json.Unmarshal([]byte(formatJSON), &format) != nil ||
+			directory.Protected || directory.PrivacyLevel != "normal" || format.Protected || format.Format == "" {
 			continue
 		}
+		c.Role = directory.Role
 		choices = append(choices, c)
 	}
 	return choices, rows.Err()
@@ -251,5 +252,4 @@ type SourcePurgeChoice struct {
 	Size      int64                `json:"size"`
 	SHA256    string               `json:"sha256"`
 	Role      domain.DirectoryRole `json:"role"`
-	Protected bool                 `json:"protected"`
 }
