@@ -51,3 +51,9 @@ func ExecutePurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeR
 func RecoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
 	return recoverPurgeTransaction(ctx, plan)
 }
+
+// DryRunPurgeTransaction checks all present filesystem prerequisites without
+// changing the source, staging directory, or journal.
+func DryRunPurgeTransaction(ctx context.Context, plan PurgeTransaction) error {
+	return dryRunPurgeTransaction(ctx, plan)
+}

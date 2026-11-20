@@ -39,6 +39,18 @@ func purgeDirIdentity(fd int) (PurgeIdentity, error) {
 	return purgeIdentity(st), err
 }
 
+func purgeFileFD(directory int, name string) (int, error) {
+	// openat2 rejects O_NONBLOCK when combined with O_PATH.
+	fd, err := unix.Openat2(directory, name, &unix.OpenHow{
+		Flags:   unix.O_PATH | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV,
+	})
+	if err != nil {
+		return -1, ErrRejected
+	}
+	return fd, nil
+}
+
 func purgeRelative(relative string) bool {
 	if !fs.ValidPath(relative) || relative == "." || strings.ContainsAny(relative, "\x00\r\n\\") {
 		return false
@@ -58,7 +70,10 @@ func samePurgeFile(a, b unix.Statx_t) bool {
 
 func purgeFile(ctx context.Context, fd int, relative string) (PurgeTarget, error) {
 	st, err := purgeStat(fd)
-	if err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Size > uint64(maxObjectBytes) {
+	if err != nil {
+		return PurgeTarget{}, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Size > uint64(maxObjectBytes) {
 		return PurgeTarget{}, ErrRejected
 	}
 	// A kernel FD link opens the already confined regular inode. The source
@@ -110,7 +125,7 @@ func observeUnderRoot(ctx context.Context, fd int, relative string) (PurgeTarget
 		return PurgeTarget{}, err
 	}
 	defer unix.Close(parent)
-	file, err := rooted(fd, relative, unix.O_PATH)
+	file, err := purgeFileFD(fd, relative)
 	if err != nil {
 		return PurgeTarget{}, err
 	}
@@ -127,7 +142,7 @@ func observeUnderRoot(ctx context.Context, fd int, relative string) (PurgeTarget
 	if err != nil || result.Root.Mount != result.Parent.Mount || result.Root.Mount != result.File.Mount {
 		return PurgeTarget{}, ErrRejected
 	}
-	bound, err := rooted(parent, path.Base(relative), unix.O_PATH)
+	bound, err := purgeFileFD(parent, path.Base(relative))
 	if err != nil {
 		return PurgeTarget{}, err
 	}
@@ -295,7 +310,7 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 		unix.Fsync(parent) != nil || unix.Fsync(stage) != nil || fail("staged") {
 		return empty, ErrRecoveryRequired
 	}
-	staged, err := rooted(stage, plan.ID, unix.O_PATH)
+	staged, err := purgeFileFD(stage, plan.ID)
 	if err != nil {
 		return empty, ErrRecoveryRequired
 	}
@@ -314,7 +329,7 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 	if purgeJournal(stage, marker, actual) != nil || fail("commit_pending") {
 		return empty, ErrRecoveryRequired
 	}
-	verified, err := rooted(stage, plan.ID, unix.O_PATH)
+	verified, err := purgeFileFD(stage, plan.ID)
 	if err != nil {
 		return empty, ErrRecoveryRequired
 	}
@@ -372,7 +387,7 @@ func recoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeR
 			return empty, ErrRecoveryRequired
 		}
 	} else {
-		staged, err := rooted(stage, plan.ID, unix.O_PATH)
+		staged, err := purgeFileFD(stage, plan.ID)
 		if err != nil {
 			return empty, ErrRecoveryRequired
 		}
@@ -392,4 +407,23 @@ func recoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeR
 		return empty, ErrRecoveryRequired
 	}
 	return receipt, nil
+}
+
+func dryRunPurgeTransaction(ctx context.Context, plan PurgeTransaction) error {
+	d, err := openPurgeDirectories(plan)
+	if err != nil {
+		return err
+	}
+	defer d.close()
+	if !purgeEntryAbsent(d.stage, "pending") {
+		return ErrRecoveryRequired
+	}
+	if !purgeEntryAbsent(d.stage, "receipt-"+plan.ID) || !purgeEntryAbsent(d.stage, plan.ID) {
+		return ErrRejected
+	}
+	observed, err := observeUnderRoot(ctx, d.root, plan.Target.Relative)
+	if err != nil || observed != plan.Target || purgeKeeper(ctx, d.root, plan) != nil {
+		return ErrRejected
+	}
+	return nil
 }

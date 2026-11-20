@@ -114,6 +114,11 @@ func governanceGuard(ctx context.Context, r governanceReader) (recovery, scan bo
 		return false, false, ErrGovernanceRejected
 	}
 	recovery = n > 0
+	dualRecovery, err := dualPurgeBusy(ctx, r)
+	if err != nil {
+		return false, false, ErrGovernanceRejected
+	}
+	recovery = recovery || dualRecovery
 	if err = r.QueryRowContext(ctx, `SELECT COUNT(*) FROM job_runs WHERE state IN ('QUEUED','RUNNING','CANCEL_REQUESTED')`).Scan(&n); err != nil {
 		return false, false, ErrGovernanceRejected
 	}

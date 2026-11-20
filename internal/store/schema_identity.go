@@ -19,6 +19,7 @@ const (
 	// written for it — the marker tripwire stays at 12, and the layout
 	// fingerprint itself distinguishes the increment.
 	authorizationAudit13Layout = "552e600f555aa7ffa47ef5ae52417109ea8071656e6b13ff3578b6bb3dc984c2"
+	dualPurge14Layout          = "60de4bacafd51284a5985b5f220bbc0afd792ff4f509fb87377955d276162fd4"
 )
 
 // Fingerprint only the exact stored layout. It is not a provenance certificate

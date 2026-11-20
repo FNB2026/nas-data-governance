@@ -21,5 +21,9 @@ func requireNoRecovery(ctx context.Context, st *store.SQLiteStore) error {
 	if err != nil || len(purges) > 0 {
 		return fmt.Errorf("app: purge recovery lock active or unavailable")
 	}
+	dualPurge, err := st.DualPurgeBusy(ctx)
+	if err != nil || dualPurge {
+		return fmt.Errorf("app: permanent deletion recovery lock active or unavailable")
+	}
 	return nil
 }

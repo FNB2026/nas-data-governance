@@ -15,3 +15,7 @@ func executePurgeTransaction(context.Context, PurgeTransaction, func(string) err
 func recoverPurgeTransaction(context.Context, PurgeTransaction) (PurgeReceipt, error) {
 	return PurgeReceipt{}, ErrUnsupported
 }
+
+func dryRunPurgeTransaction(context.Context, PurgeTransaction) error {
+	return ErrUnsupported
+}
