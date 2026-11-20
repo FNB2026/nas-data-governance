@@ -33,11 +33,13 @@ export NDG_CANDIDATE_STATE="$fixture/state" NDG_CANDIDATE_RUN="$fixture/run"
 export NDG_CANDIDATE_SOURCE="$fixture/source"
 export NDG_CANDIDATE_WEB_CONFIG="$fixture/config" NDG_CANDIDATE_QUARANTINE="$fixture/quarantine"
 : "${NDG_QUARANTINE_IMAGE:?build candidate image first}"
+: "${NDG_PURGE_CLI:?build candidate CLI first}"
 "${compose[@]}" up -d --no-build --pull never >/dev/null
 python3 -B - "$fixture" "${compose[@]}" <<'PY'
 import hashlib
 import json
 from pathlib import Path
+import os
 import ssl
 import subprocess
 import sys
@@ -117,6 +119,8 @@ def source_act(p, op, expected=200, **fields):
     return source_request(op, expected, plan_id=p['id'], digest=p['digest'], **fields)
 
 choices = source_request('LIST')['choices']
+cli = [os.environ['NDG_PURGE_CLI'], '-ca-file', str(base / 'client.crt'), '-token-file', str(base / 'client-token')]
+assert json.loads(subprocess.check_output(cli + ['-action', 'list']))['choices'] == choices
 assert {c['file_id'] for c in choices} == {source_one, keeper_one, source_two, keeper_two, source_stale, keeper_stale}
 source_plan(source_one, source_one, 409)
 p1 = source_plan(source_one, keeper_one)
@@ -157,9 +161,12 @@ expected = 'DRAFT,APPROVED,DRY_RUN,EXECUTING,PURGED'
 for p in (plan, p1, p2):
     assert audit_states(p) == expected
 assert audit_states(p3) == 'DRAFT,APPROVED,DRY_RUN'
+for p, mode in ((plan, 'quarantine'), (p1, 'source')):
+    receipt = subprocess.check_output(cli + ['-mode', mode, '-action', 'receipt', '-plan-id', p['id'], '-digest', p['digest']])
+    assert json.loads(receipt)['state'] == 'PURGED'
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
                   'verified_keepers': 2, 'independent_approval_and_confirmation': True,
-                  'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'plan_and_dry_run_required': True,
+                  'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'tls_cli_receipts_verified': True, 'plan_and_dry_run_required': True,
                   'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"
