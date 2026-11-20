@@ -216,6 +216,8 @@ func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([
 		LEFT JOIN directory_contexts d ON d.file_id=f.id
 		WHERE s.root_path=? AND s.kind='local' AND f.file_status='active'
 		AND f.physical_reliable=1 AND f.link_count=1 AND length(f.content_sha256)=64
+		AND NOT EXISTS(SELECT 1 FROM protected_paths p WHERE p.storage_id=s.id)
+		AND NOT EXISTS(SELECT 1 FROM quarantine_items q WHERE q.source_path=f.path AND COALESCE(q.hold_reason,'')<>'')
 		AND EXISTS(SELECT 1 FROM file_instances k WHERE k.storage_id=f.storage_id
 		AND k.file_status='active' AND k.content_sha256=f.content_sha256 AND k.size=f.size
 		AND k.physical_reliable=1 AND k.link_count=1 AND (k.device<>f.device OR k.inode<>f.inode))

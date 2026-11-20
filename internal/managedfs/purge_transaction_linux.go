@@ -337,7 +337,8 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 	}
 	if fail("pending") || validatePurgeBinding(plan, root, stage, parent) != nil ||
 		unix.Renameat2(parent, path.Base(plan.Target.Relative), stage, plan.ID, unix.RENAME_NOREPLACE) != nil ||
-		unix.Fsync(parent) != nil || unix.Fsync(stage) != nil || fail("staged") {
+		fail("renamed") || unix.Fsync(parent) != nil || fail("parent_synced") ||
+		unix.Fsync(stage) != nil || fail("staged") {
 		return empty, ErrRecoveryRequired
 	}
 	staged, err := purgeFileFD(stage, plan.ID)
@@ -368,12 +369,12 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 	confirmed.Root, confirmed.Parent = current.Root, current.Parent
 	if err != nil || confirmed != actual || validatePurgeBinding(plan, root, stage, parent) != nil ||
 		purgeKeeper(ctx, root, plan) != nil || unix.Unlinkat(stage, plan.ID, 0) != nil ||
-		unix.Fsync(stage) != nil || fail("unlinked") {
+		fail("unlinked_unsynced") || unix.Fsync(stage) != nil || fail("unlinked") {
 		return empty, ErrRecoveryRequired
 	}
 	receipt := PurgeReceipt{ID: plan.ID, State: "PURGED"}
-	if purgeJournal(stage, "receipt-"+plan.ID, receipt) != nil ||
-		unix.Unlinkat(stage, "pending", 0) != nil || unix.Fsync(stage) != nil {
+	if purgeJournal(stage, "receipt-"+plan.ID, receipt) != nil || fail("receipt_synced") ||
+		unix.Unlinkat(stage, "pending", 0) != nil || fail("pending_removed") || unix.Fsync(stage) != nil {
 		return empty, ErrRecoveryRequired
 	}
 	return receipt, nil

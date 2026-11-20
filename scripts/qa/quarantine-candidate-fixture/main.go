@@ -74,7 +74,7 @@ func seedSource(ctx context.Context, st *store.SQLiteStore, root string) {
 	gen, err := st.StartCheckpoint(ctx, storageID)
 	check(err)
 	var files []domain.FileInstance
-	for _, group := range []string{"one", "two"} {
+	for _, group := range []string{"one", "two", "stale"} {
 		for _, name := range []string{group + "-remove.txt", group + "-keeper.txt"} {
 			raw := []byte("synthetic source group " + group + "\n")
 			sum := sha256.Sum256(raw)

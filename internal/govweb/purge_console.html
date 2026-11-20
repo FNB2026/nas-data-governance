@@ -30,6 +30,13 @@
 <section>
 <h2>逐文件计划与结果</h2>
 <div id="plans"></div>
+<details>
+<summary>查询已保存的计划</summary>
+<label>操作 <select id="lookup-kind"><option value="source">源文件永久删除</option><option value="quarantine">隔离区永久清理</option></select></label>
+<label>计划 ID <input id="lookup-id" maxlength="64" autocomplete="off"></label>
+<label>审批摘要 <input id="lookup-digest" maxlength="64" autocomplete="off"></label>
+<button id="lookup" type="button">查询回执</button>
+</details>
 </section>
 </main>
 </body>

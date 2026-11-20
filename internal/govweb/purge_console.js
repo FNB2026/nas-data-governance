@@ -133,7 +133,9 @@ function addPlan(route, prefix, initial, label) {
   action('CANCEL', '取消此计划', ['DRAFT', 'APPROVED', 'DRY_RUN']);
   action('RECEIPT', '查询回执', null);
   action('RECOVER', '核验并尝试恢复', ['EXECUTING']);
-  panel.append(title, details, controls, status);
+  const reference = document.createElement('p');
+  reference.textContent = '计划 ID ' + plan.id + ' · 审批摘要 ' + plan.digest;
+  panel.append(title, details, controls, status, reference);
   element('plans').append(panel);
   update('');
 }
@@ -185,4 +187,15 @@ pageAction('plan', async () => {
       element('plans').append(result);
     }
   }
+});
+
+pageAction('lookup', async () => {
+  const isSource = element('lookup-kind').value === 'source';
+  const route = isSource ? sourceRoute : quarantineRoute;
+  const prefix = isSource ? 'SOURCE_DIRECT_PURGE_' : 'QUARANTINE_PURGE_';
+  const plan = await request(route, prefix + 'RECEIPT', {
+    plan_id: element('lookup-id').value.trim(),
+    digest: element('lookup-digest').value.trim()
+  });
+  addPlan(route, prefix, plan, plan.target_path || '隔离区项目 ' + plan.item_id);
 });

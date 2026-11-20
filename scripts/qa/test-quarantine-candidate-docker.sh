@@ -60,8 +60,14 @@ for _ in range(30):
 else:
     raise RuntimeError('candidate TLS endpoint did not become ready')
 
+with opener.open(url + '/gov/purge-console', timeout=5) as page:
+    assert "frame-ancestors 'none'" in page.headers.get('Content-Security-Policy', '')
+    assert b'id="files"' in page.read()
+with opener.open(url + '/gov/purge-console.js', timeout=5) as js:
+    assert js.headers.get_content_type() == 'text/javascript'
+    assert b'SOURCE_DIRECT_PURGE_LIST' in js.read()
 token = (base / 'client-token').read_text().strip()
-item_id, source_one, keeper_one, source_two, keeper_two = (base / 'item').read_text().splitlines()
+item_id, source_one, keeper_one, source_two, keeper_two, source_stale, keeper_stale = (base / 'item').read_text().splitlines()
 def request(payload, expected=200, route='/gov/quarantine-purge'):
     req = urllib.request.Request(url + route,
                                  json.dumps(payload).encode(),
@@ -111,16 +117,24 @@ def source_act(p, op, expected=200, **fields):
     return source_request(op, expected, plan_id=p['id'], digest=p['digest'], **fields)
 
 choices = source_request('LIST')['choices']
-assert {c['file_id'] for c in choices} == {source_one, keeper_one, source_two, keeper_two}
+assert {c['file_id'] for c in choices} == {source_one, keeper_one, source_two, keeper_two, source_stale, keeper_stale}
 source_plan(source_one, source_one, 409)
 p1 = source_plan(source_one, keeper_one)
 p2 = source_plan(source_two, keeper_two)
+p3 = source_plan(source_stale, keeper_stale)
 source_act(p1, 'EXECUTE', 409, confirmation='永久删除 ' + p1['id'])
 source_act(p1, 'APPROVE')
 source_act(p1, 'DRY_RUN')
 source_act(p2, 'APPROVE')
 source_act(p2, 'DRY_RUN')
 source_act(p2, 'EXECUTE', 409, confirmation='永久删除 ' + p1['id'])
+source_act(p3, 'APPROVE')
+source_act(p3, 'DRY_RUN')
+stale_path = str(base / 'source' / 'stale-remove.txt')
+subprocess.run(['sudo', '-n', 'tee', stale_path], input=b'changed after dry run', stdout=subprocess.DEVNULL, check=True)
+source_act(p3, 'EXECUTE', 409, confirmation='永久删除 ' + p3['id'])
+assert source_act(p3, 'RECEIPT')['state'] == 'DRY_RUN'
+assert subprocess.check_output(['sudo', '-n', 'cat', stale_path]) == b'changed after dry run'
 assert source_act(p1, 'EXECUTE', confirmation='永久删除 ' + p1['id'])['state'] == 'PURGED'
 assert source_act(p2, 'EXECUTE', confirmation='永久删除 ' + p2['id'])['state'] == 'PURGED'
 for p in (p1, p2):
@@ -132,7 +146,8 @@ for name in ('one', 'two'):
     assert keeper == ('synthetic source group ' + name + '\n').encode()
 assert hashlib.sha256((base / 'sentinel').read_bytes()).hexdigest() == (base / 'sentinel.sha').read_text().split()[0]
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
-                  'verified_keepers': 2, 'independent_approval_and_confirmation': True, 'plan_and_dry_run_required': True,
+                  'verified_keepers': 2, 'independent_approval_and_confirmation': True,
+                  'stale_selected_file_preserved': True, 'plan_and_dry_run_required': True,
                   'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"

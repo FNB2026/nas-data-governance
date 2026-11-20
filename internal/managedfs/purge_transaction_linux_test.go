@@ -4,11 +4,13 @@ package managedfs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -310,4 +312,67 @@ func TestRootedPurgeRejectsSharedWritableNamespace(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRootedPurgeProcessKill(t *testing.T) {
+	for _, cut := range []string{"pending", "renamed", "parent_synced", "staged", "commit_pending",
+		"unlinked_unsynced", "unlinked", "receipt_synced", "pending_removed"} {
+		t.Run(cut, func(t *testing.T) {
+			ctx, plan, stage := purgeFixture(t)
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(exe, "-test.run=^TestRootedPurgeKillChild$")
+			cmd.Env = append(os.Environ(), "NDG_PURGE_TEST_CUT="+cut, "NDG_PURGE_TEST_PLAN="+string(raw))
+			output, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+				t.Fatalf("expected real SIGKILL, got %v %s", err, output)
+			}
+			if purgeEntryMissing(t, stage, "pending") != (cut == "pending_removed") {
+				t.Fatal("journal does not match the interrupted phase")
+			}
+			keeper, err := ObservePurgeTarget(ctx, plan.RootPath, plan.Keeper.Relative)
+			if err != nil || keeper != *plan.Keeper {
+				t.Fatal("interrupted purge changed its keeper", err)
+			}
+			result, err := RecoverPurgeTransaction(ctx, plan)
+			switch cut {
+			case "pending", "renamed", "parent_synced", "staged":
+				if err != nil || result.State != "ROLLED_BACK" ||
+					purgeEntryMissing(t, plan.RootPath, plan.Target.Relative) || !purgeEntryMissing(t, stage, plan.ID) {
+					t.Fatal("did not safely restore the synthetic target", err)
+				}
+			default:
+				if !errors.Is(err, ErrRecoveryRequired) || !purgeEntryMissing(t, plan.RootPath, plan.Target.Relative) {
+					t.Fatal("accepted ambiguous post-commit outcome", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRootedPurgeKillChild(t *testing.T) {
+	cut := os.Getenv("NDG_PURGE_TEST_CUT")
+	if cut == "" {
+		return
+	}
+	var plan PurgeTransaction
+	if json.Unmarshal([]byte(os.Getenv("NDG_PURGE_TEST_PLAN")), &plan) != nil ||
+		!strings.HasPrefix(plan.RootPath, filepath.Join(os.TempDir(), "TestRootedPurgeProcessKill")) ||
+		plan.Target.Relative != "folder/remove" {
+		t.Fatal("subprocess requires its dedicated synthetic fixture")
+	}
+	_, err := executePurgeTransaction(context.Background(), plan, func(phase string) error {
+		if phase == cut {
+			return unix.Kill(os.Getpid(), unix.SIGKILL)
+		}
+		return nil
+	})
+	t.Fatal("subprocess did not reach kill point", err)
 }
