@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { canCommitGovernancePreview, decisionLabel, reasonLabel, type DecisionKind, type ReviewPreview, type SelectedReview } from "../lib/governance";
 
-export default function GovernancePreview({ preview, selection, kind, canRecord, busy, ambiguous, onClose, onCommit, canQueryReceipt, onQueryReceipt, note }: {
+export default function GovernancePreview({ preview, selection, kind, canRecord, busy, ambiguous, onClose, onCommit, canQueryReceipt, onQueryReceipt, note, returnFocusRef }: {
   preview: ReviewPreview; selection: Map<string, SelectedReview>; kind: DecisionKind;
+  returnFocusRef?: RefObject<HTMLButtonElement | null>;
   note: string | null; canRecord: boolean; busy: boolean; ambiguous: boolean; canQueryReceipt: boolean; onQueryReceipt: () => void; onClose: () => void; onCommit: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -15,10 +16,10 @@ export default function GovernancePreview({ preview, selection, kind, canRecord,
     return () => clearTimeout(timer);
   }, [expiry]);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
+    const previous = returnFocusRef?.current ?? (document.activeElement as HTMLElement | null);
     title.current?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };
-  }, []);
+  }, [returnFocusRef]);
   const keyboard = (event: KeyboardEvent) => {
     if (event.key === "Escape" && !busy && !ambiguous) { event.preventDefault(); onClose(); }
     if (event.key !== "Tab") return;

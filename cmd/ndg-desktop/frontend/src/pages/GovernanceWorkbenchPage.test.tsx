@@ -49,6 +49,28 @@ async function chooseFirst() { await ready(); fireEvent.click(screen.getByRole("
 async function preview() { fireEvent.click(screen.getByRole("button", { name: /预览这一组决定|预览批量决定/ })); await screen.findByRole("dialog"); }
 
 describe("governance workbench selection and records-only flow", () => {
+  it("returns focus to the preview button after an asynchronous refusal", async () => {
+    bridge.preview.mockImplementationOnce(async (request: PreviewRequest) => {
+      // WebKit can blur the trigger while the request disables it.
+      (document.activeElement as HTMLElement).blur();
+      return { preview_token: "", expires_at: "", project_scope: "project-a", records_only: true,
+        items: request.items.map((item) => ({ ...item, eligibility: "BLOCKED",
+          reason_code: "SOURCE_PLATFORM_PROOF_UNAVAILABLE", source_freshness: "UNVERIFIED" })) };
+    });
+
+    render(<GovernanceWorkbenchPage />);
+    await chooseFirst();
+    const trigger = screen.getByRole("button", { name: "预览这一组决定" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog");
+    expect(screen.getByRole("heading", { name: "确认要记录的决定" })).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(bridge.commit).not.toHaveBeenCalled();
+  });
+
   it("records a single intent on the same page without an execution API", async () => {
     render(<GovernanceWorkbenchPage />); await chooseFirst(); await preview();
     expect(screen.getByText(/不会删除、移动或修改源文件/)).toBeVisible();
