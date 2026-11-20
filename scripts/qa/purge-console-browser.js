@@ -19,7 +19,6 @@
     await status(panel, 'Dry Run 通过');
   };
 
-
   if (phase === 'prepare-source') {
     const deadline = Date.now() + 45_000;
     while (true) {
@@ -73,7 +72,6 @@
     await status(quarantined, '待审批');
     await approveAndDryRun(quarantined);
     await press(quarantined, '确认并永久删除');
-
     return;
   }
   if (phase !== 'verify-reload') throw new Error('Unknown browser acceptance phase');
@@ -96,5 +94,5 @@
     await button(page.locator('details'), '查询回执').click();
     await status(plan(title), state);
   }
-  return "NDG browser verification complete";
+  return 'NDG browser verification complete';
 })
