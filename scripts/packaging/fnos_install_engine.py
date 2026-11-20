@@ -374,10 +374,10 @@ def ensure_dir(path, mode, uid=None, gid=None):
                 'directory_owner_not_applied')
 
 
-def atomic_write(path, data, mode):
-    directory = os.path.dirname(path)
-    temporary = os.path.join(directory, '.' + os.path.basename(path) + '.new-' + secrets.token_hex(6))
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+def atomic_write_at(directory_fd, name, data, mode):
+    temporary = '.' + name + '.new-' + secrets.token_hex(6)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
     try:
         with os.fdopen(fd, 'wb', closefd=False) as handle:
             handle.write(data)
@@ -386,8 +386,17 @@ def atomic_write(path, data, mode):
         os.fsync(fd)
     finally:
         os.close(fd)
-    os.rename(temporary, path)
-    sync_dir(directory)
+    os.rename(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+    os.fsync(directory_fd)
+
+
+def atomic_write(path, data, mode):
+    directory, name = os.path.split(path)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        atomic_write_at(fd, name, data, mode)
+    finally:
+        os.close(fd)
 
 
 def tree_entries(root_fd, directory='.'):
@@ -1507,30 +1516,39 @@ def step_upgrade(ctx):
 
 def step_rollback(ctx):
     plan = ctx.plan
-    receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
-    verify_backup(ctx)
-    assert_mounts_stable(ctx)
-    record = ctx.inspect_container()
-    if (record.get('State', {}) or {}).get('Running'):
-        ctx.runner.must(['docker', 'container', 'stop', record['Id']], timeout=180,
-                        reason='container_stop_failed')
-    original = open(ctx.receipt_path('compose-before-upgrade.yaml'), 'rb').read()
-    failed = ctx.path('state') + '.failed-' + utcnow().replace(':', '').replace('-', '')
-    os.rename(ctx.path('state'), failed)
-    copy_tree(os.path.join(receipt['backup_dir'], 'state'), ctx.path('state'), 10001, 10001,
-              boundary=plan['boundary_root'])
-    restored = manifest(ctx.path('state'), 'restored', boundary=plan['boundary_root'])
-    expected = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in receipt['files']]
-    actual = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in restored]
-    require(actual == expected, 'restored_state_differs_from_backup')
-    atomic_write(ctx.path('compose.yaml'), original, 0o644)
+    with confined_directory(plan['boundary_root'], plan['root'], 'rollback_root') as root_fd:
+        trusted_ancestors(plan['root'], 'rollback_root')
+        state_fd = confined_open(root_fd, 'state', os.O_RDONLY | os.O_DIRECTORY, 'rollback_state_mount_rejected')
+        os.close(state_fd)
+        receipt = load_json(ctx.receipt_path('backup-receipt.json'), 'backup_receipt')
+        verify_backup(ctx)
+        assert_mounts_stable(ctx)
+        record = ctx.inspect_container()
+        if (record.get('State', {}) or {}).get('Running'):
+            ctx.runner.must(['docker', 'container', 'stop', record['Id']], timeout=180,
+                            reason='container_stop_failed')
+        original = open(ctx.receipt_path('compose-before-upgrade.yaml'), 'rb').read()
+        failed = 'state.failed-' + utcnow().replace(':', '').replace('-', '') + '-' + secrets.token_hex(4)
+        state_fd = confined_open(root_fd, 'state', os.O_RDONLY | os.O_DIRECTORY, 'rollback_state_mount_rejected')
+        try:
+            os.rename('state', failed, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+            os.fsync(root_fd)
+        finally:
+            os.close(state_fd)
+        copy_tree(os.path.join(receipt['backup_dir'], 'state'), ctx.path('state'), 10001, 10001,
+                  boundary=plan['boundary_root'])
+        restored = manifest(ctx.path('state'), 'restored', boundary=plan['boundary_root'])
+        expected = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in receipt['files']]
+        actual = [{'path': entry['path'], 'sha256': entry['sha256']} for entry in restored]
+        require(actual == expected, 'restored_state_differs_from_backup')
+        atomic_write_at(root_fd, 'compose.yaml', original, 0o644)
     ctx.compose('up', '-d', '--no-build', '--pull', 'never', '--no-deps', timeout=600)
     ctx.core_health(timeout=180)
     record = ctx.inspect_container()
     # Compare against the identity this installation actually recorded, not a
     # config-digest constant: the host may name the image by its index digest.
     require(record.get('Image') == ctx.recorded('image.json')['image_id'], 'rollback_image_mismatch')
-    return {'state_preserved_at': failed.replace(plan['root'] + '/', ''),
+    return {'state_preserved_at': failed,
             'container': record['Id'][:12]}
 
 

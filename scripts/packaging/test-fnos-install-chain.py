@@ -20,6 +20,7 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import fnos_install_engine as engine
 
@@ -144,7 +145,7 @@ def verify_nested_bind_refused(fixture):
     tree, other = fixture / 'mount-source', fixture / 'mount-outside'
     tree.mkdir(mode=0o700)
     other.mkdir(mode=0o700)
-    mountpoint = tree / 'nested'
+    mountpoint = tree / 'state'
     mountpoint.mkdir(mode=0o700)
     (other / 'synthetic.txt').write_text('must stay outside the tree')
     run(['mount', '--bind', str(other), str(mountpoint)], timeout=30)
@@ -161,7 +162,17 @@ def verify_nested_bind_refused(fixture):
                 assert str(error) == 'tree_mount_or_alias_rejected'
             else:
                 raise AssertionError('same-device bind mount traversal must refuse')
-        assert not (fixture / 'refused-copy' / 'nested' / 'synthetic.txt').exists()
+        before = sorted(p.name for p in other.iterdir())
+        for root, reason in ((mountpoint, 'rollback_root_nested_mount_or_alias_rejected'),
+                             (tree, 'rollback_state_mount_rejected')):
+            try:
+                engine.step_rollback(SimpleNamespace(plan={'boundary_root': str(fixture), 'root': str(root)}))
+            except engine.Refused as error:
+                assert str(error) == reason
+            else:
+                raise AssertionError('rollback must refuse a mounted installation root or state')
+        assert sorted(p.name for p in other.iterdir()) == before
+        assert not (fixture / 'refused-copy' / 'state' / 'synthetic.txt').exists()
     finally:
         run(['umount', str(mountpoint)], timeout=30)
 
