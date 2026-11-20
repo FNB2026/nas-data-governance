@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import worker from "../dist/worker.mjs";
 const visit = (url, method = "GET") => worker.fetch(new Request(url, {method}));
+const digest = value => createHash("sha256").update(value).digest("hex").slice(0, 10);
 test("canonical homepage keeps releases and security boundaries", async () => {
   const response = await visit("https://ndg.fnbapp.net/");
   const html = await response.text();
@@ -34,6 +36,24 @@ test("alias redirects with path and query", async () => {
   const redirect = await visit("https://ngd.fnbapp.net/privacy?q=1");
   assert.equal(redirect.status, 308);
   assert.equal(redirect.headers.get("Location"), "https://ndg.fnbapp.net/privacy?q=1");
+});
+test("static assets carry content hashes and only hashed URLs are immutable", async () => {
+  const html = await (await visit("https://ndg.fnbapp.net/")).text();
+  const cssHref = html.match(/href="\/style\.css\?v=([0-9a-f]{10})"/);
+  const iconHref = html.match(/href="\/favicon\.svg\?v=([0-9a-f]{10})"/);
+  assert.ok(cssHref, "homepage must reference a hashed stylesheet");
+  assert.ok(iconHref, "homepage must reference a hashed favicon");
+  const css = await (await visit("https://ndg.fnbapp.net/style.css")).text();
+  const icon = await (await visit("https://ndg.fnbapp.net/favicon.svg")).text();
+  assert.equal(cssHref[1], digest(css));
+  assert.equal(iconHref[1], digest(icon));
+  const hashed = await visit("https://ndg.fnbapp.net/style.css?v=" + cssHref[1]);
+  assert.equal(hashed.status, 200);
+  assert.equal(hashed.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  const bare = await visit("https://ndg.fnbapp.net/style.css");
+  assert.equal(bare.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
+  const privacy = await (await visit("https://ndg.fnbapp.net/privacy")).text();
+  assert.match(privacy, /href="\/style\.css\?v=[0-9a-f]{10}"/);
 });
 test("health, headers, methods, and missing resources", async () => {
   for (const path of ["/healthz", "/robots.txt", "/sitemap.xml", "/favicon.svg"]) {
