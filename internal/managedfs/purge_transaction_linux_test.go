@@ -286,3 +286,28 @@ func TestRootedPurgeRefusesRealSameDeviceBind(t *testing.T) {
 		t.Fatal("outside sentinel changed")
 	}
 }
+
+func TestRootedPurgeRejectsSharedWritableNamespace(t *testing.T) {
+	for _, relative := range []string{".", "folder", "folder/remove", "folder/keeper"} {
+		t.Run(relative, func(t *testing.T) {
+			ctx, plan, stage := purgeFixture(t)
+			changed := filepath.Join(plan.RootPath, relative)
+			original, err := os.Stat(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(changed, original.Mode().Perm()|0020); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ExecutePurgeTransaction(ctx, plan); !errors.Is(err, ErrRejected) {
+				t.Fatalf("expected shared-writable component to be rejected, got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(stage, "pending")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("expected rejection before journal creation, got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(plan.RootPath, plan.Target.Relative)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

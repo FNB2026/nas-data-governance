@@ -72,6 +72,7 @@ var allowedKeys = map[string][]string{
 	"QUARANTINE_PURGE_APPROVE": {"plan_id", "digest"},
 	"QUARANTINE_PURGE_DRY_RUN": {"plan_id", "digest"},
 	"QUARANTINE_PURGE_EXECUTE": {"plan_id", "digest", "confirmation"},
+	"QUARANTINE_PURGE_CANCEL":  {"plan_id", "digest"},
 	"QUARANTINE_PURGE_RECOVER": {"plan_id", "digest"},
 	"QUARANTINE_PURGE_RECEIPT": {"plan_id", "digest"},
 	"PING":                     {},

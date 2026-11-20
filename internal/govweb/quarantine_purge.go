@@ -64,7 +64,7 @@ func (s *Server) handleQuarantinePurge(w http.ResponseWriter, r *http.Request) {
 func validQuarantineOp(op string) bool {
 	switch op {
 	case "QUARANTINE_PURGE_PLAN", "QUARANTINE_PURGE_APPROVE", "QUARANTINE_PURGE_DRY_RUN",
-		"QUARANTINE_PURGE_EXECUTE", "QUARANTINE_PURGE_RECOVER", "QUARANTINE_PURGE_RECEIPT":
+		"QUARANTINE_PURGE_EXECUTE", "QUARANTINE_PURGE_RECOVER", "QUARANTINE_PURGE_RECEIPT", "QUARANTINE_PURGE_CANCEL":
 		return true
 	}
 	return false

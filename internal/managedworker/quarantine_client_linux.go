@@ -28,7 +28,7 @@ func (c QuarantineClient) Call(ctx context.Context, op, item, plan, digest, conf
 	case "QUARANTINE_PURGE_EXECUTE":
 		message["confirmation"] = confirmation
 		fallthrough
-	case "QUARANTINE_PURGE_APPROVE", "QUARANTINE_PURGE_DRY_RUN", "QUARANTINE_PURGE_RECOVER", "QUARANTINE_PURGE_RECEIPT":
+	case "QUARANTINE_PURGE_APPROVE", "QUARANTINE_PURGE_DRY_RUN", "QUARANTINE_PURGE_RECOVER", "QUARANTINE_PURGE_RECEIPT", "QUARANTINE_PURGE_CANCEL":
 		message["plan_id"], message["digest"] = plan, digest
 	default:
 		return empty, "", ErrProtocol

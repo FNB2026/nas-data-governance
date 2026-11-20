@@ -33,7 +33,7 @@ export NDG_CANDIDATE_STATE="$fixture/state" NDG_CANDIDATE_RUN="$fixture/run"
 export NDG_CANDIDATE_WEB_CONFIG="$fixture/config" NDG_CANDIDATE_QUARANTINE="$fixture/quarantine"
 : "${NDG_QUARANTINE_IMAGE:?build candidate image first}"
 "${compose[@]}" up -d --no-build --pull never >/dev/null
-python3 -B - "$fixture" <<'PY'
+python3 -B - "$fixture" "${compose[@]}" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -78,15 +78,30 @@ def act(suffix, confirmation=None, expected=200):
     if confirmation:
         data['confirmation'] = confirmation
     return request(data, expected)
+assert act('CANCEL')['state'] == 'CANCELLED'
+act('APPROVE', expected=409)
+plan = request({'op': 'QUARANTINE_PURGE_PLAN', 'item_id': item_id})
 act('EXECUTE', '永久清理 ' + plan['id'], 409)
 assert act('APPROVE')['state'] == 'APPROVED'
 assert act('DRY_RUN')['state'] == 'DRY_RUN'
 assert act('EXECUTE', '永久清理 ' + plan['id'])['state'] == 'PURGED'
 assert act('RECEIPT')['state'] == 'PURGED'
+subprocess.run(sys.argv[2:] + ['restart', 'worker'], check=True, capture_output=True)
+for _ in range(30):
+    try:
+        assert act('RECEIPT')['state'] == 'PURGED'
+        break
+    except AssertionError as err:
+        # Only allow the Web gateway's temporary unavailable response.
+        if not err.args or err.args[0] != ('QUARANTINE_PURGE_RECEIPT', 503):
+            raise
+        time.sleep(1)
+else:
+    raise RuntimeError('persisted receipt unavailable after Worker restart')
 assert subprocess.run(['sudo', '-n', 'test', '-e', str(base / 'quarantine' / 'synthetic.txt')]).returncode == 1
 assert hashlib.sha256((base / 'sentinel').read_bytes()).hexdigest() == (base / 'sentinel.sha').read_text().split()[0]
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'plan_and_dry_run_required': True,
-                  'tls_worker_receipt_verified': True, 'outside_sentinel_unchanged': True}))
+                  'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"
 worker_id="$("${compose[@]}" ps -q worker)"

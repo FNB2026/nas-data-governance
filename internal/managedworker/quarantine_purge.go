@@ -204,6 +204,23 @@ func (s *QuarantinePurge) Execute(ctx context.Context, id, digest string, confir
 	return s.advance(ctx, id, digest, "DRY_RUN", "EXECUTING", confirmed)
 }
 
+func (s *QuarantinePurge) Cancel(ctx context.Context, id, digest string) (QuarantinePurgeResult, error) {
+	if !opaqueID(id) || !opaqueID(digest) {
+		return QuarantinePurgeResult{}, ErrAuthorization
+	}
+	p, err := s.project.ReadDualPurgePlan(ctx, id)
+	if err != nil || p.Operation != store.QuarantinePurge ||
+		p.Digest != digest || evidenceDigest([]byte(p.EvidenceJSON)) != digest {
+		return QuarantinePurgeResult{}, ErrAuthorization
+	}
+	now := time.Now().UTC()
+	if err := s.project.AdvanceQuarantinePurge(ctx, p, domain.QuarantineItem{ID: p.SubjectID}, "CANCELLED", now); err != nil {
+		return QuarantinePurgeResult{}, ErrAuthorization
+	}
+	p.State, p.UpdatedAt = "CANCELLED", now
+	return quarantineResult(p), nil
+}
+
 func (s *QuarantinePurge) Recover(ctx context.Context, id, digest string) (QuarantinePurgeResult, error) {
 	return s.advance(ctx, id, digest, "EXECUTING", "RECOVER", false)
 }
@@ -247,6 +264,8 @@ func (s *QuarantinePurge) dispatch(ctx context.Context, req Request) (Quarantine
 			return QuarantinePurgeResult{}, ErrAuthorization
 		}
 		return s.Execute(ctx, id, digest, true)
+	case "QUARANTINE_PURGE_CANCEL":
+		return s.Cancel(ctx, id, digest)
 	case "QUARANTINE_PURGE_RECOVER":
 		return s.Recover(ctx, id, digest)
 	case "QUARANTINE_PURGE_RECEIPT":

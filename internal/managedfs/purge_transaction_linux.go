@@ -84,7 +84,8 @@ func purgeFile(ctx context.Context, fd int, relative string) (PurgeTarget, error
 	}
 	defer content.Close()
 	before, err := purgeStat(int(content.Fd()))
-	if err != nil || !samePurgeFile(before, st) {
+	if err != nil || !samePurgeFile(before, st) || before.Uid != uint32(os.Geteuid()) ||
+		before.Gid != uint32(os.Getegid()) || before.Mode&0022 != 0 || !aclAbsent(int(content.Fd())) {
 		return PurgeTarget{}, ErrRejected
 	}
 	h := sha256.New()
@@ -116,11 +117,42 @@ func purgeFile(ctx context.Context, fd int, relative string) (PurgeTarget, error
 	}, nil
 }
 
+// The exclusive Worker account is the only non-administrator that can
+// mutate the namespace. A descriptor alone does not prevent a writable
+// parent directory from being renamed between validation and mutation.
+func openPurgeParent(root int, relative string) (int, error) {
+	current, err := rooted(root, ".", unix.O_RDONLY|unix.O_DIRECTORY)
+	if err != nil {
+		return -1, err
+	}
+	if _, err := directory(current, true); err != nil {
+		unix.Close(current)
+		return -1, err
+	}
+	parent := path.Dir(relative)
+	if parent == "." {
+		return current, nil
+	}
+	for part := range strings.SplitSeq(parent, "/") {
+		next, err := rooted(current, part, unix.O_RDONLY|unix.O_DIRECTORY)
+		unix.Close(current)
+		if err != nil {
+			return -1, err
+		}
+		if _, err := directory(next, true); err != nil {
+			unix.Close(next)
+			return -1, err
+		}
+		current = next
+	}
+	return current, nil
+}
+
 func observeUnderRoot(ctx context.Context, fd int, relative string) (PurgeTarget, error) {
 	if !purgeRelative(relative) {
 		return PurgeTarget{}, ErrRejected
 	}
-	parent, err := rooted(fd, path.Dir(relative), unix.O_RDONLY|unix.O_DIRECTORY)
+	parent, err := openPurgeParent(fd, relative)
 	if err != nil {
 		return PurgeTarget{}, err
 	}
@@ -254,9 +286,7 @@ func openPurgeDirectories(plan PurgeTransaction) (purgeDirectorySet, error) {
 	if err != nil {
 		return d, err
 	}
-	if _, err := directory(d.root, false); err != nil {
-		return d, err
-	}
+
 	d.stage, err = rooted(d.root, purgeStage, unix.O_RDONLY|unix.O_DIRECTORY)
 	if err != nil {
 		return d, err
@@ -267,7 +297,7 @@ func openPurgeDirectories(plan PurgeTransaction) (purgeDirectorySet, error) {
 	if err := unix.Flock(d.stage, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return d, ErrBusy
 	}
-	d.parent, err = rooted(d.root, path.Dir(plan.Target.Relative), unix.O_RDONLY|unix.O_DIRECTORY)
+	d.parent, err = openPurgeParent(d.root, plan.Target.Relative)
 	if err != nil {
 		return d, err
 	}
