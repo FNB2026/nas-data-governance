@@ -14,6 +14,11 @@ const (
 	emptySchemaLayout        = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	legacySchema11Layout     = "e177d2a1ec16d33cd96eed49a70082c8b25a10c5b6b72ca7e4c7e5138f811af5"
 	governanceSchema12Layout = "2cdb8fa859ae5f680af9cb6ed2455422946e317381ab93a4118077d3e34ccf84"
+	// authorizationAudit13Layout adds the authorization_audit table and its
+	// two indexes (migration 013, R4 Task C). No schema_migrations row is
+	// written for it — the marker tripwire stays at 12, and the layout
+	// fingerprint itself distinguishes the increment.
+	authorizationAudit13Layout = "552e600f555aa7ffa47ef5ae52417109ea8071656e6b13ff3578b6bb3dc984c2"
 )
 
 // Fingerprint only the exact stored layout. It is not a provenance certificate

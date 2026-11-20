@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/FNB2026/nas-data-governance/internal/authz"
 	"github.com/FNB2026/nas-data-governance/internal/domain"
 	"github.com/FNB2026/nas-data-governance/internal/executor"
 	"github.com/FNB2026/nas-data-governance/internal/purge"
@@ -24,12 +25,33 @@ import (
 //   - Print to stdout/stderr (CLI's job)
 type QuarantineService struct {
 	store *store.SQLiteStore
+	// gate is the single app-side authorization assembly (A7). It is the
+	// only path through which execution methods consult the durable
+	// business-authorization contract; no method may construct its own
+	// verifier/facts pair.
+	gate *AuthorizationGate
 }
 
 // NewQuarantineService creates a quarantine service. The store is required
-// for all operations.
+// for all operations. The service assembles its own AuthorizationGate bound
+// to this store; use NewQuarantineServiceWithGate to share one gate across
+// services (single gate lifecycle).
 func NewQuarantineService(st *store.SQLiteStore) *QuarantineService {
-	return &QuarantineService{store: st}
+	return &QuarantineService{store: st, gate: NewAuthorizationGate(st)}
+}
+
+// NewQuarantineServiceWithGate creates a quarantine service that shares a
+// caller-owned AuthorizationGate. The gate must be bound to the same store;
+// a gate from another database would fail its own scope checks, and
+// mis-binding it here is treated as a construction error.
+func NewQuarantineServiceWithGate(st *store.SQLiteStore, gate *AuthorizationGate) (*QuarantineService, error) {
+	if gate == nil {
+		return nil, fmt.Errorf("app: nil authorization gate")
+	}
+	if gate.store != st {
+		return nil, fmt.Errorf("app: authorization gate is bound to a different store")
+	}
+	return &QuarantineService{store: st, gate: gate}, nil
 }
 
 // ListItems returns quarantine items, optionally filtered by lifecycle status.
@@ -95,18 +117,34 @@ type RestoreExecuteResult struct {
 // mode, the executor performs stale checks, isolation, verification, audit,
 // and rollback per AGENTS.md rule 7.
 //
-// The digest is verified again at execution time to prevent replay attacks.
+// Real mode runs the chained authorization contract (A7): the business
+// authorization is verified before the lock is taken, the execution lock is
+// reserved through a real scope, the recovery gate is checked, and the
+// authorization is re-verified under that scope — ownership is proven by
+// the same release handle the lock was acquired with, never claimed. The
+// digest is verified again at execution time to prevent replay attacks.
 func (s *QuarantineService) ExecuteRestore(ctx context.Context, in RestoreExecuteInput) (*RestoreExecuteResult, error) {
 	if in.PlanID == "" || in.Digest == "" || in.QuarantineRoot == "" || len(in.SourceRoots) == 0 {
 		return nil, fmt.Errorf("app: ExecuteRestore: plan-id, digest, quarantine, and source-root are required")
 	}
 	if !in.DryRun {
-		unlock, err := s.store.AcquireExecutionLock()
+		// Phase 1 — pre-lock business authorization. The typed refusal
+		// carries the verifier's stable reason for CLI/UI surfaces.
+		if _, err := s.gate.AuthorizeRestore(ctx, in.PlanID, in.Digest); err != nil {
+			return nil, err
+		}
+		// Phase 2 — single-writer reservation and recovery gate.
+		scope, err := authz.AcquireExecutionLockScope(s.store)
 		if err != nil {
 			return nil, err
 		}
-		defer unlock()
+		defer scope.Release()
 		if err := requireNoRecovery(ctx, s.store); err != nil {
+			return nil, err
+		}
+		// Phase 3 — re-verification under proven ownership. State that was
+		// true before the lock may have changed while waiting for it.
+		if _, err := s.gate.AuthorizeRestoreWithScope(ctx, in.PlanID, in.Digest, scope); err != nil {
 			return nil, err
 		}
 	}
