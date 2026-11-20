@@ -149,7 +149,7 @@ func updateSourcePurge(ctx context.Context, tx *sql.Tx, plan DualPurgePlan, next
 	if count, err := result.RowsAffected(); err != nil || count != 1 {
 		return ErrGovernanceRejected
 	}
-	return nil
+	return recordDualPurgeEvent(ctx, tx, plan, next, now)
 }
 
 func (s *SQLiteStore) FinishSourcePurge(ctx context.Context, plan DualPurgePlan, proof SourcePurgeFacts, next string, now time.Time) error {

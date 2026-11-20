@@ -22,11 +22,22 @@ type DualPurgePlan struct {
 }
 
 func (s *SQLiteStore) InsertDualPurgePlan(ctx context.Context, plan DualPurgePlan) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO dual_purge_plans
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	_, err = tx.ExecContext(ctx, `INSERT INTO dual_purge_plans
 		(id, operation, subject_id, digest, evidence_json, state, expires_at, updated_at)
 		VALUES(?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
 		plan.ID, plan.Operation, plan.SubjectID, plan.Digest, plan.EvidenceJSON, formatTime(plan.ExpiresAt), formatTime(plan.UpdatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	if err := recordDualPurgeEvent(ctx, tx, plan, "DRAFT", plan.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) ReadDualPurgePlan(ctx context.Context, id string) (DualPurgePlan, error) {
@@ -106,6 +117,9 @@ func (s *SQLiteStore) AdvanceQuarantinePurge(ctx context.Context, p DualPurgePla
 	if n, err := result.RowsAffected(); err != nil || n != 1 {
 		return ErrGovernanceRejected
 	}
+	if err := recordDualPurgeEvent(ctx, tx, p, next, now); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -135,5 +149,16 @@ func (s *SQLiteStore) FinishQuarantinePurge(ctx context.Context, p DualPurgePlan
 			return err
 		}
 	}
+	if err := recordDualPurgeEvent(ctx, tx, p, resultState, now); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// Only opaque identifiers and a fixed transition code enter the audit stream.
+func recordDualPurgeEvent(ctx context.Context, tx *sql.Tx, plan DualPurgePlan, state string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO authorization_audit
+		(created_at,operation,plan_id,item_id,eligible,detail,ownership_verified)
+		VALUES(?,?,?,?,1,?,1)`, formatTime(at), plan.Operation, plan.ID, plan.SubjectID, state)
+	return err
 }

@@ -208,6 +208,11 @@ func (s *QuarantinePurge) Cancel(ctx context.Context, id, digest string) (Quaran
 	if !opaqueID(id) || !opaqueID(digest) {
 		return QuarantinePurgeResult{}, ErrAuthorization
 	}
+	release, err := s.project.AcquireExecutionLock()
+	if err != nil {
+		return QuarantinePurgeResult{}, ErrBusy
+	}
+	defer release()
 	p, err := s.project.ReadDualPurgePlan(ctx, id)
 	if err != nil || p.Operation != store.QuarantinePurge ||
 		p.Digest != digest || evidenceDigest([]byte(p.EvidenceJSON)) != digest {

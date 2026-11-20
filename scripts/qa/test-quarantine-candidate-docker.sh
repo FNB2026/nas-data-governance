@@ -145,9 +145,21 @@ for name in ('one', 'two'):
     keeper = subprocess.check_output(['sudo', '-n', 'cat', str(base / 'source' / (name + '-keeper.txt'))])
     assert keeper == ('synthetic source group ' + name + '\n').encode()
 assert hashlib.sha256((base / 'sentinel').read_bytes()).hexdigest() == (base / 'sentinel.sha').read_text().split()[0]
+def audit_states(purge_plan):
+    # Read the Worker-owned synthetic SQLite database as root on this
+    # disposable runner. Inspect only stable codes and opaque plan IDs.
+    query = ("SELECT detail FROM authorization_audit WHERE plan_id=? ORDER BY id")
+    python = ("import sqlite3,sys; db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); "
+              "print(','.join(r[0] for r in db.execute(sys.argv[2],(sys.argv[3],))))")
+    return subprocess.check_output(['sudo','-n','python3','-c',python,str(base/'state'/'project.db'),
+                                    query,purge_plan['id']], text=True).strip()
+expected = 'DRAFT,APPROVED,DRY_RUN,EXECUTING,PURGED'
+for p in (plan, p1, p2):
+    assert audit_states(p) == expected
+assert audit_states(p3) == 'DRAFT,APPROVED,DRY_RUN'
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
                   'verified_keepers': 2, 'independent_approval_and_confirmation': True,
-                  'stale_selected_file_preserved': True, 'plan_and_dry_run_required': True,
+                  'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'plan_and_dry_run_required': True,
                   'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"
