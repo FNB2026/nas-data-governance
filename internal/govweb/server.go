@@ -85,8 +85,9 @@ type Config struct {
 	// user, and hold exactly one bearer token line.
 	CredentialPath string
 	// RequireTLS forbids plaintext once the surface leaves loopback.
-	RequireTLS bool
-	Backing    Backing
+	RequireTLS      bool
+	Backing         Backing
+	QuarantinePurge QuarantinePurgeClient
 }
 
 // ErrBound is any startup refusal about the deployment boundary itself. Server
@@ -187,11 +188,12 @@ func (c Config) Validate() error {
 
 // Server serves the private governance surface.
 type Server struct {
-	token        string
-	backing      Backing
-	mu           sync.Mutex
-	failed       map[string]int
-	failureReset time.Time
+	token           string
+	backing         Backing
+	quarantinePurge QuarantinePurgeClient
+	mu              sync.Mutex
+	failed          map[string]int
+	failureReset    time.Time
 }
 
 const (
@@ -213,7 +215,7 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{token: token, backing: cfg.Backing, failed: map[string]int{}}, nil
+	return &Server{token: token, backing: cfg.Backing, quarantinePurge: cfg.QuarantinePurge, failed: map[string]int{}}, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
@@ -266,6 +268,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/gov/pending", s.handlePending)
 	mux.HandleFunc("/gov/journal", s.handleJournal)
 	mux.HandleFunc("/gov/intent", s.handleIntent)
+	mux.HandleFunc("/gov/quarantine-purge", s.handleQuarantinePurge)
 	return mux
 }
 

@@ -1,18 +1,24 @@
 //go:build linux
 
-package managedworker
+package managedworker_test
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/govweb"
+	"github.com/FNB2026/nas-data-governance/internal/managedworker"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -65,29 +71,103 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatal("fixture quarantine registration failed", err)
 	}
-	svc, err := NewQuarantinePurge(st, root)
+	svc, err := managedworker.NewQuarantinePurge(st, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := svc.Plan(ctx, items[0].ID)
-	if err != nil || p.State != "DRAFT" {
-		t.Fatal("plan failed", err)
+	runDir := filepath.Join(base, "run")
+	stateDir := filepath.Join(base, "state")
+	for _, dir := range []string{runDir, stateDir} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := svc.Execute(ctx, p.ID, p.Digest, true); !errors.Is(err, ErrAuthorization) {
-		t.Fatal("execution without approval admitted", err)
+	subject := managedworker.Subject{UID: uint32(os.Geteuid()), GID: uint32(os.Getegid())}
+	listener, err := managedworker.Listen(managedworker.Layout{Run: runDir, State: stateDir}, subject, []managedworker.Subject{subject})
+	if err != nil {
+		t.Fatal("IPC listener", err)
 	}
-	if _, err := svc.Approve(ctx, p.ID, p.Digest); err != nil {
-		t.Fatal("approve failed", err)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		for {
+			c, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.ServeQuarantinePurge(ctx, svc)
+		}
+	}()
+	defer func() {
+		_ = listener.Close()
+		<-workerDone
+	}()
+	token, err := govweb.RandomToken()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := svc.DryRun(ctx, p.ID, p.Digest); err != nil {
-		t.Fatal("dry run failed", err)
+	credential := filepath.Join(base, "test-credential")
+	if err := os.WriteFile(credential, []byte(token+"\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := svc.Execute(ctx, p.ID, p.Digest, false); !errors.Is(err, ErrAuthorization) {
-		t.Fatal("missing confirmation admitted", err)
+	web, err := govweb.New(govweb.Config{
+		Addr: "127.0.0.1:8443", CredentialPath: credential, RequireTLS: true, Backing: govweb.ClosedBacking{},
+		QuarantinePurge: managedworker.QuarantineClient{RunDir: runDir, Worker: subject},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	result, err := svc.Execute(ctx, p.ID, p.Digest, true)
-	if err != nil || result.State != "PURGED" {
-		t.Fatal("commit failed", err)
+	server := httptest.NewTLSServer(web.Handler())
+	defer server.Close()
+	post := func(payload map[string]string, expected int) managedworker.QuarantinePurgeResult {
+		t.Helper()
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/gov/quarantine-purge", strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != expected {
+			t.Fatalf("%s status %d, want %d", payload["op"], resp.StatusCode, expected)
+		}
+		var result managedworker.QuarantinePurgeResult
+		if expected == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return result
+	}
+	p := post(map[string]string{"op": "QUARANTINE_PURGE_PLAN", "item_id": items[0].ID}, http.StatusOK)
+	if p.State != "DRAFT" {
+		t.Fatal("plan did not start in draft")
+	}
+	step := func(op, confirmation string, expected int) managedworker.QuarantinePurgeResult {
+		t.Helper()
+		fields := map[string]string{"op": op, "plan_id": p.ID, "digest": p.Digest}
+		if confirmation != "" {
+			fields["confirmation"] = confirmation
+		}
+		return post(fields, expected)
+	}
+	step("QUARANTINE_PURGE_EXECUTE", "永久清理 "+p.ID, http.StatusConflict)
+	step("QUARANTINE_PURGE_APPROVE", "", http.StatusOK)
+	step("QUARANTINE_PURGE_DRY_RUN", "", http.StatusOK)
+	step("QUARANTINE_PURGE_EXECUTE", "", http.StatusConflict)
+	result := step("QUARANTINE_PURGE_EXECUTE", "永久清理 "+p.ID, http.StatusOK)
+	if result.State != "PURGED" {
+		t.Fatal("commit did not produce a receipt")
+	}
+	if receipt := step("QUARANTINE_PURGE_RECEIPT", "", http.StatusOK); receipt.State != "PURGED" {
+		t.Fatal("receipt could not be read through the Worker")
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("selected item survived")

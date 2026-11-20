@@ -30,7 +30,9 @@ jobs:
         run: test "$(uname -m)" = "${{ matrix.machine }}"
       - run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store ./internal/managedfs ./internal/managedworker
       - name: Record rooted purge results on synthetic files
-        run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
+        run: |
+          NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
+          go test -race -count=1 -v ./internal/managedworker -run '^TestQuarantinePurgeDurableWorkerFlow$'
       - name: Build private reader kernel probe without product integration
         shell: bash
         run: |
