@@ -169,6 +169,9 @@ func (s *QuarantinePurge) advance(ctx context.Context, id, digest, from, to stri
 		p.State, p.UpdatedAt = receipt.State, time.Now().UTC()
 		return quarantineResult(p), nil
 	}
+	// Filesystem verification may itself be lengthy. The approval window
+	// applies to the durable execution claim, using a fresh service clock.
+	now = time.Now().UTC()
 	if err := s.project.AdvanceQuarantinePurge(ctx, p, item, to, now); err != nil {
 		return empty, ErrAuthorization
 	}

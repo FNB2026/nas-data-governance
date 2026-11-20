@@ -166,7 +166,6 @@ func (s *SourcePurge) Advance(ctx context.Context, id, digest, op, confirmation 
 	if op == "RECEIPT" {
 		return sourcePurgeResult(p, proof), nil
 	}
-	now := time.Now().UTC()
 	txn := managedfs.PurgeTransaction{ID: id, ApprovalSHA256: digest, RootPath: s.root, Target: proof.Target, Keeper: &proof.Keeper}
 	if op == "RECOVER" {
 		if p.State != "EXECUTING" {
@@ -204,6 +203,8 @@ func (s *SourcePurge) Advance(ctx context.Context, id, digest, op, confirmation 
 			}
 		}
 	}
+	// Do not use a timestamp captured before a potentially lengthy Dry Run.
+	now := time.Now().UTC()
 	if err := s.project.AdvanceSourcePurge(ctx, p, proof.Facts, next, now); err != nil {
 		return empty, ErrAuthorization
 	}
