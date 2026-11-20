@@ -33,6 +33,13 @@ jobs:
         run: |
           NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
           go test -race -count=1 -v ./internal/managedworker -run '^TestQuarantinePurgeDurableWorkerFlow$'
+      - name: Build and run isolated quarantine Docker candidate
+        if: matrix.architecture == 'amd64'
+        shell: bash
+        run: |
+          export NDG_QUARANTINE_IMAGE=ndg-quarantine-integration:${GITHUB_SHA}
+          docker build --build-arg SOURCE_SHA="${GITHUB_SHA}" -f packaging/docker/Dockerfile.quarantine-candidate -t "$NDG_QUARANTINE_IMAGE" .
+          bash scripts/qa/test-quarantine-candidate-docker.sh
       - name: Build private reader kernel probe without product integration
         shell: bash
         run: |

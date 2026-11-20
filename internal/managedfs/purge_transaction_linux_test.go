@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func purgeFixture(t *testing.T) (context.Context, PurgeTransaction, string) {
@@ -198,5 +201,88 @@ func TestRootedPurgeConcurrentExecutionRefused(t *testing.T) {
 	executionErr := <-finished
 	if !errors.Is(concurrentErr, ErrBusy) || executionErr != nil {
 		t.Fatalf("unexpected concurrent outcome: %v, %v", concurrentErr, executionErr)
+	}
+}
+
+func TestRootedPurgeRejectsReplacedParentAndRoot(t *testing.T) {
+	for _, replace := range []string{"parent", "root"} {
+		t.Run(replace, func(t *testing.T) {
+			ctx, plan, _ := purgeFixture(t)
+			p := plan.RootPath
+			if replace == "parent" {
+				p = filepath.Join(p, "folder")
+			}
+			if err := os.Rename(p, p+"-original"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(p, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if replace == "root" {
+				for _, name := range []string{purgeStage, "folder"} {
+					if err := os.Mkdir(filepath.Join(p, name), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			substitution := filepath.Join(plan.RootPath, plan.Target.Relative)
+			if err := os.WriteFile(substitution, []byte("synthetic duplicate"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ExecutePurgeTransaction(ctx, plan); !errors.Is(err, ErrRejected) {
+				t.Fatal("replacement with identical bytes admitted", err)
+			}
+			if _, err := os.Lstat(substitution); err != nil {
+				t.Fatal("replacement was modified", err)
+			}
+		})
+	}
+}
+
+func TestRootedPurgeRefusesRealSameDeviceBind(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" {
+		t.Skip("privileged synthetic mount test runs only on a disposable GitHub runner")
+	}
+	dir, err := os.MkdirTemp("", "ndg-purge-bind-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, outside := filepath.Join(dir, "root"), filepath.Join(dir, "outside")
+	mount := filepath.Join(root, "nested")
+	for _, p := range []string{root, mount, outside} {
+		if err := os.Mkdir(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sentinel := filepath.Join(outside, "synthetic")
+	if err := os.WriteFile(sentinel, []byte("outside sentinel"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	attached := false
+	defer func() {
+		if attached {
+			if err := exec.Command("sudo", "-n", "umount", "--", mount).Run(); err != nil {
+				t.Error("synthetic bind failed to detach; retaining fixture", err)
+				return
+			}
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			t.Error("synthetic fixture cleanup failed", err)
+		}
+	}()
+	if err := exec.Command("sudo", "-n", "mount", "--bind", "--", outside, mount).Run(); err != nil {
+		t.Fatal("synthetic bind failed", err)
+	}
+	attached = true
+	var outer, inner unix.Stat_t
+	if unix.Stat(root, &outer) != nil || unix.Stat(mount, &inner) != nil || outer.Dev != inner.Dev {
+		t.Fatal("fixture did not establish same-device bind")
+	}
+	if _, err := ObservePurgeTarget(context.Background(), root, "nested/synthetic"); !errors.Is(err, ErrRejected) {
+		t.Fatal("nested mount admitted", err)
+	}
+	data, err := os.ReadFile(sentinel)
+	if err != nil || string(data) != "outside sentinel" {
+		t.Fatal("outside sentinel changed")
 	}
 }

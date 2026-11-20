@@ -1,0 +1,56 @@
+# Integration candidate for synthetic projects. Use an isolated project name.
+services:
+  worker:
+    image: ${NDG_QUARANTINE_IMAGE:?set a verified local image reference}
+    pull_policy: never
+    command: ["-role", "worker"]
+    user: "10002:10002"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    network_mode: none
+    volumes:
+      - type: bind
+        source: ${NDG_CANDIDATE_STATE:?provide a private Worker state directory}
+        target: /state
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_CANDIDATE_QUARANTINE:?provide an isolated quarantine directory}
+        target: /quarantine
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_CANDIDATE_RUN:?provide an exclusive socket directory}
+        target: /run/ndg-worker
+        bind: {create_host_path: false}
+
+  web:
+    image: ${NDG_QUARANTINE_IMAGE:?set a verified local image reference}
+    pull_policy: never
+    command: ["-role", "web"]
+    user: "10001:10001"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    volumes:
+      - type: bind
+        source: ${NDG_CANDIDATE_RUN:?provide an exclusive socket directory}
+        target: /run/ndg-worker
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NDG_CANDIDATE_WEB_CONFIG:?provide private Web credentials and TLS materials}
+        target: /config
+        read_only: true
+        bind: {create_host_path: false}
+    ports:
+      - "127.0.0.1:18443:8443"
+    networks:
+      web:
+        ipv4_address: 10.254.140.2
+
+networks:
+  web:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.140.0/29
