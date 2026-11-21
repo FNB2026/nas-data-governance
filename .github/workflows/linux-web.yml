@@ -32,7 +32,7 @@ jobs:
       - name: Record rooted purge results on synthetic files
         run: |
           NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
-          go test -race -count=1 -v ./internal/managedworker -run '^TestQuarantinePurge(DurableWorkerFlow|PersistsAcrossDatabaseProcessKill)$'
+          go test -race -count=1 -v ./internal/managedworker -run '^Test(QuarantinePurgeDurableWorkerFlow|(Source|Quarantine)PurgePersistsAcrossDatabaseProcessKill)$'
       - name: Build and run isolated dual-purge Docker candidate
         shell: bash
         run: |

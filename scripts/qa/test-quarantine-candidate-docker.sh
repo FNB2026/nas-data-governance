@@ -149,6 +149,8 @@ source_one, keeper_one = file_id('one', 'remove'), file_id('one', 'keeper')
 source_two, keeper_two = file_id('two', 'remove'), file_id('two', 'keeper')
 source_stale, keeper_stale = file_id('stale', 'remove'), file_id('stale', 'keeper')
 source_plan(source_one, source_one, 409)
+unknown_plan = '0' * 64
+source_request('EXECUTE', 409, plan_id=unknown_plan, digest='e' * 64, confirmation='synthetic refused input')
 p1 = source_plan(source_one, keeper_one)
 p2 = source_plan(source_two, keeper_two)
 p3 = source_plan(source_stale, keeper_stale)
@@ -189,18 +191,24 @@ assert readonly_query("SELECT file_status FROM file_instances WHERE id=?", keepe
 def audit_states(purge_plan):
     # Read the Worker-owned synthetic SQLite database as root on this
     # disposable runner. Inspect only stable codes and opaque plan IDs.
-    query = ("SELECT detail FROM authorization_audit WHERE plan_id=? ORDER BY id")
+    query = ("SELECT detail FROM authorization_audit WHERE plan_id=? AND eligible=1 ORDER BY id")
     return ','.join(row[0] for row in readonly_query(query, purge_plan['id']))
 expected = 'DRAFT,APPROVED,DRY_RUN,EXECUTING,PURGED'
 for p in (plan, p1, p2):
     assert audit_states(p) == expected
 assert audit_states(p3) == 'DRAFT,APPROVED,DRY_RUN'
+refused = "SELECT operation,reason,item_id,detail FROM authorization_audit WHERE plan_id=? AND eligible=0 ORDER BY id"
+assert readonly_query(refused, plan['id']) == [["QUARANTINE_PURGE_EXECUTE", "REFUSED", "", ""]]
+assert readonly_query(refused, p3['id']) == [["SOURCE_DIRECT_PURGE_EXECUTE", "REFUSED", "", ""]]
+assert len(readonly_query(refused, p2['id'])) == 2
+assert not readonly_query(refused, unknown_plan)
+assert readonly_query(refused, "")[-1] == ["SOURCE_DIRECT_PURGE_EXECUTE", "REFUSED", "", ""]
 for p, mode in ((plan, 'quarantine'), (p1, 'source')):
     receipt = subprocess.check_output(cli + ['-mode', mode, '-action', 'receipt', '-plan-id', p['id'], '-digest', p['digest']])
     assert json.loads(receipt)['state'] == 'PURGED'
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
                   'native_scan_analyze_project_verified': True, 'verified_keepers': 2, 'independent_approval_and_confirmation': True,
-                  'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'tls_cli_receipts_verified': True, 'plan_and_dry_run_required': True,
+                  'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'durable_refusal_audit_verified': True, 'tls_cli_receipts_verified': True, 'plan_and_dry_run_required': True,
                   'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"
