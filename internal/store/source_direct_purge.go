@@ -186,9 +186,9 @@ func (s *SQLiteStore) FinishSourcePurge(ctx context.Context, plan DualPurgePlan,
 func (f SourcePurgeFacts) SourcePurgeDecision(ruleVersion string) (domain.DirectoryRole, error) {
 	var contexts [2]domain.DirectoryContext
 	for i, file := range []SourcePurgeFile{f.Target, f.Keeper} {
-		var format domain.FormatInfo
-		if json.Unmarshal([]byte(file.Directory), &contexts[i]) != nil ||
-			json.Unmarshal([]byte(file.Format), &format) != nil || format.Protected || format.Format == "" ||
+		format, confirmed := sourceFormat(file)
+		if !confirmed || json.Unmarshal([]byte(file.Directory), &contexts[i]) != nil ||
+			format.Protected ||
 			format.Role == domain.FormatRoleMetadataSidecar || format.Role == domain.FormatRoleProjectSource ||
 			file.RuleVersion != ruleVersion || contexts[i].Protected || contexts[i].PrivacyLevel != "normal" ||
 			contexts[i].BranchPoint != "" {
@@ -212,11 +212,21 @@ func (f SourcePurgeFacts) SourcePurgeDecision(ruleVersion string) (domain.Direct
 	return contexts[0].Role, nil
 }
 
+func sourceFormat(file SourcePurgeFile) (domain.FormatInfo, bool) {
+	var result persistedFormat
+	if json.Unmarshal([]byte(file.Format), &result) != nil || result.Binding == nil ||
+		result.Format == "" || result.Format == "unknown" || result.Category == domain.CategoryUnknown {
+		return result.FormatInfo, false
+	}
+	want := FormatBinding{file.SHA256, file.MTime, file.Discovered, file.Device, file.Inode, file.Size}
+	return result.FormatInfo, *result.Binding == want
+}
+
 // SourcePurgeCandidates is a bounded display view. Every execution plan
 // independently validates the selected target and keeper against a new snapshot.
 func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([]SourcePurgeChoice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT s.id,f.id,f.path,f.size,f.content_sha256,
-		d.context_json,m.format_json
+		d.context_json,m.format_json,f.mtime,f.discovered_at,f.device,f.inode
 		FROM storages s JOIN file_instances f ON f.storage_id=s.id
 		JOIN directory_contexts d ON d.file_id=f.id JOIN file_formats m ON m.file_id=f.id
 		WHERE s.root_path=? AND s.kind IN ('local','filesystem') AND f.file_status='active'
@@ -234,14 +244,15 @@ func (s *SQLiteStore) SourcePurgeCandidates(ctx context.Context, root string) ([
 	choices := make([]SourcePurgeChoice, 0)
 	for rows.Next() {
 		var c SourcePurgeChoice
-		var directoryJSON, formatJSON string
-		if err := rows.Scan(&c.StorageID, &c.FileID, &c.Path, &c.Size, &c.SHA256, &directoryJSON, &formatJSON); err != nil {
+		var file SourcePurgeFile
+		if err := rows.Scan(&c.StorageID, &c.FileID, &c.Path, &c.Size, &c.SHA256, &file.Directory, &file.Format, &file.MTime, &file.Discovered, &file.Device, &file.Inode); err != nil {
 			return nil, err
 		}
 		var directory domain.DirectoryContext
-		var format domain.FormatInfo
-		if json.Unmarshal([]byte(directoryJSON), &directory) != nil || json.Unmarshal([]byte(formatJSON), &format) != nil ||
-			directory.Protected || directory.PrivacyLevel != "normal" || format.Protected || format.Format == "" {
+		file.SHA256, file.Size = c.SHA256, c.Size
+		format, confirmed := sourceFormat(file)
+		if !confirmed || json.Unmarshal([]byte(file.Directory), &directory) != nil ||
+			directory.Protected || directory.PrivacyLevel != "normal" || format.Protected {
 			continue
 		}
 		c.Role = directory.Role

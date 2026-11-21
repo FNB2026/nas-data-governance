@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -263,6 +264,28 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		return nil, err
 	}
 
+	var boundary *scanner.Boundary
+	if runtime.GOOS == "linux" && s.guardedRecovery && in.ReadDirectory == nil {
+		boundary, err = scanner.OpenBoundary(rootPath)
+		if err != nil {
+			return nil, err
+		}
+		defer boundary.Close()
+		in.ReadDirectory = boundary.ReadDirectory
+	}
+	confinedHash := func(file domain.FileInstance, full bool) HashFunc {
+		return func(_ string, size int64) (sum string, err error) {
+			err = boundary.ReadFile(file, func(f *os.File) error {
+				if full {
+					sum, err = fingerprint.FullReader(f)
+				} else {
+					sum, err = fingerprint.QuickReader(f, size)
+				}
+				return err
+			})
+			return sum, err
+		}
+	}
 	result := &ScanResult{}
 
 	// Register storage in DB if store is available.
@@ -421,7 +444,9 @@ func (s *ScanService) Scan(ctx context.Context, in ScanInput) (*ScanResult, erro
 		// File is new or changed: compute quick hash (possibly concurrent).
 		return hashRunner.Submit(ctx, func() error {
 			hash := s.quickHash
-			if !discovered {
+			if boundary != nil {
+				hash = confinedHash(file, false)
+			} else if !discovered {
 				hash = func(path string, size int64) (string, error) {
 					if s.guardedRecovery {
 						return fingerprint.Guarded(in.Root, file, false)
@@ -603,7 +628,9 @@ fullHashSubmission:
 			idx := i // capture for closure
 			if submitErr := fullRunner.Submit(ctx, func() error {
 				hash := s.fullHash
-				if result.ResumedFrom != "" && files[idx].Path <= result.ResumedFrom {
+				if boundary != nil {
+					hash = confinedHash(files[idx], true)
+				} else if result.ResumedFrom != "" && files[idx].Path <= result.ResumedFrom {
 					// Recovered prefix work has been absent from this traversal.
 					// Check its bounds/metadata on both sides of every read attempt.
 					hash = func(path string, size int64) (string, error) {
@@ -667,6 +694,11 @@ fullHashSubmission:
 			if outcome == "pending" {
 				return nil, errors.New("full fingerprint work incomplete; scan remains resumable")
 			}
+		}
+	}
+	if boundary != nil {
+		if err := boundary.VerifyRoot(); err != nil {
+			return nil, err
 		}
 	}
 	s.setStage(in, "persisting")

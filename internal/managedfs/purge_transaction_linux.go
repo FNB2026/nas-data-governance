@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -375,6 +376,97 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 	receipt := PurgeReceipt{ID: plan.ID, State: "PURGED"}
 	if purgeJournal(stage, "receipt-"+plan.ID, receipt) != nil || fail("receipt_synced") ||
 		unix.Unlinkat(stage, "pending", 0) != nil || fail("pending_removed") || unix.Fsync(stage) != nil {
+		return empty, ErrRecoveryRequired
+	}
+	return receipt, nil
+}
+
+func readPurgeRecord(dir int, name string, record any) error {
+	fd, err := rooted(dir, name, unix.O_RDONLY)
+	if err != nil {
+		return ErrRecoveryRequired
+	}
+	f := os.NewFile(uintptr(fd), "purge journal")
+	defer f.Close()
+	st, err := regular(fd)
+	if err != nil || st.Size > 16384 {
+		return ErrRecoveryRequired
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 16385))
+	if err != nil || json.Unmarshal(raw, record) != nil {
+		return ErrRecoveryRequired
+	}
+	return nil
+}
+
+// ReconcilePurgeTransaction is operator requested. It never performs an
+// unlink of user content. It only reconciles complete, attributable proof.
+func reconcilePurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
+	empty := PurgeReceipt{}
+	d, err := openPurgeDirectories(plan)
+	if err != nil {
+		return empty, ErrRecoveryRequired
+	}
+	stage := d.stage
+	receiptName := "receipt-" + plan.ID
+	commitName := "commit-" + plan.ID
+	name := path.Base(plan.Target.Relative)
+	pending := !purgeEntryAbsent(stage, "pending")
+	receiptExists := !purgeEntryAbsent(stage, receiptName)
+	if pending && !receiptExists {
+		d.close()
+		// This helper reacquires the stage flock and rechecks all bindings.
+		return recoverPurgeTransaction(ctx, plan)
+	}
+	defer d.close()
+	if ctx.Err() != nil || !purgeEntryAbsent(stage, plan.ID) || validatePurgeBinding(plan, d.root, stage, d.parent) != nil {
+		return empty, ErrRecoveryRequired
+	}
+	if pending {
+		var recorded PurgeTransaction
+		if readPurgeRecord(stage, "pending", &recorded) != nil || !reflect.DeepEqual(recorded, plan) {
+			return empty, ErrRecoveryRequired
+		}
+	}
+	var receipt PurgeReceipt
+	if receiptExists {
+		if readPurgeRecord(stage, receiptName, &receipt) != nil || receipt.ID != plan.ID {
+			return empty, ErrRecoveryRequired
+		}
+	} else {
+		receipt = PurgeReceipt{ID: plan.ID, State: "ROLLED_BACK"}
+	}
+	switch receipt.State {
+	case "PURGED":
+		var commit PurgeTarget
+		if readPurgeRecord(stage, commitName, &commit) != nil || !purgeEntryAbsent(d.parent, name) {
+			return empty, ErrRecoveryRequired
+		}
+		commit.CTimeSec, commit.CTimeNsec = plan.Target.CTimeSec, plan.Target.CTimeNsec
+		if commit != plan.Target || purgeKeeper(ctx, d.root, plan) != nil {
+			return empty, ErrRecoveryRequired
+		}
+	case "ROLLED_BACK":
+		if !purgeEntryAbsent(stage, commitName) {
+			return empty, ErrRecoveryRequired
+		}
+		current, err := observeUnderRoot(ctx, d.root, plan.Target.Relative)
+		if receiptExists {
+			current.CTimeSec, current.CTimeNsec = plan.Target.CTimeSec, plan.Target.CTimeNsec
+		}
+		if err != nil || current != plan.Target {
+			return empty, ErrRecoveryRequired
+		}
+	default:
+		return empty, ErrRecoveryRequired
+	}
+	if ctx.Err() != nil || validatePurgeBinding(plan, d.root, stage, d.parent) != nil {
+		return empty, ErrRecoveryRequired
+	}
+	if !receiptExists && purgeJournal(stage, receiptName, receipt) != nil {
+		return empty, ErrRecoveryRequired
+	}
+	if pending && (unix.Unlinkat(stage, "pending", 0) != nil || unix.Fsync(stage) != nil) {
 		return empty, ErrRecoveryRequired
 	}
 	return receipt, nil

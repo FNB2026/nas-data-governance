@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -351,19 +352,33 @@ func Analyze(path string) (domain.FormatInfo, error) {
 	if !stat.Mode().IsRegular() {
 		return domain.FormatInfo{}, errors.New("format: non-regular file rejected; path omitted")
 	}
-	if filepolicy.ExtensionOnly(path) {
-		return filepolicy.Apply(path, domain.FormatInfo{Format: "unknown", Category: domain.CategoryUnknown}), nil
+	return analyzeFile(path, path, stat.Size())
+}
+
+// AnalyzeDescriptor uses the held Linux descriptor for every content read
+// while retaining the original name only for extension policy.
+func AnalyzeDescriptor(file *os.File, name string) (domain.FormatInfo, error) {
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return domain.FormatInfo{}, errors.New("format: verified regular descriptor required")
+	}
+	return analyzeFile(fmt.Sprintf("/proc/self/fd/%d", file.Fd()), name, info.Size())
+}
+
+func analyzeFile(path, name string, size int64) (domain.FormatInfo, error) {
+	if filepolicy.ExtensionOnly(name) {
+		return filepolicy.Apply(name, domain.FormatInfo{Format: "unknown", Category: domain.CategoryUnknown}), nil
 	}
 	info, err := Detect(path)
 	if err != nil && !errors.Is(err, ErrUnrecognized) {
 		return info, err
 	}
 	if errors.Is(err, ErrUnrecognized) {
-		if textInfo, ok := detectStructuredText(path, stat.Size()); ok {
+		if textInfo, ok := detectStructuredText(path, size); ok {
 			info = textInfo
 		}
 	}
-	info = filepolicy.Apply(path, info)
+	info = filepolicy.Apply(name, info)
 	// Even if unrecognized, return the info (with unknown category).
 	// ExtractMetadata is skipped for unrecognized formats.
 	if info.Format == "unknown" || info.Format == "" {

@@ -163,7 +163,7 @@ func (s *SourcePurge) Advance(ctx context.Context, id, digest, op, confirmation 
 	if err != nil || caps.ProjectScope != proof.Project {
 		return empty, ErrAuthorization
 	}
-	if op == "RECEIPT" {
+	if op == "RECEIPT" || op == "RECOVER" && (p.State == "PURGED" || p.State == "ROLLED_BACK") {
 		return sourcePurgeResult(p, proof), nil
 	}
 	txn := managedfs.PurgeTransaction{ID: id, ApprovalSHA256: digest, RootPath: s.root, Target: proof.Target, Keeper: &proof.Keeper}
@@ -171,7 +171,7 @@ func (s *SourcePurge) Advance(ctx context.Context, id, digest, op, confirmation 
 		if p.State != "EXECUTING" {
 			return empty, ErrAuthorization
 		}
-		receipt, err := managedfs.RecoverPurgeTransaction(ctx, txn)
+		receipt, err := managedfs.ReconcilePurgeTransaction(ctx, txn)
 		if err != nil {
 			return empty, err
 		}

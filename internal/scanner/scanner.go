@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -106,6 +107,15 @@ type scanPathKey struct {
 //     excludes inode by design.
 func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) error) (Stats, error) {
 	reader := opts.ReadDirectory
+	if reader == nil && runtime.GOOS == "linux" && !opts.CrossMounts {
+		boundary, err := OpenBoundary(opts.Root)
+		if err != nil {
+			return Stats{}, err
+		}
+		defer boundary.Close()
+		stats, err := scan(ctx, opts, visit, boundary.ReadDirectory)
+		return stats, errors.Join(err, boundary.VerifyRoot())
+	}
 	if reader == nil {
 		reader = os.ReadDir
 	}
@@ -215,6 +225,9 @@ func scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 			}
 
 			info, err := entry.Info()
+			if errors.Is(err, ErrMountBoundary) {
+				continue
+			}
 			if err != nil {
 				stats.Errors = append(stats.Errors, ErrorEntry{Path: path, Error: err})
 				checkpointBlocked = true

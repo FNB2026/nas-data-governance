@@ -19,3 +19,7 @@ func recoverPurgeTransaction(context.Context, PurgeTransaction) (PurgeReceipt, e
 func dryRunPurgeTransaction(context.Context, PurgeTransaction) error {
 	return ErrUnsupported
 }
+
+func reconcilePurgeTransaction(context.Context, PurgeTransaction) (PurgeReceipt, error) {
+	return PurgeReceipt{}, ErrUnsupported
+}

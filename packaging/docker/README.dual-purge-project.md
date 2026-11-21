@@ -35,7 +35,7 @@ docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges \
   --mount "type=bind,src=$NDG_CANDIDATE_SOURCE,dst=/ndg-volume,readonly" \
   --mount "type=bind,src=$NDG_CANDIDATE_STATE,dst=/state" \
-  ndg-project-ingest:local analyze --storage-id candidate-volume \
+  ndg-project-ingest:local analyze --confined-root /ndg-volume --storage-id candidate-volume \
   --db /state/project.db --index /state/index.jsonl --out /state/formats.json
 ```
 
@@ -50,3 +50,42 @@ Existing projects with file records tied to another absolute path require a
 scan through the candidate path. Preserve the previous project before any
 migration. This private workflow is limited to isolated Linux deployment
 validation.
+
+## Project upgrade and rollback
+
+Normal NDG project opens use Schema013 for new projects. Schema014 is
+introduced only by starting the private Worker, after indexing and analysis
+have stopped. The Worker takes the project owner lock, checks for unresolved
+work, and creates a verified, synced `project.db.before-schema014` snapshot
+before changing the database. The snapshot includes committed WAL data. A
+pre-existing snapshot is preserved if migration needs to be retried.
+
+Keep the snapshot private and back it up off the candidate volume. To roll back
+the software, stop every process that can open this project. Preserve the entire
+upgraded state directory for inspection. Copy the backup as `project.db` into a
+new private state directory with no SQLite sidecars, verify SQLite
+`PRAGMA quick_check`, and open that copy with the baseline client. Restoring
+SQLite does not undo a file deletion. Review any actions since the snapshot
+against the filesystem before resuming project operations.
+
+## Operator reconciliation
+
+If an execution reports `RECOVERY_REQUIRED`, keep the original source and
+stage mounts attached. Use the original plan ID and digest to query Receipt.
+If its state is `EXECUTING`, run Recover for that exact plan in the private
+console or via `ndg-private-purge -action recover` with the TLS, token,
+mode, plan ID and digest arguments. Recover never deletes source content.
+It restores a provably staged precommit file or reconciles a verified disk
+receipt into SQLite. A proven claim that never touched the filesystem is
+closed as rolled back. A repeat request returns the same terminal result.
+
+If recovery still refuses, keep the project locked and retain the private
+database, stage records and logs for review. Do not remove the stage, restore
+an older database over the only copy, or change the existing mounts to bypass
+the check. A replacement mount can have a different kernel identity even when
+its device and inode match.
+
+The confined Analyzer reads only verified Linux descriptors and binds its
+format record to the indexed size, identity, hash and discovery generation.
+Run it after every rescan before authorizing direct purge. Unknown or legacy
+unbound format records cannot authorize deletion.

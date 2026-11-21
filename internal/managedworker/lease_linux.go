@@ -83,7 +83,9 @@ func (l *Lease) Release() error {
 		return nil
 	}
 	_ = unix.Flock(int(l.f.Fd()), unix.LOCK_UN)
-	return l.f.Close()
+	err := l.f.Close()
+	l.f = nil
+	return err
 }
 
 // LeaseHolder reports the recorded pid and whether it is currently alive.

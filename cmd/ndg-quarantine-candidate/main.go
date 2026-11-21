@@ -40,7 +40,7 @@ func runWorker(ctx context.Context) (result error) {
 		return err
 	}
 	defer func() { result = errors.Join(result, lease.Release()) }()
-	project, err := store.Open(ctx, filepath.Join(layout.State, "project.db"))
+	project, err := store.OpenPurgeCandidate(ctx, filepath.Join(layout.State, "project.db"))
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func runWorker(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	server, err := managedworker.Listen(layout, workerSubject, []managedworker.Subject{webSubject})
+	server, err := lease.ListenWithLease(layout, workerSubject, []managedworker.Subject{webSubject})
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/FNB2026/nas-data-governance/internal/app"
-	"github.com/FNB2026/nas-data-governance/internal/format"
 	"github.com/FNB2026/nas-data-governance/internal/managedfs"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
@@ -42,7 +41,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 				}
 			}
 			database := filepath.Join(base, "test.db")
-			st, err := store.Open(ctx, database)
+			st, err := store.OpenPurgeCandidate(ctx, database)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,26 +52,25 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 			if err != nil || !scan.FullTraversal || len(scan.Files) != 2 {
 				t.Fatal("could not scan process crash fixture", err)
 			}
-			ids := make(map[string]int64)
-			for _, path := range []string{target, keeper} {
-				id, err := st.FileID(ctx, crashStorage, path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				info, err := format.Detect(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := st.SaveFormat(ctx, id, info); err != nil {
-					t.Fatal(err)
-				}
-				ids[path] = id
+			analyzed, err := app.NewAnalyzeService(st).Analyze(ctx, app.AnalyzeInput{
+				Files: scan.Files, StorageID: crashStorage, ConfinedRoot: root, Workers: 1,
+			})
+			if err != nil || analyzed.PersistErr != nil || analyzed.Persisted != 2 {
+				t.Fatal("could not analyze process crash fixture", err)
+			}
+			targetID, err := st.FileID(ctx, crashStorage, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			keeperID, err := st.FileID(ctx, crashStorage, keeper)
+			if err != nil {
+				t.Fatal(err)
 			}
 			service, err := NewSourcePurge(st, root)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := service.Plan(ctx, crashStorage, ids[target], ids[keeper])
+			plan, err := service.Plan(ctx, crashStorage, targetID, keeperID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +96,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 				t.Fatalf("expected real SIGKILL, got %v %s", err, out)
 			}
 
-			reopened, err := store.Open(ctx, database)
+			reopened, err := store.OpenPurgeCandidate(ctx, database)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +147,7 @@ func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteS
 	}
 	for path, absent := range map[string]bool{
 		filepath.Join(root, "target.pdf"):                           deleted,
-		filepath.Join(root, ".ndg-purge-stage", "receipt-"+plan.ID): !deleted,
+		filepath.Join(root, ".ndg-purge-stage", "receipt-"+plan.ID): !deleted && wantState != "ROLLED_BACK",
 	} {
 		_, err := os.Lstat(path)
 		if (absent && !errors.Is(err, os.ErrNotExist)) || (!absent && err != nil) {
@@ -157,9 +155,17 @@ func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteS
 		}
 	}
 	if wantState == "EXECUTING" {
-		if _, err := svc.Advance(ctx, plan.ID, plan.Digest, "RECOVER", ""); !errors.Is(err, managedfs.ErrRecoveryRequired) {
-			t.Fatal("ambiguous crash state must remain locked", err)
+		expected := "ROLLED_BACK"
+		if deleted {
+			expected = "PURGED"
 		}
+		for i := 0; i < 2; i++ {
+			resolved, err := svc.Advance(ctx, plan.ID, plan.Digest, "RECOVER", "")
+			if err != nil || resolved.State != expected {
+				t.Fatal("operator reconciliation did not return the proven outcome", resolved.State, err)
+			}
+		}
+		verifySourceCrashState(t, ctx, st, root, plan, expected, deleted)
 	}
 }
 
@@ -174,7 +180,7 @@ func TestSourcePurgeDatabaseKillChild(t *testing.T) {
 		t.Fatal("subprocess requires its dedicated synthetic fixture")
 	}
 	ctx := context.Background()
-	st, err := store.Open(ctx, database)
+	st, err := store.OpenPurgeCandidate(ctx, database)
 	if err != nil {
 		t.Fatal(err)
 	}

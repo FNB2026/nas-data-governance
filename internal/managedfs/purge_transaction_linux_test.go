@@ -14,6 +14,9 @@ import (
 	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 )
 
 func purgeFixture(t *testing.T) (context.Context, PurgeTransaction, string) {
@@ -282,6 +285,29 @@ func TestRootedPurgeRefusesRealSameDeviceBind(t *testing.T) {
 	}
 	if _, err := ObservePurgeTarget(context.Background(), root, "nested/synthetic"); !errors.Is(err, ErrRejected) {
 		t.Fatal("nested mount admitted", err)
+	}
+	safe := filepath.Join(root, "safe")
+	if err := os.WriteFile(safe, []byte("safe fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var indexed []string
+	_, err = scanner.Scan(context.Background(), scanner.Options{Root: root}, func(f domain.FileInstance) error {
+		indexed = append(indexed, f.Path)
+		return nil
+	})
+	if err != nil || len(indexed) != 1 || indexed[0] != safe {
+		t.Fatal("scanner did not exclude the nested mount", err, indexed)
+	}
+	boundary, err := scanner.OpenBoundary(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer boundary.Close()
+	if err := boundary.ReadFile(domain.FileInstance{Path: filepath.Join(mount, "synthetic")}, func(*os.File) error {
+		t.Fatal("confined reader received a descriptor outside the mount")
+		return nil
+	}); !errors.Is(err, scanner.ErrMountBoundary) {
+		t.Fatal("confined read did not reject the nested mount", err)
 	}
 	data, err := os.ReadFile(sentinel)
 	if err != nil || string(data) != "outside sentinel" {

@@ -133,8 +133,14 @@ func (s *QuarantinePurge) advance(ctx context.Context, id, digest, from, to stri
 	}
 	defer release()
 	p, err := s.project.ReadDualPurgePlan(ctx, id)
-	if err != nil || p.Operation != store.QuarantinePurge || p.State != from || p.Digest != digest ||
+	if err != nil || p.Operation != store.QuarantinePurge || p.Digest != digest ||
 		evidenceDigest([]byte(p.EvidenceJSON)) != digest {
+		return empty, ErrAuthorization
+	}
+	if to == "RECOVER" && (p.State == "PURGED" || p.State == "ROLLED_BACK") {
+		return quarantineResult(p), nil
+	}
+	if p.State != from {
 		return empty, ErrAuthorization
 	}
 	var proof quarantinePurgeEvidence
@@ -159,7 +165,7 @@ func (s *QuarantinePurge) advance(ctx context.Context, id, digest, from, to stri
 		}
 	}
 	if to == "RECOVER" {
-		receipt, err := managedfs.RecoverPurgeTransaction(ctx, transaction)
+		receipt, err := managedfs.ReconcilePurgeTransaction(ctx, transaction)
 		if err != nil {
 			return empty, err
 		}

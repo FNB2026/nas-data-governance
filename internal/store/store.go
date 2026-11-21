@@ -32,6 +32,24 @@ type FormatRecord struct {
 	StorageID string
 	Path      string
 	Info      domain.FormatInfo
+	Binding   *FormatBinding
+}
+
+// FormatBinding names the exact scanned generation and object analyzed.
+type FormatBinding struct {
+	SHA256, Modified, Discovered string
+	Device, Inode                uint64
+	Size                         int64
+}
+
+func BindAnalyzedFormat(file domain.FileInstance) FormatBinding {
+	return FormatBinding{file.ContentSHA256, file.ModifiedAt.UTC().Format(time.RFC3339Nano),
+		file.DiscoveredAt.UTC().Format(time.RFC3339Nano), file.Device, file.Inode, file.Size}
+}
+
+type persistedFormat struct {
+	domain.FormatInfo
+	Binding *FormatBinding `json:"_ndg_source,omitempty"`
 }
 
 // Store is the persistence port used by scan/plan/execute layers.

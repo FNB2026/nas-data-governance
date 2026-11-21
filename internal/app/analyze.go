@@ -3,12 +3,15 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/fingerprint"
 	"github.com/FNB2026/nas-data-governance/internal/format"
 	"github.com/FNB2026/nas-data-governance/internal/runner"
+	"github.com/FNB2026/nas-data-governance/internal/scanner"
 	"github.com/FNB2026/nas-data-governance/internal/store"
 )
 
@@ -33,6 +36,7 @@ type FormatReportEntry struct {
 
 // AnalyzeInput defines parameters for a format analysis run.
 type AnalyzeInput struct {
+	ConfinedRoot string
 	// Files is the list of file instances to analyze (required).
 	Files []domain.FileInstance
 	// StorageID filters files by storage ID (empty = no filter).
@@ -193,14 +197,23 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 	// Resume: load existing format rows from DB. Resume is based on durable
 	// format rows, not a fragile path cursor. This safely handles worker
 	// completion order and makes repeated runs idempotent.
-	existing := map[string]domain.FormatInfo{}
+	var boundary *scanner.Boundary
+	if in.ConfinedRoot != "" {
+		var err error
+		boundary, err = scanner.OpenBoundary(in.ConfinedRoot)
+		if err != nil {
+			return nil, err
+		}
+		defer boundary.Close()
+	}
+	existing := map[string]store.FormatRecord{}
 	if in.Resume {
 		records, err := s.store.ListFormats(ctx, in.StorageID)
 		if err != nil {
 			return nil, fmt.Errorf("app: load existing formats: %w", err)
 		}
 		for _, record := range records {
-			existing[formatRecordKey(record.StorageID, record.Path)] = record.Info
+			existing[formatRecordKey(record.StorageID, record.Path)] = record
 		}
 	}
 
@@ -211,7 +224,9 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 	}
 	pending := make([]pendingFile, 0, len(files))
 	for i, file := range files {
-		if info, ok := existing[formatRecordKey(file.StorageID, file.Path)]; ok &&
+		record, ok := existing[formatRecordKey(file.StorageID, file.Path)]
+		info := record.Info
+		if ok && (boundary == nil || record.Binding != nil && *record.Binding == store.BindAnalyzedFormat(file)) &&
 			!(in.RefreshUnknown && IsUnknownFormat(info)) &&
 			!(in.RefreshMetadata && NeedsMetadataRefresh(info)) {
 			result.Entries[i] = FormatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
@@ -275,7 +290,26 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 		idx := item.index
 		file := item.file
 		if err := ar.Submit(ctx, func() error {
-			info, analyzeErr := s.analyze(file.Path)
+			var info domain.FormatInfo
+			var analyzeErr error
+			var binding *store.FormatBinding
+			if boundary == nil {
+				info, analyzeErr = s.analyze(file.Path)
+			} else {
+				analyzeErr = boundary.ReadFile(file, func(opened *os.File) error {
+					var err error
+					if file.ContentSHA256 != "" && file.Physical.Reliable {
+						sha, err := fingerprint.FullReader(opened)
+						if err != nil || sha != file.ContentSHA256 {
+							return scanner.ErrMountBoundary
+						}
+						proof := store.BindAnalyzedFormat(file)
+						binding = &proof
+					}
+					info, err = format.AnalyzeDescriptor(opened, file.Path)
+					return err
+				})
+			}
 			entry := FormatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
 			if analyzeErr != nil {
 				entry.Error = analyzeErr.Error()
@@ -286,7 +320,7 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 				atomic.AddInt64(&result.Analyzed, 1)
 			}
 			if persistCh != nil && analyzeErr == nil && info.Format != "" {
-				persistCh <- store.FormatRecord{StorageID: file.StorageID, Path: file.Path, Info: info}
+				persistCh <- store.FormatRecord{StorageID: file.StorageID, Path: file.Path, Info: info, Binding: binding}
 			}
 			entriesMu.Lock()
 			result.Entries[idx] = entry

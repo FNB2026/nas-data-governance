@@ -57,3 +57,9 @@ func RecoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeR
 func DryRunPurgeTransaction(ctx context.Context, plan PurgeTransaction) error {
 	return dryRunPurgeTransaction(ctx, plan)
 }
+
+// ReconcilePurgeTransaction resolves a proven disk outcome for an authorized
+// operator. An incomplete or mismatched record leaves recovery locked.
+func ReconcilePurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
+	return reconcilePurgeTransaction(ctx, plan)
+}

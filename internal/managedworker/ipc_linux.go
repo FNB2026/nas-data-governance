@@ -3,9 +3,11 @@
 package managedworker
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -51,6 +53,52 @@ func Listen(layout Layout, want Subject, callers []Subject) (*Listener, error) {
 		return nil, ErrIsolation
 	}
 	return &Listener{ln: ln.(*net.UnixListener), path: path, callers: authorized}, nil
+}
+
+// ListenWithLease reuses the dedicated run directory after a confirmed
+// dead listener. The caller keeps the lease until the returned listener closes.
+func (l *Lease) ListenWithLease(layout Layout, want Subject, callers []Subject) (*Listener, error) {
+	if l == nil || l.f == nil || l.path != filepath.Join(layout.Run, LeaseName) {
+		return nil, ErrIsolation
+	}
+	if err := RequireSubject(want); err != nil {
+		return nil, err
+	}
+	if err := RequireLayout(layout, want); err != nil {
+		return nil, err
+	}
+	held, err := l.f.Stat()
+	if err != nil {
+		return nil, ErrIsolation
+	}
+	current, err := os.Lstat(l.path)
+	if err != nil || !os.SameFile(held, current) {
+		return nil, ErrIsolation
+	}
+	path := filepath.Join(layout.Run, SocketName)
+	var first, last unix.Stat_t
+	err = unix.Lstat(path, &first)
+	if errors.Is(err, unix.ENOENT) {
+		return Listen(layout, want, callers)
+	}
+	if err != nil || first.Mode&unix.S_IFMT != unix.S_IFSOCK || first.Uid != want.UID ||
+		first.Gid != want.GID || first.Nlink != 1 {
+		return nil, ErrIsolation
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err == nil {
+		_ = conn.Close()
+		return nil, ErrBusy
+	}
+	if !errors.Is(err, unix.ECONNREFUSED) || unix.Lstat(path, &last) != nil ||
+		first.Dev != last.Dev || first.Ino != last.Ino || first.Mode != last.Mode ||
+		first.Uid != last.Uid || first.Gid != last.Gid || first.Ctim != last.Ctim {
+		return nil, ErrIsolation
+	}
+	if err := unix.Unlink(path); err != nil {
+		return nil, ErrIsolation
+	}
+	return Listen(layout, want, callers)
 }
 
 // Accept admits a connection only when the kernel attests the peer identity.

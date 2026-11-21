@@ -48,7 +48,7 @@ scan_tool=(docker run --rm --network none --read-only --cap-drop ALL
   --mount "type=bind,src=$fixture/source,dst=/ndg-volume,readonly"
   --mount "type=bind,src=$fixture/state,dst=/state" "$NDG_SCAN_IMAGE")
 "${scan_tool[@]}" scan --root /ndg-volume --storage candidate-volume --db /state/project.db --out /state/index.jsonl >&2
-"${scan_tool[@]}" analyze --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
+"${scan_tool[@]}" analyze --confined-root /ndg-volume --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
 "${compose[@]}" up -d --no-build --pull never >/dev/null
 if [[ "${NDG_TEST_PURGE_BROWSER:-}" == 1 ]]; then
   bash scripts/qa/test-purge-console-browser.sh "$fixture"
@@ -80,6 +80,9 @@ for _ in range(30):
         time.sleep(1)
 else:
     raise RuntimeError('candidate TLS endpoint did not become ready')
+
+duplicate_worker = subprocess.run(sys.argv[2:] + ['run', '--no-deps', '--rm', 'worker'], capture_output=True, timeout=20)
+assert duplicate_worker.returncode != 0
 
 with opener.open(url + '/gov/purge-console', timeout=5) as page:
     assert "frame-ancestors 'none'" in page.headers.get('Content-Security-Policy', '')
@@ -114,7 +117,8 @@ assert act('APPROVE')['state'] == 'APPROVED'
 assert act('DRY_RUN')['state'] == 'DRY_RUN'
 assert act('EXECUTE', '永久清理 ' + plan['id'])['state'] == 'PURGED'
 assert act('RECEIPT')['state'] == 'PURGED'
-subprocess.run(sys.argv[2:] + ['restart', 'worker'], check=True, capture_output=True)
+subprocess.run(sys.argv[2:] + ['kill', '-s', 'SIGKILL', 'worker'], check=True, capture_output=True)
+subprocess.run(sys.argv[2:] + ['start', 'worker'], check=True, capture_output=True)
 for _ in range(30):
     try:
         assert act('RECEIPT')['state'] == 'PURGED'
@@ -209,7 +213,7 @@ for p, mode in ((plan, 'quarantine'), (p1, 'source')):
 print(json.dumps({'synthetic_quarantine_file_deleted': True, 'synthetic_source_files_deleted': 2,
                   'native_scan_analyze_project_verified': True, 'verified_keepers': 2, 'independent_approval_and_confirmation': True,
                   'stale_selected_file_preserved': True, 'durable_audit_states_verified': True, 'durable_refusal_audit_verified': True, 'tls_cli_receipts_verified': True, 'plan_and_dry_run_required': True,
-                  'tls_worker_receipt_verified_after_restart': True, 'outside_sentinel_unchanged': True}))
+                  'tls_worker_receipt_verified_after_restart': True, 'worker_sigkill_stale_socket_recovered': True, 'duplicate_worker_refused': True, 'outside_sentinel_unchanged': True}))
 PY
 web_id="$("${compose[@]}" ps -q web)"
 worker_id="$("${compose[@]}" ps -q worker)"

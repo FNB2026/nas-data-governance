@@ -58,7 +58,7 @@ func newQuarantinePurgeFixture(t *testing.T) quarantinePurgeFixture {
 	}
 
 	database := filepath.Join(base, "test.db")
-	st, err := store.Open(ctx, database)
+	st, err := store.OpenPurgeCandidate(ctx, database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, database)
+	reopened, err := store.OpenPurgeCandidate(ctx, database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
 				t.Fatalf("expected real SIGKILL, got %v %s", err, out)
 			}
-			st, err := store.Open(ctx, f.database)
+			st, err := store.OpenPurgeCandidate(ctx, f.database)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,7 +301,7 @@ func TestQuarantinePurgeDatabaseKillChild(t *testing.T) {
 		t.Fatal("subprocess requires its dedicated synthetic fixture")
 	}
 	ctx := context.Background()
-	st, err := store.Open(ctx, database)
+	st, err := store.OpenPurgeCandidate(ctx, database)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,9 +48,6 @@ func applyGovernanceMigration(ctx context.Context, conn *sql.Conn) error {
 	if _, e := conn.ExecContext(ctx, schemas.Schema013); e != nil {
 		return ErrGovernanceRejected
 	}
-	if _, e := conn.ExecContext(ctx, schemas.Schema014); e != nil {
-		return ErrGovernanceRejected
-	}
 	if _, e := conn.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(12,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`); e != nil {
 		return ErrGovernanceRejected
 	}

@@ -385,7 +385,7 @@ func (s *SQLiteStore) SaveFormatsByPath(ctx context.Context, records []FormatRec
 		if record.StorageID == "" || record.Path == "" || record.Info.Format == "" {
 			return 0, 0, fmt.Errorf("store: incomplete format batch record %d", i)
 		}
-		blob, err := json.Marshal(record.Info)
+		blob, err := json.Marshal(persistedFormat{FormatInfo: record.Info, Binding: record.Binding})
 		if err != nil {
 			return 0, 0, fmt.Errorf("store: marshal format batch: %w", err)
 		}
@@ -416,6 +416,18 @@ func (s *SQLiteStore) SaveFormatsByPath(ctx context.Context, records []FormatRec
 				continue
 			}
 			return 0, 0, fmt.Errorf("store: lookup format batch row: %w", err)
+		}
+		if binding := record.Binding; binding != nil {
+			var valid bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM file_instances
+				WHERE id=? AND file_status='active' AND content_sha256=? AND mtime=? AND discovered_at=? AND device=? AND inode=? AND size=?)`,
+				fileID, binding.SHA256, binding.Modified, binding.Discovered, binding.Device, binding.Inode, binding.Size).Scan(&valid); err != nil {
+				return 0, 0, err
+			}
+			if !valid {
+				missing++
+				continue
+			}
 		}
 		if _, err := upsert.ExecContext(ctx, fileID, record.Info.Format, string(record.Info.Category), string(blobs[i])); err != nil {
 			return 0, 0, fmt.Errorf("store: save format batch: %w", err)
@@ -450,9 +462,11 @@ func (s *SQLiteStore) ListFormats(ctx context.Context, storageID string) ([]Form
 		if err := rows.Scan(&record.StorageID, &record.Path, &blob); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(blob), &record.Info); err != nil {
+		var decoded persistedFormat
+		if err := json.Unmarshal([]byte(blob), &decoded); err != nil {
 			return nil, fmt.Errorf("store: decode persisted format: %w", err)
 		}
+		record.Info, record.Binding = decoded.FormatInfo, decoded.Binding
 		out = append(out, record)
 	}
 	return out, rows.Err()
