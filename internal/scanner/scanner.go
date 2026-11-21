@@ -352,7 +352,7 @@ func markPathSeen(seen map[scanPathKey]struct{}, storageID, path string) bool {
 }
 
 func DefaultExclusions() map[string]bool {
-	names := []string{".data-governance-trash", "@eaDir", ".snapshot", "#recycle"}
+	names := []string{".data-governance-trash", ".ndg-purge-stage", "@eaDir", ".snapshot", "#recycle"}
 	m := make(map[string]bool, len(names))
 	for _, name := range names {
 		m[strings.TrimSpace(name)] = true

@@ -29,6 +29,37 @@ jobs:
       - name: Require native runner architecture
         run: test "$(uname -m)" = "${{ matrix.machine }}"
       - run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store ./internal/managedfs ./internal/managedworker
+      - name: Record rooted purge results on synthetic files
+        run: |
+          NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
+          go test -race -count=1 -v ./internal/managedworker -run '^Test(QuarantinePurgeDurableWorkerFlow|(Source|Quarantine)PurgePersistsAcrossDatabaseProcessKill)$'
+      - name: Build and run isolated dual-purge Docker candidate
+        shell: bash
+        run: |
+          source_sha="$(git rev-parse HEAD)"
+          export NDG_QUARANTINE_IMAGE="ndg-dual-purge-integration:$source_sha"
+          docker build --build-arg SOURCE_SHA="$source_sha" -f packaging/docker/Dockerfile.quarantine-candidate -t "$NDG_QUARANTINE_IMAGE" .
+          export NDG_SCAN_IMAGE="ndg-project-ingest:$source_sha"
+          docker build --target scanner -f packaging/docker/Dockerfile.quarantine-candidate -t "$NDG_SCAN_IMAGE" .
+          mkdir -m 700 /tmp/ndg-dual-purge-integration
+          export NDG_PURGE_CLI=/tmp/ndg-dual-purge-integration/ndg-private-purge
+          CGO_ENABLED=0 go build -trimpath -o "$NDG_PURGE_CLI" ./cmd/ndg-private-purge
+          bash scripts/qa/test-quarantine-candidate-docker.sh | tee /tmp/ndg-dual-purge-integration/synthetic-receipt.json
+          if [[ "${{ matrix.architecture }}" == amd64 ]]; then
+            NDG_TEST_PURGE_BROWSER=1 bash scripts/qa/test-quarantine-candidate-docker.sh | tee /tmp/ndg-dual-purge-integration/browser-receipt.json
+          fi
+          docker image inspect --format '{{.Id}}' "$NDG_QUARANTINE_IMAGE" > /tmp/ndg-dual-purge-integration/image-id.txt
+          git rev-parse HEAD > /tmp/ndg-dual-purge-integration/source-sha.txt
+          docker save "$NDG_QUARANTINE_IMAGE" | gzip > /tmp/ndg-dual-purge-integration/dual-purge-integration-${{ matrix.architecture }}.tar.gz
+          cd /tmp/ndg-dual-purge-integration
+          receipts=(synthetic-receipt.json)
+          if [[ -f browser-receipt.json ]]; then receipts+=(browser-receipt.json); fi
+          sha256sum image-id.txt source-sha.txt "${receipts[@]}" ndg-private-purge dual-purge-integration-${{ matrix.architecture }}.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ndg-dual-purge-integration-${{ matrix.architecture }}
+          path: /tmp/ndg-dual-purge-integration/
+          retention-days: 14
       - name: Build private reader kernel probe without product integration
         shell: bash
         run: |

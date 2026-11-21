@@ -48,6 +48,9 @@ func applyGovernanceMigration(ctx context.Context, conn *sql.Conn) error {
 	if _, e := conn.ExecContext(ctx, schemas.Schema013); e != nil {
 		return ErrGovernanceRejected
 	}
+	if _, e := conn.ExecContext(ctx, schemas.Schema014); e != nil {
+		return ErrGovernanceRejected
+	}
 	if _, e := conn.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(12,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`); e != nil {
 		return ErrGovernanceRejected
 	}
@@ -101,7 +104,7 @@ func preflightGovernanceSchema(ctx context.Context, path string) error {
 	if layout == emptySchemaLayout {
 		return nil // New disposable/project database, no application objects.
 	}
-	if layout != legacySchema11Layout && layout != governanceSchema12Layout && layout != authorizationAudit13Layout {
+	if layout != legacySchema11Layout && layout != governanceSchema12Layout && layout != authorizationAudit13Layout && layout != dualPurge14Layout {
 		return ErrGovernanceRejected
 	}
 	var count, lowest, highest int
@@ -113,7 +116,7 @@ func preflightGovernanceSchema(ctx context.Context, path string) error {
 	// is the first to persist a marker, and commits it with the entire layout.
 	if (layout == legacySchema11Layout && count == 0) ||
 		(layout == governanceSchema12Layout && count == 1 && lowest == 12 && highest == 12) ||
-		(layout == authorizationAudit13Layout && count == 1 && lowest == 12 && highest == 12) {
+		((layout == authorizationAudit13Layout || layout == dualPurge14Layout) && count == 1 && lowest == 12 && highest == 12) {
 		return nil
 	}
 	return ErrGovernanceRejected

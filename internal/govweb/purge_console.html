@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NDG 永久删除</title>
+<script src="/gov/purge-console.js" defer></script>
+</head>
+<body>
+<main>
+<h1>NDG 永久删除</h1>
+<p>删除提交后无法通过 NDG 恢复。备份或快照可能仍保留数据，删除文件不等于擦除介质。</p>
+<label>私有访问令牌 <input id="token" type="password" autocomplete="off"></label>
+<p id="status" role="status"></p>
+<section>
+<h2>隔离区永久清理</h2>
+<label>隔离区项目 ID <input id="item" type="text" maxlength="128" autocomplete="off"></label>
+<button id="quarantine" type="button">为此项目创建计划</button>
+</section>
+<section>
+<h2>从扫描结果永久删除</h2>
+<p>每页最多显示 50 个扫描候选。每个选中的文件分别生成计划，每个计划都有独立的审批、Dry Run 和执行按钮。</p>
+<button id="load" type="button">加载扫描候选</button>
+<table>
+<thead><tr><th scope="col">选择</th><th scope="col">文件</th><th scope="col">字节</th><th scope="col">SHA-256</th><th scope="col">目录角色</th><th scope="col">保留副本</th></tr></thead>
+<tbody id="files"></tbody>
+</table>
+<button id="plan" type="button">为所选文件分别创建计划</button>
+</section>
+<section>
+<h2>逐文件计划与结果</h2>
+<div id="plans"></div>
+<details>
+<summary>查询已保存的计划</summary>
+<label for="lookup-kind">操作</label> <select id="lookup-kind"><option value="source">源文件永久删除</option><option value="quarantine">隔离区永久清理</option></select>
+<label>计划 ID <input id="lookup-id" maxlength="64" autocomplete="off"></label>
+<label>审批摘要 <input id="lookup-digest" maxlength="64" autocomplete="off"></label>
+<button id="lookup" type="button">查询回执</button>
+</details>
+</section>
+</main>
+</body>
+</html>

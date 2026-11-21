@@ -68,11 +68,26 @@ const maxRequestBytes = 64 << 10
 // decodes (omission is meaningful) and is refused by the business gate as a
 // typed wrong_plan, not as a protocol error.
 var allowedKeys = map[string][]string{
-	"PING":    {},
-	"STATUS":  {},
-	"SEAL":    {"object_id", "size", "sha256", "authorization_sha256", "plan_id"},
-	"PURGE":   {"object_id", "authorization_sha256", "size", "sha256", "device", "inode", "plan_id"},
-	"INSPECT": {"object_id", "size", "sha256", "device", "inode", "plan_id"},
+	"QUARANTINE_PURGE_PLAN":       {"item_id"},
+	"QUARANTINE_PURGE_APPROVE":    {"plan_id", "digest"},
+	"QUARANTINE_PURGE_DRY_RUN":    {"plan_id", "digest"},
+	"QUARANTINE_PURGE_EXECUTE":    {"plan_id", "digest", "confirmation"},
+	"QUARANTINE_PURGE_CANCEL":     {"plan_id", "digest"},
+	"QUARANTINE_PURGE_RECOVER":    {"plan_id", "digest"},
+	"QUARANTINE_PURGE_RECEIPT":    {"plan_id", "digest"},
+	"SOURCE_DIRECT_PURGE_LIST":    {},
+	"SOURCE_DIRECT_PURGE_PLAN":    {"storage_id", "target_id", "keeper_id"},
+	"SOURCE_DIRECT_PURGE_APPROVE": {"plan_id", "digest"},
+	"SOURCE_DIRECT_PURGE_DRY_RUN": {"plan_id", "digest"},
+	"SOURCE_DIRECT_PURGE_EXECUTE": {"plan_id", "digest", "confirmation"},
+	"SOURCE_DIRECT_PURGE_CANCEL":  {"plan_id", "digest"},
+	"SOURCE_DIRECT_PURGE_RECOVER": {"plan_id", "digest"},
+	"SOURCE_DIRECT_PURGE_RECEIPT": {"plan_id", "digest"},
+	"PING":                        {},
+	"STATUS":                      {},
+	"SEAL":                        {"object_id", "size", "sha256", "authorization_sha256", "plan_id"},
+	"PURGE":                       {"object_id", "authorization_sha256", "size", "sha256", "device", "inode", "plan_id"},
+	"INSPECT":                     {"object_id", "size", "sha256", "device", "inode", "plan_id"},
 	// RESTORE names a durable restore plan and the object it returns. It
 	// carries no device/inode: restore binds plan↔item↔original-destination
 	// durably, and the executor re-proves the destination live.

@@ -1,0 +1,24 @@
+FROM golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ndg-quarantine-candidate ./cmd/ndg-quarantine-candidate
+COPY internal ./internal
+COPY schemas ./schemas
+RUN CGO_ENABLED=0 go build -trimpath -o /out/ndg-quarantine-candidate ./cmd/ndg-quarantine-candidate
+FROM build AS ingest-build
+COPY cmd/nas-governance ./cmd/nas-governance
+RUN CGO_ENABLED=0 go build -trimpath -o /out/nas-governance ./cmd/nas-governance
+
+FROM scratch AS scanner
+COPY --from=ingest-build /out/nas-governance /nas-governance
+USER 10002:10002
+ENTRYPOINT ["/nas-governance"]
+
+FROM scratch AS candidate
+ARG SOURCE_SHA
+LABEL org.opencontainers.image.revision=$SOURCE_SHA com.ndg.channel="dual-purge-integration"
+COPY --from=build /out/ndg-quarantine-candidate /ndg-quarantine-candidate
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /licenses/
+USER 10001:10001
+ENTRYPOINT ["/ndg-quarantine-candidate"]

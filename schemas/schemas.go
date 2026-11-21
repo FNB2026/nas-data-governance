@@ -38,6 +38,9 @@ var Schema012 string
 //go:embed 013_authorization_audit.sql
 var Schema013 string
 
+//go:embed 014_dual_purge.sql
+var Schema014 string
+
 // All returns the base migrations in order. Store applies the governance
 // increments separately in its additive migration transaction.
 func All() []string {

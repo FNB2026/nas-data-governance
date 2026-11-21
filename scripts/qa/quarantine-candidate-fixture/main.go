@@ -1,0 +1,66 @@
+//go:build linux
+
+// quarantine-candidate-fixture seeds only a new CI-owned synthetic project.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/FNB2026/nas-data-governance/internal/domain"
+	"github.com/FNB2026/nas-data-governance/internal/store"
+)
+
+func check(err error) {
+	if err != nil {
+		panic("synthetic fixture preparation failed")
+	}
+}
+
+func main() {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || len(os.Args) != 2 {
+		panic("disposable GitHub runner required")
+	}
+	root := filepath.Clean(os.Args[1])
+	if filepath.Dir(root) != "/tmp" || !strings.HasPrefix(filepath.Base(root), "ndg-quarantine-ci-") {
+		panic("new synthetic fixture root required")
+	}
+	db := filepath.Join(root, "state", "project.db")
+	if _, err := os.Lstat(db); !os.IsNotExist(err) {
+		panic("new synthetic database required")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	check(err)
+	defer st.Close()
+	raw := []byte("synthetic delete fixture\n")
+	sum := sha256.Sum256(raw)
+	target := filepath.Join(root, "quarantine", "synthetic.txt")
+	f, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	check(err)
+	_, err = f.Write(raw)
+	check(err)
+	check(f.Close())
+	now := time.Now().UTC()
+	task := domain.OperationTask{ID: "synthetic-task", RootPath: "/quarantine", State: "completed", CreatedAt: now}
+	plan := domain.OperationPlan{ID: "synthetic-quarantine", State: domain.PlanVerified, Actions: []domain.PlannedAction{{
+		Path: "/quarantine/original", Action: domain.OperationQuarantine, TargetPath: "/quarantine/synthetic.txt",
+		File: domain.FileInstance{Size: int64(len(raw)), ContentSHA256: hex.EncodeToString(sum[:])},
+	}}}
+	check(st.CreateTask(ctx, task))
+	check(st.SavePlans(ctx, task.ID, []domain.OperationPlan{plan}))
+	check(st.BeginJournal(ctx, task.ID, plan.ID, plan.Actions))
+	check(st.MarkJournalDone(ctx, plan.ID, 0, "/quarantine/synthetic.txt"))
+	items, err := st.RegisterQuarantinesFromJournal(ctx, plan.ID, now.Add(-31*24*time.Hour), now.Add(-24*time.Hour))
+	check(err)
+	if len(items) != 1 {
+		panic("synthetic item not registered")
+	}
+	fmt.Println(items[0].ID)
+}
