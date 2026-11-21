@@ -33,7 +33,7 @@ func OpenBoundary(root string) (*Boundary, error) {
 		Flags: unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS,
 	})
 	if err != nil {
-		return nil, ErrMountBoundary
+		return nil, errors.Join(ErrMountBoundary, err)
 	}
 	id, err := boundaryStat(fd)
 	if err != nil {

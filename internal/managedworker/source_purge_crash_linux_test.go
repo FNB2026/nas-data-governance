@@ -53,7 +53,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 				t.Fatal("could not scan process crash fixture", err)
 			}
 			analyzed, err := app.NewAnalyzeService(st).Analyze(ctx, app.AnalyzeInput{
-				Files: scan.Files, StorageID: crashStorage, ConfinedRoot: root, Workers: 1,
+				Files: scan.Files, StorageID: crashStorage, ConfinedRoot: root, Workers: 1, BatchSize: 2,
 			})
 			if err != nil || analyzed.PersistErr != nil || analyzed.Persisted != 2 {
 				t.Fatal("could not analyze process crash fixture", err)

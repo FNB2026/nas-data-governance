@@ -393,7 +393,7 @@ func readPurgeRecord(dir int, name string, record any) error {
 		return ErrRecoveryRequired
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, 16385))
-	if err != nil || json.Unmarshal(raw, record) != nil {
+	if err != nil || json.Unmarshal(raw, record) != nil || f.Sync() != nil {
 		return ErrRecoveryRequired
 	}
 	return nil
@@ -466,7 +466,10 @@ func reconcilePurgeTransaction(ctx context.Context, plan PurgeTransaction) (Purg
 	if !receiptExists && purgeJournal(stage, receiptName, receipt) != nil {
 		return empty, ErrRecoveryRequired
 	}
-	if pending && (unix.Unlinkat(stage, "pending", 0) != nil || unix.Fsync(stage) != nil) {
+	if pending && unix.Unlinkat(stage, "pending", 0) != nil {
+		return empty, ErrRecoveryRequired
+	}
+	if err := unix.Fsync(stage); err != nil {
 		return empty, ErrRecoveryRequired
 	}
 	return receipt, nil

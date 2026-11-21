@@ -110,11 +110,17 @@ func Scan(ctx context.Context, opts Options, visit func(domain.FileInstance) err
 	if reader == nil && runtime.GOOS == "linux" && !opts.CrossMounts {
 		boundary, err := OpenBoundary(opts.Root)
 		if err != nil {
+			if opts.NetworkSource && (isNetworkInterruption(err) || errors.Is(err, os.ErrNotExist)) {
+				return Stats{Errors: []ErrorEntry{{Path: opts.Root, Error: err}}, SourceUnavailable: true}, nil
+			}
 			return Stats{}, err
 		}
 		defer boundary.Close()
 		stats, err := scan(ctx, opts, visit, boundary.ReadDirectory)
-		return stats, errors.Join(err, boundary.VerifyRoot())
+		if err != nil {
+			return stats, err
+		}
+		return stats, boundary.VerifyRoot()
 	}
 	if reader == nil {
 		reader = os.ReadDir
