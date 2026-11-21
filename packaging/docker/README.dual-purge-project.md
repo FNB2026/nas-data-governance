@@ -35,7 +35,7 @@ docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges \
   --mount "type=bind,src=$NDG_CANDIDATE_SOURCE,dst=/ndg-volume,readonly" \
   --mount "type=bind,src=$NDG_CANDIDATE_STATE,dst=/state" \
-  ndg-project-ingest:local analyze --confined-root /ndg-volume --storage-id candidate-volume \
+  ndg-project-ingest:local analyze --storage-id candidate-volume \
   --db /state/project.db --index /state/index.jsonl --out /state/formats.json
 ```
 
@@ -89,3 +89,9 @@ The confined Analyzer reads only verified Linux descriptors and binds its
 format record to the indexed size, identity, hash and discovery generation.
 Run it after every rescan before authorizing direct purge. Unknown or legacy
 unbound format records cannot authorize deletion.
+
+On Linux the Analyzer takes the analysis root from the registered storage for
+each selected file when using a project database. For JSON-only analysis,
+provide the authorized source with `--confined-root`. The index does not set
+the source boundary. The Worker also requires a kernel file identity handle
+for a recoverable purge, checked before claiming the execution.

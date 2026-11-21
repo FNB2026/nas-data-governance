@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/FNB2026/nas-data-governance/internal/domain"
@@ -24,11 +25,21 @@ func TestAnalyzeService_JSONOnlyMode(t *testing.T) {
 		{StorageID: "test", Path: filepath.Join(root, "b.txt"), Name: "b.txt"},
 	}
 
+	explicitRoot := ""
+	if runtime.GOOS == "linux" {
+		scanned, err := NewScanService(nil).Scan(context.Background(), ScanInput{Root: root, StorageID: "test", Workers: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = scanned.Files
+		explicitRoot = root
+	}
 	svc := NewAnalyzeService(nil) // no DB
 	result, err := svc.Analyze(context.Background(), AnalyzeInput{
-		Files:     files,
-		Workers:   1,
-		BatchSize: 500,
+		Files:        files,
+		ConfinedRoot: explicitRoot,
+		Workers:      1,
+		BatchSize:    500,
 	})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)

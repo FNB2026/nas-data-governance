@@ -24,7 +24,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 	if os.Geteuid() == 0 || os.Getegid() == 0 {
 		t.Skip("worker runs as a non-root account")
 	}
-	for _, cut := range []string{"before_claim", "after_claim", "after_filesystem_commit", "after_database_commit"} {
+	for _, cut := range []string{"before_claim", "after_claim", "after_rollback_filesystem", "after_filesystem_commit", "after_database_commit"} {
 		t.Run(cut, func(t *testing.T) {
 			ctx := context.Background()
 			base := t.TempDir()
@@ -109,7 +109,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 			} else if committed {
 				wantState = "PURGED"
 			}
-			verifySourceCrashState(t, ctx, reopened, root, plan, wantState, deleted)
+			verifySourceCrashState(t, ctx, reopened, root, plan, wantState, deleted, cut == "after_rollback_filesystem")
 			for _, path := range []string{keeper, sentinel} {
 				if got, err := os.ReadFile(path); err != nil || string(got) != contents {
 					t.Fatal("keeper or outside sentinel changed", err)
@@ -119,7 +119,7 @@ func TestSourcePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 	}
 }
 
-func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteStore, root string, plan SourcePurgeResult, wantState string, deleted bool) {
+func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteStore, root string, plan SourcePurgeResult, wantState string, deleted, rolledBackOnDisk bool) {
 	t.Helper()
 	svc, err := NewSourcePurge(st, root)
 	if err != nil {
@@ -147,7 +147,7 @@ func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteS
 	}
 	for path, absent := range map[string]bool{
 		filepath.Join(root, "target.pdf"):                           deleted,
-		filepath.Join(root, ".ndg-purge-stage", "receipt-"+plan.ID): !deleted && wantState != "ROLLED_BACK",
+		filepath.Join(root, ".ndg-purge-stage", "receipt-"+plan.ID): !deleted && !rolledBackOnDisk,
 	} {
 		_, err := os.Lstat(path)
 		if (absent && !errors.Is(err, os.ErrNotExist)) || (!absent && err != nil) {
@@ -159,13 +159,14 @@ func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteS
 		if deleted {
 			expected = "PURGED"
 		}
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			resolved, err := svc.Advance(ctx, plan.ID, plan.Digest, "RECOVER", "")
 			if err != nil || resolved.State != expected {
 				t.Fatal("operator reconciliation did not return the proven outcome", resolved.State, err)
 			}
 		}
-		verifySourceCrashState(t, ctx, st, root, plan, expected, deleted)
+		verifySourceCrashState(t, ctx, st, root, plan, expected, deleted, expected == "ROLLED_BACK")
+		assertSinglePurgeTerminalAudit(t, st, plan.ID, expected)
 	}
 }
 
@@ -215,6 +216,13 @@ func TestSourcePurgeDatabaseKillChild(t *testing.T) {
 	}
 	stop("after_claim")
 	p.State = "EXECUTING"
+	if cut == "after_rollback_filesystem" {
+		r, err := managedfs.ReconcilePurgeTransaction(ctx, txn)
+		if err != nil || r.State != "ROLLED_BACK" {
+			t.Fatal("fixture rollback did not persist its filesystem receipt", err)
+		}
+		stop("after_rollback_filesystem")
+	}
 	result, err := managedfs.ExecutePurgeTransaction(ctx, txn)
 	if err != nil || result.State != "PURGED" {
 		t.Fatal("fixture filesystem commit failed", err)

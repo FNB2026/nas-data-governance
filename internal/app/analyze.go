@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -98,8 +101,9 @@ type AnalyzeResult struct {
 //   - Write progress files (CLI's job — it polls Progress() via a ticker)
 //   - Print to stdout/stderr (CLI's job)
 type AnalyzeService struct {
-	store   AnalyzeStore // nil for JSON-only mode
-	analyze AnalyzeFunc
+	store         AnalyzeStore // nil for JSON-only mode
+	analyze       AnalyzeFunc
+	customAnalyze bool
 
 	// Internal progress counters. Read by Progress() from any goroutine.
 	stage     atomic.Value // string
@@ -121,7 +125,7 @@ func NewAnalyzeService(st AnalyzeStore) *AnalyzeService {
 // NewAnalyzeServiceWithFunc creates a new analyze service with a custom
 // analyze function, primarily for testing.
 func NewAnalyzeServiceWithFunc(st AnalyzeStore, fn AnalyzeFunc) *AnalyzeService {
-	s := &AnalyzeService{store: st, analyze: fn}
+	s := &AnalyzeService{store: st, analyze: fn, customAnalyze: true}
 	s.stage.Store("idle")
 	return s
 }
@@ -197,14 +201,27 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 	// Resume: load existing format rows from DB. Resume is based on durable
 	// format rows, not a fragile path cursor. This safely handles worker
 	// completion order and makes repeated runs idempotent.
-	var boundary *scanner.Boundary
-	if in.ConfinedRoot != "" {
-		var err error
-		boundary, err = scanner.OpenBoundary(in.ConfinedRoot)
-		if err != nil {
-			return nil, err
+	boundaries := make(map[string]*scanner.Boundary)
+	roots, err := s.analysisRoots(ctx, in.ConfinedRoot, files)
+	if err != nil {
+		return nil, err
+	}
+	openedRoots := make(map[string]*scanner.Boundary)
+	defer func() {
+		for _, boundary := range openedRoots {
+			_ = boundary.Close()
 		}
-		defer boundary.Close()
+	}()
+	for storageID, root := range roots {
+		boundary := openedRoots[root]
+		if boundary == nil {
+			boundary, err = scanner.OpenBoundary(root)
+			if err != nil {
+				return nil, err
+			}
+			openedRoots[root] = boundary
+		}
+		boundaries[storageID] = boundary
 	}
 	existing := map[string]store.FormatRecord{}
 	if in.Resume {
@@ -224,9 +241,11 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 	}
 	pending := make([]pendingFile, 0, len(files))
 	for i, file := range files {
+		boundary := boundaries[file.StorageID]
 		record, ok := existing[formatRecordKey(file.StorageID, file.Path)]
 		info := record.Info
-		if ok && (boundary == nil || record.Binding != nil && *record.Binding == store.BindAnalyzedFormat(file)) &&
+		if ok && (boundary == nil || withinAnalysisRoot(roots[file.StorageID], file.Path) &&
+			record.Binding != nil && *record.Binding == store.BindAnalyzedFormat(file)) &&
 			!(in.RefreshUnknown && IsUnknownFormat(info)) &&
 			!(in.RefreshMetadata && NeedsMetadataRefresh(info)) {
 			result.Entries[i] = FormatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
@@ -293,15 +312,18 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 			var info domain.FormatInfo
 			var analyzeErr error
 			var binding *store.FormatBinding
+			boundary := boundaries[file.StorageID]
 			if boundary == nil {
 				info, analyzeErr = s.analyze(file.Path)
 			} else {
 				analyzeErr = boundary.ReadFile(file, func(opened *os.File) error {
 					var err error
-					if file.ContentSHA256 != "" && file.Physical.Reliable {
-						sha, err := fingerprint.FullReader(opened)
-						if err != nil || sha != file.ContentSHA256 {
-							return scanner.ErrMountBoundary
+					if file.Physical.Reliable && file.Device != 0 && file.Inode != 0 {
+						if file.ContentSHA256 != "" {
+							sha, err := fingerprint.FullReader(opened)
+							if err != nil || sha != file.ContentSHA256 {
+								return scanner.ErrMountBoundary
+							}
 						}
 						proof := store.BindAnalyzedFormat(file)
 						binding = &proof
@@ -313,6 +335,11 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 			entry := FormatReportEntry{Path: file.Path, StorageID: file.StorageID, Format: info}
 			if analyzeErr != nil {
 				entry.Error = analyzeErr.Error()
+				if boundary != nil {
+					entry.Format = domain.FormatInfo{}
+					entry.Error = "confined analysis refused or unreadable; source path omitted"
+					entry.Path = ""
+				}
 				atomic.AddInt64(&result.Failed, 1)
 			} else if IsUnknownFormat(info) {
 				atomic.AddInt64(&result.Unrecognized, 1)
@@ -386,4 +413,53 @@ func NeedsMetadataRefresh(info domain.FormatInfo) bool {
 	default:
 		return false
 	}
+}
+
+// The index supplies file records, never the authority to choose a Linux root.
+func (s *AnalyzeService) analysisRoots(ctx context.Context, explicit string, files []domain.FileInstance) (map[string]string, error) {
+	roots := make(map[string]string)
+	if explicit != "" {
+		root, err := filepath.Abs(explicit)
+		if err != nil {
+			return nil, scanner.ErrMountBoundary
+		}
+		for _, file := range files {
+			roots[file.StorageID] = root
+		}
+		return roots, nil
+	}
+	if runtime.GOOS != "linux" || s.customAnalyze || len(files) == 0 {
+		return roots, nil
+	}
+	registry, ok := s.store.(interface {
+		ListStorages(context.Context) ([]domain.Storage, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("app: Linux analysis requires a registered storage root or --confined-root")
+	}
+	storages, err := registry.ListStorages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	registered := make(map[string]string)
+	for _, storage := range storages {
+		if (storage.Kind == "local" || storage.Kind == "filesystem") &&
+			filepath.IsAbs(storage.RootPath) && filepath.Clean(storage.RootPath) == storage.RootPath {
+			registered[storage.ID] = storage.RootPath
+		}
+	}
+	for _, file := range files {
+		root, ok := registered[file.StorageID]
+		if !ok {
+			return nil, fmt.Errorf("app: Linux analysis could not prove a local storage root; source path omitted")
+		}
+		roots[file.StorageID] = root
+	}
+	return roots, nil
+}
+
+func withinAnalysisRoot(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && filepath.IsAbs(path) && filepath.Clean(path) == path &&
+		relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

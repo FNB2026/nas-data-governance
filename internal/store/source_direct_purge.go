@@ -214,7 +214,7 @@ func (f SourcePurgeFacts) SourcePurgeDecision(ruleVersion string) (domain.Direct
 
 func sourceFormat(file SourcePurgeFile) (domain.FormatInfo, bool) {
 	var result persistedFormat
-	if json.Unmarshal([]byte(file.Format), &result) != nil || result.Binding == nil ||
+	if len(file.SHA256) != 64 || json.Unmarshal([]byte(file.Format), &result) != nil || result.Binding == nil ||
 		result.Format == "" || result.Format == "unknown" || result.Category == domain.CategoryUnknown {
 		return result.FormatInfo, false
 	}

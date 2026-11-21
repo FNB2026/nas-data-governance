@@ -60,8 +60,7 @@ func (b *Boundary) VerifyRoot() error {
 		return err
 	}
 	defer current.Close()
-	if current.id.Dev_major != b.id.Dev_major || current.id.Dev_minor != b.id.Dev_minor ||
-		current.id.Ino != b.id.Ino || current.id.Mnt_id != b.id.Mnt_id {
+	if !sameBoundaryIdentity(current.id, b.id) {
 		return ErrMountBoundary
 	}
 	return nil
@@ -91,6 +90,17 @@ func (b *Boundary) ReadFile(file domain.FileInstance, read func(*os.File) error)
 	if err := b.VerifyRoot(); err != nil {
 		return err
 	}
+	parentPath := filepath.Dir(file.Path)
+	parent, err := b.open(parentPath, unix.O_PATH|unix.O_DIRECTORY)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	parentID, err := boundaryStat(int(parent.Fd()))
+	if err != nil {
+		return err
+	}
+
 	meta, err := b.open(file.Path, unix.O_PATH)
 	if err != nil {
 		return err
@@ -100,18 +110,39 @@ func (b *Boundary) ReadFile(file domain.FileInstance, read func(*os.File) error)
 	if err != nil || before.Mode&unix.S_IFMT != unix.S_IFREG ||
 		before.Size != uint64(file.Size) || before.Mtime.Sec != file.ModifiedAt.Unix() ||
 		before.Mtime.Nsec != uint32(file.ModifiedAt.Nanosecond()) ||
-		(file.Physical.Reliable && (unix.Mkdev(before.Dev_major, before.Dev_minor) != file.Device || before.Ino != file.Inode)) {
+		(file.Device != 0 && unix.Mkdev(before.Dev_major, before.Dev_minor) != file.Device) ||
+		(file.Inode != 0 && before.Ino != file.Inode) {
 		return ErrMountBoundary
+	}
+	if err := b.verifyFilePath(file.Path, before, parentID); err != nil {
+		return err
 	}
 	f, err := os.Open(fmt.Sprintf("/proc/self/fd/%d", meta.Fd()))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	opened, err := boundaryStat(int(f.Fd()))
+	if err != nil || !sameBoundaryFile(before, opened) {
+		return ErrMountBoundary
+	}
 	if err := read(f); err != nil {
 		return err
 	}
-	current, err := b.open(file.Path, unix.O_PATH)
+	return b.verifyFilePath(file.Path, before, parentID)
+}
+
+func (b *Boundary) verifyFilePath(path string, before, parentID unix.Statx_t) error {
+	currentParent, err := b.open(filepath.Dir(path), unix.O_PATH|unix.O_DIRECTORY)
+	if err != nil {
+		return err
+	}
+	defer currentParent.Close()
+	currentID, err := boundaryStat(int(currentParent.Fd()))
+	if err != nil || !sameBoundaryIdentity(parentID, currentID) {
+		return ErrMountBoundary
+	}
+	current, err := b.open(path, unix.O_PATH)
 	if err != nil {
 		return err
 	}
@@ -123,9 +154,12 @@ func (b *Boundary) ReadFile(file domain.FileInstance, read func(*os.File) error)
 	return b.VerifyRoot()
 }
 
+func sameBoundaryIdentity(a, b unix.Statx_t) bool {
+	return a.Mnt_id == b.Mnt_id && a.Dev_major == b.Dev_major && a.Dev_minor == b.Dev_minor && a.Ino == b.Ino
+}
+
 func sameBoundaryFile(a, b unix.Statx_t) bool {
-	return a.Mnt_id == b.Mnt_id && a.Dev_major == b.Dev_major && a.Dev_minor == b.Dev_minor &&
-		a.Ino == b.Ino && a.Size == b.Size && a.Mode == b.Mode && a.Mtime == b.Mtime && a.Ctime == b.Ctime
+	return sameBoundaryIdentity(a, b) && a.Size == b.Size && a.Mode == b.Mode && a.Mtime == b.Mtime && a.Ctime == b.Ctime
 }
 
 func (b *Boundary) ReadDirectory(path string) ([]os.DirEntry, error) {

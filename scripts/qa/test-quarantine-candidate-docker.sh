@@ -48,7 +48,7 @@ scan_tool=(docker run --rm --network none --read-only --cap-drop ALL
   --mount "type=bind,src=$fixture/source,dst=/ndg-volume,readonly"
   --mount "type=bind,src=$fixture/state,dst=/state" "$NDG_SCAN_IMAGE")
 "${scan_tool[@]}" scan --root /ndg-volume --storage candidate-volume --db /state/project.db --out /state/index.jsonl >&2
-"${scan_tool[@]}" analyze --confined-root /ndg-volume --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
+"${scan_tool[@]}" analyze --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
 "${compose[@]}" up -d --no-build --pull never >/dev/null
 if [[ "${NDG_TEST_PURGE_BROWSER:-}" == 1 ]]; then
   bash scripts/qa/test-purge-console-browser.sh "$fixture"

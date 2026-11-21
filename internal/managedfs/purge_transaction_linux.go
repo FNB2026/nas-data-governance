@@ -321,11 +321,12 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 	if !purgeEntryAbsent(stage, "pending") {
 		return empty, ErrRecoveryRequired
 	}
-	if !purgeEntryAbsent(stage, "receipt-"+plan.ID) || !purgeEntryAbsent(stage, plan.ID) {
+	if !purgeEntryAbsent(stage, "receipt-"+plan.ID) || !purgeEntryAbsent(stage, "rollback-"+plan.ID) || !purgeEntryAbsent(stage, plan.ID) {
 		return empty, ErrRejected
 	}
 	current, err := observeUnderRoot(ctx, root, plan.Target.Relative)
-	if err != nil || current != plan.Target || purgeKeeper(ctx, root, plan) != nil {
+	if err != nil || current != plan.Target || purgeKeeper(ctx, root, plan) != nil ||
+		!supportsRollbackHandle(parent, path.Base(plan.Target.Relative)) {
 		return empty, ErrRejected
 	}
 	if err := purgeJournal(stage, "pending", plan); err != nil {
@@ -382,7 +383,7 @@ func executePurgeTransaction(ctx context.Context, plan PurgeTransaction, fault f
 }
 
 func readPurgeRecord(dir int, name string, record any) error {
-	fd, err := rooted(dir, name, unix.O_RDONLY)
+	fd, err := rooted(dir, name, unix.O_RDONLY|unix.O_NONBLOCK)
 	if err != nil {
 		return ErrRecoveryRequired
 	}
@@ -393,146 +394,237 @@ func readPurgeRecord(dir int, name string, record any) error {
 		return ErrRecoveryRequired
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, 16385))
-	if err != nil || json.Unmarshal(raw, record) != nil || f.Sync() != nil {
+	if err != nil || json.Unmarshal(raw, record) != nil {
+		return ErrRecoveryRequired
+	}
+	canonical, err := json.Marshal(record)
+	if err != nil || !bytes.Equal(raw, append(canonical, '\n')) || f.Sync() != nil {
 		return ErrRecoveryRequired
 	}
 	return nil
 }
 
-// ReconcilePurgeTransaction is operator requested. It never performs an
-// unlink of user content. It only reconciles complete, attributable proof.
+// The private stage flock is held by the caller. Only completed, synced
+// records are renamed into their permanent names. A leftover scratch record
+// is disposable and cannot serve as recovery evidence.
+func writeRollbackRecord(stage int, name string, record any) error {
+	scratch := name + ".partial"
+	if !purgeEntryAbsent(stage, scratch) {
+		fd, err := rooted(stage, scratch, unix.O_RDONLY|unix.O_NONBLOCK)
+		if err != nil {
+			return err
+		}
+		_, err = regular(fd)
+		unix.Close(fd)
+		if err != nil || unix.Unlinkat(stage, scratch, 0) != nil {
+			return ErrRecoveryRequired
+		}
+	}
+	if err := purgeJournal(stage, scratch, record); err != nil {
+		return err
+	}
+	if err := unix.Renameat2(stage, scratch, stage, name, unix.RENAME_NOREPLACE); err != nil {
+		return err
+	}
+	return unix.Fsync(stage)
+}
+
+type purgeRollbackIntent struct {
+	ApprovalSHA256 string
+	Staged         PurgeTarget
+	FileHandle     string
+}
+
+type purgeDiskReceipt struct {
+	PurgeReceipt
+	Restored *PurgeTarget `json:"restored,omitempty"`
+}
+
+// Reconcile never unlinks user content. A rollback intent authenticates the
+// staged inode across the rename; a receipt records the exact restored ctime.
 func reconcilePurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
+	return reconcilePurgeWithFault(ctx, plan, false, nil)
+}
+
+func recoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
+	return reconcilePurgeWithFault(ctx, plan, true, nil)
+}
+
+func reconcilePurgeWithFault(ctx context.Context, plan PurgeTransaction, precommitOnly bool, fault func(string) error) (PurgeReceipt, error) {
 	empty := PurgeReceipt{}
 	d, err := openPurgeDirectories(plan)
 	if err != nil {
 		return empty, ErrRecoveryRequired
 	}
-	stage := d.stage
+	defer d.close()
 	receiptName := "receipt-" + plan.ID
 	commitName := "commit-" + plan.ID
-	name := path.Base(plan.Target.Relative)
-	pending := !purgeEntryAbsent(stage, "pending")
-	receiptExists := !purgeEntryAbsent(stage, receiptName)
-	if pending && !receiptExists {
-		d.close()
-		// This helper reacquires the stage flock and rechecks all bindings.
-		return recoverPurgeTransaction(ctx, plan)
-	}
-	defer d.close()
-	if ctx.Err() != nil || !purgeEntryAbsent(stage, plan.ID) || validatePurgeBinding(plan, d.root, stage, d.parent) != nil {
+	intentName := "rollback-" + plan.ID
+	pending := !purgeEntryAbsent(d.stage, "pending")
+	staged := !purgeEntryAbsent(d.stage, plan.ID)
+	hasReceipt := !purgeEntryAbsent(d.stage, receiptName)
+	hasCommit := !purgeEntryAbsent(d.stage, commitName)
+	if ctx.Err() != nil || precommitOnly && (!pending || hasReceipt || hasCommit) {
 		return empty, ErrRecoveryRequired
 	}
 	if pending {
 		var recorded PurgeTransaction
-		if readPurgeRecord(stage, "pending", &recorded) != nil || !reflect.DeepEqual(recorded, plan) {
+		if readPurgeRecord(d.stage, "pending", &recorded) != nil || !reflect.DeepEqual(recorded, plan) {
 			return empty, ErrRecoveryRequired
 		}
 	}
-	var receipt PurgeReceipt
-	if receiptExists {
-		if readPurgeRecord(stage, receiptName, &receipt) != nil || receipt.ID != plan.ID {
+	var intent *purgeRollbackIntent
+	if !purgeEntryAbsent(d.stage, intentName) {
+		intent = new(purgeRollbackIntent)
+		if readPurgeRecord(d.stage, intentName, intent) != nil || !validRollbackIntent(plan, *intent) {
 			return empty, ErrRecoveryRequired
 		}
-	} else {
-		receipt = PurgeReceipt{ID: plan.ID, State: "ROLLED_BACK"}
 	}
-	switch receipt.State {
-	case "PURGED":
-		var commit PurgeTarget
-		if readPurgeRecord(stage, commitName, &commit) != nil || !purgeEntryAbsent(d.parent, name) {
+	fail := func(phase string) bool {
+		return ctx.Err() != nil || (fault != nil && fault(phase) != nil)
+	}
+	receipt := purgeDiskReceipt{PurgeReceipt: PurgeReceipt{ID: plan.ID, State: "ROLLED_BACK"}}
+	switch {
+	case hasReceipt:
+		receipt = purgeDiskReceipt{}
+		if staged || readPurgeRecord(d.stage, receiptName, &receipt) != nil || receipt.ID != plan.ID {
 			return empty, ErrRecoveryRequired
 		}
-		commit.CTimeSec, commit.CTimeNsec = plan.Target.CTimeSec, plan.Target.CTimeNsec
-		if commit != plan.Target || purgeKeeper(ctx, d.root, plan) != nil {
+		switch receipt.State {
+		case "PURGED":
+			var commit PurgeTarget
+			if intent != nil || receipt.Restored != nil || readPurgeRecord(d.stage, commitName, &commit) != nil ||
+				!purgeEntryAbsent(d.parent, path.Base(plan.Target.Relative)) ||
+				!samePurgeExceptCTime(commit, plan.Target) || purgeKeeper(ctx, d.root, plan) != nil {
+				return empty, ErrRecoveryRequired
+			}
+		case "ROLLED_BACK":
+			if hasCommit || !verifyRollbackReceipt(ctx, plan, d, intent, receipt) {
+				return empty, ErrRecoveryRequired
+			}
+		default:
 			return empty, ErrRecoveryRequired
 		}
-	case "ROLLED_BACK":
-		if !purgeEntryAbsent(stage, commitName) {
-			return empty, ErrRecoveryRequired
+	case hasCommit || (!pending && (staged || intent != nil)):
+		return empty, ErrRecoveryRequired
+	case staged || intent != nil:
+		restored, err := restorePurgeTarget(ctx, plan, d, staged, intent, intentName, fail)
+		if err != nil {
+			return empty, err
 		}
+		receipt.Restored = &restored
+	default:
 		current, err := observeUnderRoot(ctx, d.root, plan.Target.Relative)
-		if receiptExists {
-			current.CTimeSec, current.CTimeNsec = plan.Target.CTimeSec, plan.Target.CTimeNsec
-		}
 		if err != nil || current != plan.Target {
 			return empty, ErrRecoveryRequired
 		}
-	default:
+	}
+	if validatePurgeBinding(plan, d.root, d.stage, d.parent) != nil || fail("rollback_before_receipt") {
 		return empty, ErrRecoveryRequired
 	}
-	if ctx.Err() != nil || validatePurgeBinding(plan, d.root, stage, d.parent) != nil {
+	if !hasReceipt && (writeRollbackRecord(d.stage, receiptName, receipt) != nil || fail("rollback_receipt_synced")) {
 		return empty, ErrRecoveryRequired
 	}
-	if !receiptExists && purgeJournal(stage, receiptName, receipt) != nil {
+	if pending && unix.Unlinkat(d.stage, "pending", 0) != nil {
 		return empty, ErrRecoveryRequired
 	}
-	if pending && unix.Unlinkat(stage, "pending", 0) != nil {
+	if unix.Fsync(d.stage) != nil {
 		return empty, ErrRecoveryRequired
 	}
-	if err := unix.Fsync(stage); err != nil {
-		return empty, ErrRecoveryRequired
-	}
-	return receipt, nil
+	return receipt.PurgeReceipt, nil
 }
 
-// recoverPurgeTransaction can restore only a provably staged object before
-// commit authorization. Ambiguous or post-commit states keep their lock.
-func recoverPurgeTransaction(ctx context.Context, plan PurgeTransaction) (PurgeReceipt, error) {
-	empty := PurgeReceipt{}
-	d, err := openPurgeDirectories(plan)
+func samePurgeExceptCTime(actual, expected PurgeTarget) bool {
+	actual.CTimeSec, actual.CTimeNsec = expected.CTimeSec, expected.CTimeNsec
+	return actual == expected
+}
+
+func purgeCTimeAtLeast(actual, earlier PurgeTarget) bool {
+	return actual.CTimeSec > earlier.CTimeSec ||
+		actual.CTimeSec == earlier.CTimeSec && actual.CTimeNsec >= earlier.CTimeNsec
+}
+
+func validRollbackIntent(plan PurgeTransaction, intent purgeRollbackIntent) bool {
+	return intent.ApprovalSHA256 == plan.ApprovalSHA256 && opaque(intent.FileHandle) &&
+		samePurgeExceptCTime(intent.Staged, plan.Target) && purgeCTimeAtLeast(intent.Staged, plan.Target)
+}
+
+func rollbackObject(ctx context.Context, plan PurgeTransaction, dir int, name string) (PurgeTarget, string, error) {
+	fd, err := purgeFileFD(dir, name)
 	if err != nil {
-		return empty, err
+		return PurgeTarget{}, "", err
 	}
-	defer d.close()
-	stage := d.stage
-	if !purgeEntryAbsent(stage, "commit-"+plan.ID) || !purgeEntryAbsent(stage, "receipt-"+plan.ID) {
-		return empty, ErrRecoveryRequired
-	}
-	expected, err := json.Marshal(plan)
+	defer unix.Close(fd)
+	handle, err := rollbackHandle(fd)
 	if err != nil {
-		return empty, ErrRecoveryRequired
+		return PurgeTarget{}, "", err
 	}
-	fd, err := rooted(stage, "pending", unix.O_RDONLY)
+	obj, err := purgeFile(ctx, fd, plan.Target.Relative)
+	obj.Root, obj.Parent = plan.Target.Root, plan.Target.Parent
+	return obj, handle, err
+}
+
+func rollbackHandle(fd int) (string, error) {
+	// AT_HANDLE_FID asks for persistent object identity without requesting
+	// authority to open by handle. The mount is checked independently by statx.
+	const atHandleFID = 0x200
+	handle, _, err := unix.NameToHandleAt(fd, "", unix.AT_EMPTY_PATH|atHandleFID)
+	if err != nil || handle.Size() == 0 {
+		return "", ErrRecoveryRequired
+	}
+	id := sha256.Sum256(fmt.Appendf(nil, "%d:%x", handle.Type(), handle.Bytes()))
+	return hex.EncodeToString(id[:]), nil
+}
+
+func supportsRollbackHandle(dir int, name string) bool {
+	fd, err := purgeFileFD(dir, name)
 	if err != nil {
-		return empty, ErrRecoveryRequired
+		return false
 	}
-	journal := os.NewFile(uintptr(fd), "purge journal")
-	defer journal.Close()
-	if _, err := regular(fd); err != nil {
-		return empty, ErrRecoveryRequired
-	}
-	expected = append(expected, '\n')
-	record, err := io.ReadAll(io.LimitReader(journal, int64(len(expected)+1)))
-	if err != nil || !bytes.Equal(record, expected) || ctx.Err() != nil {
-		return empty, ErrRecoveryRequired
-	}
+	defer unix.Close(fd)
+	_, err = rollbackHandle(fd)
+	return err == nil
+}
+
+func restorePurgeTarget(ctx context.Context, plan PurgeTransaction, d purgeDirectorySet, staged bool,
+	intent *purgeRollbackIntent, intentName string, fail func(string) bool) (PurgeTarget, error) {
 	name := path.Base(plan.Target.Relative)
-	if purgeEntryAbsent(stage, plan.ID) {
+	if staged {
+		obj, handle, err := rollbackObject(ctx, plan, d.stage, plan.ID)
+		candidate := purgeRollbackIntent{plan.ApprovalSHA256, obj, handle}
+		if err != nil || !validRollbackIntent(plan, candidate) || (intent != nil && candidate != *intent) ||
+			!purgeEntryAbsent(d.parent, name) {
+			return PurgeTarget{}, ErrRecoveryRequired
+		}
+		if intent == nil {
+			if writeRollbackRecord(d.stage, intentName, candidate) != nil {
+				return PurgeTarget{}, ErrRecoveryRequired
+			}
+			intent = &candidate
+		}
+		if fail("rollback_intent_synced") || validatePurgeBinding(plan, d.root, d.stage, d.parent) != nil ||
+			unix.Renameat2(d.stage, plan.ID, d.parent, name, unix.RENAME_NOREPLACE) != nil ||
+			fail("rollback_renamed") {
+			return PurgeTarget{}, ErrRecoveryRequired
+		}
+	}
+	restored, handle, err := rollbackObject(ctx, plan, d.parent, name)
+	if err != nil || handle != intent.FileHandle || !samePurgeExceptCTime(restored, intent.Staged) ||
+		!purgeCTimeAtLeast(restored, intent.Staged) || !purgeEntryAbsent(d.stage, plan.ID) ||
+		unix.Fsync(d.parent) != nil || unix.Fsync(d.stage) != nil {
+		return PurgeTarget{}, ErrRecoveryRequired
+	}
+	return restored, nil
+}
+
+func verifyRollbackReceipt(ctx context.Context, plan PurgeTransaction, d purgeDirectorySet, intent *purgeRollbackIntent, receipt purgeDiskReceipt) bool {
+	if intent == nil {
 		current, err := observeUnderRoot(ctx, d.root, plan.Target.Relative)
-		if err != nil || current != plan.Target {
-			return empty, ErrRecoveryRequired
-		}
-	} else {
-		staged, err := purgeFileFD(stage, plan.ID)
-		if err != nil {
-			return empty, ErrRecoveryRequired
-		}
-		current, err := purgeFile(ctx, staged, plan.Target.Relative)
-		unix.Close(staged)
-		current.Root, current.Parent = plan.Target.Root, plan.Target.Parent
-		current.CTimeSec, current.CTimeNsec = plan.Target.CTimeSec, plan.Target.CTimeNsec
-		if err != nil || current != plan.Target || validatePurgeBinding(plan, d.root, stage, d.parent) != nil ||
-			unix.Renameat2(stage, plan.ID, d.parent, name, unix.RENAME_NOREPLACE) != nil ||
-			unix.Fsync(d.parent) != nil || unix.Fsync(stage) != nil {
-			return empty, ErrRecoveryRequired
-		}
+		return err == nil && receipt.Restored == nil && current == plan.Target
 	}
-	receipt := PurgeReceipt{ID: plan.ID, State: "ROLLED_BACK"}
-	if purgeJournal(stage, "receipt-"+plan.ID, receipt) != nil ||
-		unix.Unlinkat(stage, "pending", 0) != nil || unix.Fsync(stage) != nil {
-		return empty, ErrRecoveryRequired
-	}
-	return receipt, nil
+	restored, handle, err := rollbackObject(ctx, plan, d.parent, path.Base(plan.Target.Relative))
+	return err == nil && receipt.Restored != nil && restored == *receipt.Restored &&
+		handle == intent.FileHandle && samePurgeExceptCTime(restored, intent.Staged) && purgeCTimeAtLeast(restored, intent.Staged)
 }
 
 func dryRunPurgeTransaction(ctx context.Context, plan PurgeTransaction) error {
@@ -544,11 +636,12 @@ func dryRunPurgeTransaction(ctx context.Context, plan PurgeTransaction) error {
 	if !purgeEntryAbsent(d.stage, "pending") {
 		return ErrRecoveryRequired
 	}
-	if !purgeEntryAbsent(d.stage, "receipt-"+plan.ID) || !purgeEntryAbsent(d.stage, plan.ID) {
+	if !purgeEntryAbsent(d.stage, "receipt-"+plan.ID) || !purgeEntryAbsent(d.stage, "rollback-"+plan.ID) || !purgeEntryAbsent(d.stage, plan.ID) {
 		return ErrRejected
 	}
 	observed, err := observeUnderRoot(ctx, d.root, plan.Target.Relative)
-	if err != nil || observed != plan.Target || purgeKeeper(ctx, d.root, plan) != nil {
+	if err != nil || observed != plan.Target || purgeKeeper(ctx, d.root, plan) != nil ||
+		!supportsRollbackHandle(d.parent, path.Base(plan.Target.Relative)) {
 		return ErrRejected
 	}
 	return nil

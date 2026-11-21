@@ -402,3 +402,125 @@ func TestRootedPurgeKillChild(t *testing.T) {
 	})
 	t.Fatal("subprocess did not reach kill point", err)
 }
+
+func TestRootedPurgeRollbackProcessKill(t *testing.T) {
+	for _, tc := range []struct {
+		name, cut string
+		damage    func(*testing.T, PurgeTransaction, string)
+	}{
+		{name: "intent_synced", cut: "rollback_intent_synced"},
+		{name: "renamed", cut: "rollback_renamed"},
+		{name: "before_receipt", cut: "rollback_before_receipt"},
+		{name: "receipt_synced", cut: "rollback_receipt_synced"},
+		{name: "replaced_after_rename", cut: "rollback_renamed", damage: func(t *testing.T, plan PurgeTransaction, _ string) {
+			name := filepath.Join(plan.RootPath, plan.Target.Relative)
+			raw, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(name, name+".saved"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(name, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "corrupt_receipt", cut: "rollback_receipt_synced", damage: func(t *testing.T, plan PurgeTransaction, stage string) {
+			if err := os.WriteFile(filepath.Join(stage, "receipt-"+plan.ID), []byte("{"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "corrupt_intent", cut: "rollback_renamed", damage: func(t *testing.T, plan PurgeTransaction, stage string) {
+			if err := os.WriteFile(filepath.Join(stage, "rollback-"+plan.ID), []byte("{"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "root_replaced", cut: "rollback_renamed", damage: func(t *testing.T, plan PurgeTransaction, _ string) {
+			if err := os.Rename(plan.RootPath, plan.RootPath+".saved"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(plan.RootPath, 0700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "unlink_without_receipt", cut: "unlinked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, plan, stage := purgeFixture(t)
+			if tc.cut != "unlinked" {
+				_, err := executePurgeTransaction(ctx, plan, func(phase string) error {
+					if phase == "staged" {
+						return ErrRecoveryRequired
+					}
+					return nil
+				})
+				if !errors.Is(err, ErrRecoveryRequired) || purgeEntryMissing(t, stage, plan.ID) {
+					t.Fatal("fixture did not reach staged state", err)
+				}
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(exe, "-test.run=^TestRootedPurgeRollbackKillChild$")
+			cmd.Env = append(os.Environ(), "NDG_TEST_ROLLBACK_CUT="+tc.cut, "NDG_TEST_ROLLBACK_PLAN="+string(raw))
+			out, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+				t.Fatalf("expected actual SIGKILL, got %v %s", err, out)
+			}
+			if tc.damage != nil {
+				tc.damage(t, plan, stage)
+			}
+			blocked := tc.damage != nil || tc.cut == "unlinked"
+			for i := 0; i < 3; i++ {
+				r, err := ReconcilePurgeTransaction(ctx, plan)
+				if blocked {
+					if !errors.Is(err, ErrRecoveryRequired) || r != (PurgeReceipt{}) {
+						t.Fatal("accepted incomplete or changed recovery evidence", r, err)
+					}
+				} else if err != nil || r.ID != plan.ID || r.State != "ROLLED_BACK" {
+					t.Fatal("did not recover identical terminal state", r, err)
+				}
+			}
+			if tc.name != "root_replaced" && purgeEntryMissing(t, stage, "pending") == blocked {
+				t.Fatal("pending state does not reflect recovery outcome")
+			}
+			if !blocked {
+				target, err := ObservePurgeTarget(ctx, plan.RootPath, plan.Target.Relative)
+				if err != nil || !samePurgeExceptCTime(target, plan.Target) {
+					t.Fatal("recovery did not preserve the original file", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRootedPurgeRollbackKillChild(t *testing.T) {
+	cut := os.Getenv("NDG_TEST_ROLLBACK_CUT")
+	if cut == "" {
+		return
+	}
+	var plan PurgeTransaction
+	if json.Unmarshal([]byte(os.Getenv("NDG_TEST_ROLLBACK_PLAN")), &plan) != nil ||
+		!strings.HasPrefix(plan.RootPath, filepath.Join(os.TempDir(), "TestRootedPurgeRollbackProcessKill")) ||
+		plan.Target.Relative != "folder/remove" {
+		t.Fatal("subprocess requires its dedicated synthetic fixture")
+	}
+	stop := func(phase string) error {
+		if phase == cut {
+			return unix.Kill(os.Getpid(), unix.SIGKILL)
+		}
+		return nil
+	}
+	if cut == "unlinked" {
+		_, err := executePurgeTransaction(context.Background(), plan, stop)
+		t.Fatal("did not reach synthetic unlink checkpoint", err)
+	}
+	_, err := reconcilePurgeWithFault(context.Background(), plan, false, stop)
+	t.Fatal("did not reach synthetic rollback checkpoint", err)
+}

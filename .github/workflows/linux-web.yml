@@ -8,6 +8,10 @@ on:
         type: boolean
         default: false
         description: Run the P2.6 R1 AMD64 fixtures and skip unchanged platform probes
+      r2_targeted:
+        type: boolean
+        default: false
+        description: Run the P2.6 R2 AMD64 remediation fixtures
 permissions:
   contents: read
 jobs:
@@ -15,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.r1_targeted && '[{"runner":"ubuntu-latest","architecture":"amd64","machine":"x86_64"}]' || '[{"runner":"ubuntu-latest","architecture":"amd64","machine":"x86_64"},{"runner":"ubuntu-24.04-arm","architecture":"arm64","machine":"aarch64"}]') }}
+        include: ${{ fromJSON((inputs.r1_targeted || inputs.r2_targeted) && '[{"runner":"ubuntu-latest","architecture":"amd64","machine":"x86_64"}]' || '[{"runner":"ubuntu-latest","architecture":"amd64","machine":"x86_64"},{"runner":"ubuntu-24.04-arm","architecture":"arm64","machine":"aarch64"}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
@@ -28,6 +32,9 @@ jobs:
       - name: Require native runner architecture
         run: test "$(uname -m)" = "${{ matrix.machine }}"
       - run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store ./internal/managedfs ./internal/managedworker
+      - name: Verify default Analyzer on Linux
+        if: inputs.r2_targeted
+        run: go test -race -count=1 -v ./cmd/nas-governance -run 'Test(Analyze|Scan.*WithDB)'
       - name: Verify R1 rollback against the frozen baseline executable
         if: inputs.r1_targeted
         shell: bash
@@ -69,7 +76,7 @@ jobs:
           path: /tmp/ndg-dual-purge-integration/
           retention-days: 14
       - name: Build private reader kernel probe without product integration
-        if: ${{ !inputs.r1_targeted }}
+        if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
         shell: bash
         run: |
           mkdir -m 755 /tmp/ndg-managed-reader-evidence
@@ -86,7 +93,7 @@ jobs:
           cd /tmp/ndg-managed-reader-evidence
           sha256sum probe.test worker.test > probe-before.sha256
       - name: Real same-inode mounts and cached descriptor counterexamples (not a writer or NAS test)
-        if: ${{ !inputs.r1_targeted }}
+        if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
         shell: bash
         run: |
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-reader-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/proof.json
@@ -95,7 +102,7 @@ jobs:
           sha256sum -c probe-before.sha256
           sha256sum probe.test probe-before.sha256 source-sha.txt source-inputs.sha256 kernel.txt build-info.txt proof.json > SHA256SUMS
       - name: Private Writer process-kill and mount counterexamples (not product or NAS acceptance)
-        if: ${{ !inputs.r1_targeted }}
+        if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
         shell: bash
         run: |
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-writer-kernel.py /tmp/ndg-managed-reader-evidence/probe.test | tee /tmp/ndg-managed-reader-evidence/writer-proof.json
@@ -104,7 +111,7 @@ jobs:
           sha256sum -c probe-before.sha256
           sha256sum probe.test probe-before.sha256 source-sha.txt source-inputs.sha256 kernel.txt build-info.txt proof.json writer-proof.json > SHA256SUMS
       - name: Private Worker dedicated-UID and peer authorization (not product or NAS acceptance)
-        if: ${{ !inputs.r1_targeted }}
+        if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
         shell: bash
         run: |
           sudo -n env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" python3 -B scripts/research/managed-worker-actor.py /tmp/ndg-managed-reader-evidence/worker.test | tee /tmp/ndg-managed-reader-evidence/worker-actor-proof.json
@@ -113,7 +120,7 @@ jobs:
           sha256sum -c probe-before.sha256
           sha256sum probe.test worker.test probe-before.sha256 source-sha.txt source-inputs.sha256 kernel.txt build-info.txt worker-build-info.txt proof.json writer-proof.json worker-actor-proof.json > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: ${{ !inputs.r1_targeted }}
+        if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
         with:
           name: private-managed-object-proof-${{ matrix.architecture }}
           path: /tmp/ndg-managed-reader-evidence/
@@ -122,7 +129,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/ndg-server-amd64 ./cmd/ndg-server
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/ndg-server-arm64 ./cmd/ndg-server
   disposable-container:
-    if: ${{ !inputs.r1_targeted }}
+    if: ${{ !inputs.r1_targeted && !inputs.r2_targeted }}
     strategy:
       fail-fast: false
       matrix:

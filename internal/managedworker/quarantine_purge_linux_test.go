@@ -217,7 +217,7 @@ func TestQuarantinePurgeDurableWorkerFlow(t *testing.T) {
 // This invokes the committed store and filesystem operations in a disposable
 // child process and reopens the SQLite files under the same dedicated user.
 func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
-	for _, cut := range []string{"before_claim", "after_claim", "after_filesystem_commit", "after_database_commit"} {
+	for _, cut := range []string{"before_claim", "after_claim", "after_rollback_filesystem", "after_filesystem_commit", "after_database_commit"} {
 		t.Run(cut, func(t *testing.T) {
 			f := newQuarantinePurgeFixture(t)
 			ctx := context.Background()
@@ -277,11 +277,32 @@ func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 			}
 			removed := cut == "after_filesystem_commit" || cut == "after_database_commit"
 			for file, absent := range map[string]bool{f.path: removed,
-				filepath.Join(f.root, ".ndg-purge-stage", "receipt-"+p.ID): !removed} {
+				filepath.Join(f.root, ".ndg-purge-stage", "receipt-"+p.ID): !removed && cut != "after_rollback_filesystem"} {
 				_, err := os.Lstat(file)
 				if (absent && !errors.Is(err, os.ErrNotExist)) || (!absent && err != nil) {
 					t.Fatalf("filesystem did not reflect interrupted phase: %v", err)
 				}
+			}
+			if wantState == "EXECUTING" {
+				service, err := NewQuarantinePurge(st, f.root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected := "ROLLED_BACK"
+				if removed {
+					expected = "PURGED"
+				}
+				for i := 0; i < 3; i++ {
+					r, err := service.Recover(ctx, p.ID, p.Digest)
+					if err != nil || r.State != expected {
+						t.Fatal("recovery did not return the proven terminal state", r.State, err)
+					}
+				}
+				caps, err := st.GovernanceCapabilities(ctx)
+				if err != nil || caps.RecoveryLockActive {
+					t.Fatal("terminal recovery did not release the project lock", err)
+				}
+				assertSinglePurgeTerminalAudit(t, st, p.ID, expected)
 			}
 			if got, err := os.ReadFile(f.sentinel); err != nil || string(got) != string(f.raw) {
 				t.Fatal("outside sentinel changed")
@@ -337,9 +358,15 @@ func TestQuarantinePurgeDatabaseKillChild(t *testing.T) {
 	if json.Unmarshal([]byte(plan.EvidenceJSON), &proof) != nil || proof.Target.Relative != "synthetic-file" {
 		t.Fatal("missing synthetic target")
 	}
-	result, err := managedfs.ExecutePurgeTransaction(ctx, managedfs.PurgeTransaction{
-		ID: plan.ID, ApprovalSHA256: plan.Digest, RootPath: root, Target: proof.Target,
-	})
+	txn := managedfs.PurgeTransaction{ID: plan.ID, ApprovalSHA256: plan.Digest, RootPath: root, Target: proof.Target}
+	if cut == "after_rollback_filesystem" {
+		r, err := managedfs.ReconcilePurgeTransaction(ctx, txn)
+		if err != nil || r.State != "ROLLED_BACK" {
+			t.Fatal("fixture rollback did not persist its filesystem receipt", err)
+		}
+		stop("after_rollback_filesystem")
+	}
+	result, err := managedfs.ExecutePurgeTransaction(ctx, txn)
 	if err != nil || result.State != "PURGED" {
 		t.Fatal("synthetic filesystem commit failed", err)
 	}
@@ -349,4 +376,21 @@ func TestQuarantinePurgeDatabaseKillChild(t *testing.T) {
 	}
 	stop("after_database_commit")
 	t.Fatal("subprocess did not reach kill point")
+}
+
+func assertSinglePurgeTerminalAudit(t *testing.T, st *store.SQLiteStore, planID, state string) {
+	t.Helper()
+	decisions, err := st.ListAuthorizationDecisions(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, decision := range decisions {
+		if decision.PlanID == planID && decision.Detail == state {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d audit entries for the terminal state", count)
+	}
 }

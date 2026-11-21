@@ -421,7 +421,7 @@ type formatReportEntry = app.FormatReportEntry
 // reporting, and output formatting.
 func runAnalyze(args []string) error {
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
-	confinedRoot := fs.String("confined-root", "", "Linux confined analysis root for purge evidence")
+	confinedRoot := fs.String("confined-root", "", "Linux analysis root (defaults to the registered storage root with --db)")
 	index := fs.String("index", "./var/index.jsonl", "index file from scan")
 	out := fs.String("out", "./var/formats.json", "format analysis report output")
 	dbPath := fs.String("db", "", "SQLite database to persist results (optional)")

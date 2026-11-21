@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -306,5 +307,59 @@ func TestListenAcceptsAuthorizedPeerAndReportsIdentity(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal("authorized round trip failed", err)
+	}
+}
+
+func TestLeaseListenerPreservesMismatchedOrLiveSocket(t *testing.T) {
+	for _, scenario := range []string{"live", "foreign", "regular"} {
+		t.Run(scenario, func(t *testing.T) {
+			want := workerSubject(t)
+			layout := Layout{Run: privateDir(t), State: privateDir(t)}
+			lease, err := AcquireLease(layout.Run, want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lease.Release()
+			socket := filepath.Join(layout.Run, SocketName)
+			expected := ErrIsolation
+			if scenario == "regular" {
+				if err := os.WriteFile(socket, []byte("synthetic non-socket"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ln.SetUnlinkOnClose(false)
+				defer ln.Close()
+				if scenario == "live" {
+					expected = ErrBusy
+				} else {
+					if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" {
+						t.Skip("foreign socket fixture requires a disposable GitHub runner")
+					}
+					if err := ln.Close(); err != nil {
+						t.Fatal(err)
+					}
+					if out, err := exec.Command("sudo", "-n", "chown", "0:0", "--", socket).CombinedOutput(); err != nil {
+						t.Fatal("fixture ownership change failed", err, string(out))
+					}
+				}
+			}
+			before, err := os.Lstat(socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ln, err := lease.ListenWithLease(layout, want, []Subject{want}); ln != nil || !errors.Is(err, expected) {
+				if ln != nil {
+					_ = ln.Close()
+				}
+				t.Fatal("socket accepted unexpectedly", err)
+			}
+			if after, err := os.Lstat(socket); err != nil || !os.SameFile(before, after) {
+				t.Fatal("refused socket was replaced or removed", err)
+			}
+		})
 	}
 }
