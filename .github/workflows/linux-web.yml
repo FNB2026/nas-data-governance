@@ -30,10 +30,15 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Require native runner architecture
-        run: test "$(uname -m)" = "${{ matrix.machine }}"
+        run: |
+          uname -srm
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = "${{ matrix.machine }}"
+          go version
+          docker version
       - run: NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 ./internal/apihttp ./internal/app ./internal/scanner ./internal/store ./internal/managedfs ./internal/managedworker
       - name: Verify default Analyzer on Linux
-        if: inputs.r2_targeted
+        if: ${{ !cancelled() && inputs.r2_targeted }}
         run: go test -race -count=1 -v ./cmd/nas-governance -run 'Test(Analyze|Scan.*WithDB)'
       - name: Verify R1 rollback against the frozen baseline executable
         if: inputs.r1_targeted
@@ -45,10 +50,12 @@ jobs:
           (cd "$base_dir" && go build -o /tmp/ndg-baseline ./cmd/nas-governance)
           NDG_R1_BASE_CLI=/tmp/ndg-baseline go test -count=1 -v ./internal/store -run '^TestPurgeCandidateMigrationRollback$'
       - name: Record rooted purge results on synthetic files
+        if: ${{ success() || (!cancelled() && inputs.r2_targeted) }}
         run: |
           NDG_REQUIRE_MANAGED_READER_KERNEL=1 go test -race -count=1 -v ./internal/managedfs -run '^TestRootedPurge'
           go test -race -count=1 -v ./internal/managedworker -run '^Test(QuarantinePurgeDurableWorkerFlow|(Source|Quarantine)PurgePersistsAcrossDatabaseProcessKill)$'
       - name: Build and run isolated dual-purge Docker candidate
+        if: ${{ success() || (!cancelled() && inputs.r2_targeted) }}
         shell: bash
         run: |
           source_sha="$(git rev-parse HEAD)"
@@ -70,6 +77,17 @@ jobs:
           receipts=(synthetic-receipt.json)
           if [[ -f browser-receipt.json ]]; then receipts+=(browser-receipt.json); fi
           sha256sum image-id.txt source-sha.txt "${receipts[@]}" ndg-private-purge dual-purge-integration-${{ matrix.architecture }}.tar.gz > SHA256SUMS
+      - name: Test interrupted Docker Worker and mount identity
+        if: ${{ !cancelled() && inputs.r2_targeted }}
+        shell: bash
+        run: |
+          command -v strace || sudo -n apt-get -y install strace
+          source_sha="$(git rev-parse HEAD)"
+          export NDG_QUARANTINE_IMAGE="ndg-dual-purge-integration:$source_sha"
+          export NDG_SCAN_IMAGE="ndg-project-ingest:$source_sha"
+          export NDG_PURGE_CLI=/tmp/ndg-dual-purge-integration/ndg-private-purge
+          docker image inspect "$NDG_QUARANTINE_IMAGE" "$NDG_SCAN_IMAGE" >/dev/null
+          NDG_TEST_WORKER_LIFECYCLE=1 bash scripts/qa/test-quarantine-candidate-docker.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ndg-dual-purge-integration-${{ matrix.architecture }}

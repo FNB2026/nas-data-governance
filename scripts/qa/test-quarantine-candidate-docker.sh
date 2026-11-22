@@ -49,7 +49,44 @@ scan_tool=(docker run --rm --network none --read-only --cap-drop ALL
   --mount "type=bind,src=$fixture/state,dst=/state" "$NDG_SCAN_IMAGE")
 "${scan_tool[@]}" scan --root /ndg-volume --storage candidate-volume --db /state/project.db --out /state/index.jsonl >&2
 "${scan_tool[@]}" analyze --index /state/index.jsonl --storage-id candidate-volume --db /state/project.db --out /state/formats.json >&2
+if [[ "${NDG_TEST_WORKER_LIFECYCLE:-}" == 1 ]]; then
+  # Keep the container and its mounts alive across a real Worker process exit.
+  cat > "$fixture/anchor.go" <<'GO'
+package main
+import (
+    "fmt"
+    "os"
+    "time"
+    "golang.org/x/sys/unix"
+)
+func main() {
+    if len(os.Args) == 2 {
+        var id unix.Statx_t
+        if err := unix.Statx(unix.AT_FDCWD, os.Args[1], 0, unix.STATX_MNT_ID_UNIQUE, &id); err != nil || id.Mask&unix.STATX_MNT_ID_UNIQUE == 0 {
+            os.Exit(1)
+        }
+        fmt.Println(id.Mnt_id)
+        return
+    }
+    for { time.Sleep(time.Hour) }
+}
+GO
+  CGO_ENABLED=0 go build -trimpath -o "$fixture/anchor" "$fixture/anchor.go"
+  chmod 755 "$fixture/anchor"
+  cat > "$fixture/lifecycle.yaml" <<YAML
+services:
+  worker:
+    entrypoint: ["/qa-anchor"]
+    command: []
+    volumes:
+      - "$fixture/anchor:/qa-anchor:ro"
+YAML
+  compose+=(-f "$fixture/lifecycle.yaml")
+fi
 "${compose[@]}" up -d --no-build --pull never >/dev/null
+if [[ "${NDG_TEST_WORKER_LIFECYCLE:-}" == 1 ]]; then
+  "${compose[@]}" exec -T -d worker /ndg-quarantine-candidate -role worker
+fi
 if [[ "${NDG_TEST_PURGE_BROWSER:-}" == 1 ]]; then
   bash scripts/qa/test-purge-console-browser.sh "$fixture"
   exit
@@ -67,6 +104,9 @@ import urllib.error
 import urllib.request
 
 base = Path(sys.argv[1])
+if os.environ.get('NDG_TEST_WORKER_LIFECYCLE') == '1':
+    sys.path.insert(0, 'scripts/qa')
+    from worker_lifecycle import verify_worker_lifecycle
 tls = ssl.create_default_context(cafile=str(base / 'client.crt'))
 url = 'https://10.254.140.2:8443'
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=tls))
@@ -102,6 +142,10 @@ def request(payload, expected=200, route='/gov/quarantine-purge'):
             return json.load(result)
     except urllib.error.HTTPError as err:
         assert err.code == expected, (payload['op'], err.code)
+
+if os.environ.get('NDG_TEST_WORKER_LIFECYCLE') == '1':
+    verify_worker_lifecycle(base, sys.argv[2:], request, item_id)
+    sys.exit(0)
 
 plan = request({'op': 'QUARANTINE_PURGE_PLAN', 'item_id': item_id})
 def act(suffix, confirmation=None, expected=200):
