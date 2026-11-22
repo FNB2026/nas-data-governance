@@ -31,7 +31,7 @@ func TestCancelledResolveDoesNotStartScope(t *testing.T) {
 }
 
 func TestSupportContainerMatchesCurrentMASBundle(t *testing.T) {
-	const base = "/Users/test/Library/Containers/"
+	const base = "/sandbox-test/Library/Containers/"
 	const suffix = "/Data/Library/Application Support/NDG"
 	for _, tc := range []struct {
 		path, bundle string
