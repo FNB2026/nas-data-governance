@@ -32,7 +32,8 @@ export const NAV_ITEMS: NavItem[] = MAS_CHANNEL
   ? [
       ...desktopNav.filter(({ id }) => id === "sources" || id === "scan-jobs"),
       { id: "duplicate-results", label: "重复结果", description: "重复文件、目录语境与保留理由" },
-      ...desktopNav.filter(({ id }) => id === "settings"),
+      ...desktopNav.filter(({ id }) =>
+        id === "governance-workbench" || id === "execution-center" || id === "audit-recovery" || id === "settings"),
     ]
   : desktopNav;
 

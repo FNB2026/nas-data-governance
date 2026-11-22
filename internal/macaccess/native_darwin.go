@@ -1,6 +1,6 @@
 //go:build darwin && mas
 
-// Package macaccess bridges only OS-selected read-only grants into Go. It has
+// Package macaccess bridges OS-selected read-write grants into Go. It has
 // no Wails binding and returns no bookmark bytes through frontend DTOs.
 package macaccess
 
@@ -96,9 +96,10 @@ func SupportBase() (string, error) {
 }
 
 func isSupportContainer(dir, bundle string) bool {
-	switch bundle {
-	case "com.fnb.ndg.mas", "com.fnb.ndg.mas.launchqa", "com.fnb.ndg.mas.phase1a":
-	default:
+	// Bind to the running bundle identifier instead of naming experimental
+	// builds. Release com.fnb.ndg.mas and its QA sub-identifiers all resolve
+	// through the same container rule; unrelated bundles are rejected.
+	if bundle != "com.fnb.ndg.mas" && !strings.HasPrefix(bundle, "com.fnb.ndg.mas.") {
 		return false
 	}
 	suffix := filepath.Join("Library", "Containers", bundle, "Data", "Library", "Application Support", "NDG")

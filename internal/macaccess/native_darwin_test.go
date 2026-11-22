@@ -42,6 +42,7 @@ func TestSupportContainerMatchesCurrentMASBundle(t *testing.T) {
 		{base + "com.fnb.ndg.mas.phase1a" + suffix, "com.fnb.ndg.mas.phase1a", true},
 		{base + "com.fnb.ndg.mas" + suffix, "com.fnb.ndg.mas.launchqa", false},
 		{base + "com.fnb.ndg" + suffix, "com.fnb.ndg", false},
+		{base + "com.fnb.ndg.masother" + suffix, "com.fnb.ndg.masother", false},
 		{base + "com.fnb.ndg.mas/../com.fnb.ndg.mas" + suffix, "com.fnb.ndg.mas", false},
 		{base + "com.fnb.ndg.mas" + suffix + "/other", "com.fnb.ndg.mas", false},
 	} {

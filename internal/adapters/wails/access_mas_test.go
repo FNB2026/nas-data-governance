@@ -21,8 +21,8 @@ func TestMASDefaultConstructorAndPickerInjectionCannotBypass(t *testing.T) {
 	if _, e := a.CreateProjectFromSource(CreateProjectInput{SourcePath: t.TempDir()}); !errors.Is(e, fileaccess.ErrAuthorizationRequired) {
 		t.Fatal("default constructor bypassed grant policy")
 	}
-	if _, e := a.ExecuteRestore(ExecuteRestoreRequest{}); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-		t.Fatal("default constructor enabled source writes")
+	if _, e := a.ExecuteRestore(ExecuteRestoreRequest{}); e == nil {
+		t.Fatal("default constructor executed a restore without authority or a plan")
 	}
 }
 

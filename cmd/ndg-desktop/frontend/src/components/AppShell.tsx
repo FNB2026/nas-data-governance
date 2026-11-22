@@ -31,7 +31,7 @@ export default function AppShell({
   const modeLabel = !project
     ? "未打开"
     : isReadWrite
-      ? MAS_CHANNEL ? "项目读写 · 源只读" : "读写"
+      ? MAS_CHANNEL ? "项目读写 · 授权读写" : "读写"
       : "只读";
 
   const scanActive = activeJobId !== null;

@@ -187,17 +187,32 @@ func TestSandboxGovernancePreviewDoesNotAcquireSourceLeaseOrPersistToken(t *test
 	native.afterResolve = func() { leaseAttempted = true }
 	native.mu.Unlock()
 	preview, err := a.PreviewBatchDecisions(domain.PreviewBatchRequest{Items: []domain.GovernanceSubject{page.Items[0].GovernanceSubject}, DecisionType: domain.DecisionKeepAll})
-	if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].ReasonCode != "RECORDING_UNAVAILABLE" {
-		t.Fatal("sandbox preview did not remain read-only", err)
-	}
-	if leaseAttempted {
-		t.Fatal("sandbox recording-disabled preview unnecessarily reacquired a source lease")
-	}
 	native.mu.Lock()
 	afterResolve := native.releases
 	native.mu.Unlock()
-	if afterResolve != beforeResolve {
-		t.Fatal("sandbox preview resolved an additional source bookmark")
+	if !sandboxWrites {
+		if err != nil || preview.PreviewToken != "" || len(preview.Items) != 1 || preview.Items[0].ReasonCode != "RECORDING_UNAVAILABLE" {
+			t.Fatal("read-only sandbox preview did not remain read-only", err)
+		}
+		if leaseAttempted {
+			t.Fatal("sandbox recording-disabled preview unnecessarily reacquired a source lease")
+		}
+		if afterResolve != beforeResolve {
+			t.Fatal("sandbox preview resolved an additional source bookmark")
+		}
+		return
+	}
+	if err != nil || preview.PreviewToken == "" || len(preview.Items) != 1 {
+		t.Fatalf("read-write sandbox preview = %+v, err=%v; want an issued token", preview, err)
+	}
+	if preview.Items[0].ReasonCode == "RECORDING_UNAVAILABLE" || preview.Items[0].ReasonCode == "AUTHORIZATION_REQUIRED" {
+		t.Fatalf("read-write sandbox preview refused: %s", preview.Items[0].ReasonCode)
+	}
+	if !leaseAttempted {
+		t.Fatal("read-write preview did not verify sources through a security-scoped lease")
+	}
+	if afterResolve <= beforeResolve {
+		t.Fatal("read-write preview did not release its source lease")
 	}
 }
 func TestGovernanceWailsJSONRoundTripReceiptRestartAndSourceBytes(t *testing.T) {

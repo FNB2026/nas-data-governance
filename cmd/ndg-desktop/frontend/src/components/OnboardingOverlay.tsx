@@ -30,6 +30,9 @@ export interface OnboardingOverlayProps {
 
 const SAFETY_FACTS = MAS_CHANNEL ? [
   { title: "扫描只读", body: "通过系统选择器授权目录，扫描只读取文件并记录指纹。" },
+  { title: "授权读写", body: "隔离与恢复只在你批准后写入已授权目录；其他路径无权访问。" },
+  { title: "隔离而非删除", body: "治理动作先进入应用容器隔离区，随时可以恢复。" },
+  { title: "恢复锁", body: "存在未完成的执行计划时会锁定写操作，先处理完再继续。" },
   { title: "项目留在本机", body: "索引、结果和扫描进度保存在应用容器内，可重新打开项目。" },
   { title: "查看证据", body: "比较重复文件和目录用途，结合保留理由自行判断。" },
 ] : [

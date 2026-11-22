@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the read-only App Store channel in an isolated output directory.
+# Build the read-write App Store channel in an isolated output directory.
 set -euo pipefail
 umask 077
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -77,7 +77,7 @@ else
   cp "$output/ndg-${arches[0]}" "$contents/MacOS/NDG"
 fi
 entitlements="$output/entitlements.plist"
-cp cmd/ndg-desktop/build/mas/entitlements-readonly.plist "$entitlements"
+cp cmd/ndg-desktop/build/mas/entitlements.plist "$entitlements"
 identity=-
 if [[ "$mode" == distribution ]]; then
   security cms -D -i "$NDG_MAS_PROFILE" > "$output/profile.plist"
@@ -111,7 +111,14 @@ PY
   cp "$NDG_MAS_PRIVACY_MANIFEST" "$contents/Resources/PrivacyInfo.xcprivacy"
   identity="$NDG_MAS_APP_IDENTITY"
 fi
+# umask 077 protects private build inputs, but App Store validation rejects a
+# bundle whose files are unreadable to non-root users (error 90255). Restore
+# standard bundle permissions before sealing the signature/package.
+chmod -R a+rX "$app"
 codesign --force --sign "$identity" --entitlements "$entitlements" "$app"
+# codesign creates _CodeSignature/CodeResources under the active umask; make
+# the sealed bundle readable before App Store validation and packaging.
+chmod -R a+rX "$app"
 codesign --verify --strict --verbose=2 "$app"
 plutil -lint "$contents/Info.plist" "$entitlements"
 lipo -archs "$contents/MacOS/NDG"

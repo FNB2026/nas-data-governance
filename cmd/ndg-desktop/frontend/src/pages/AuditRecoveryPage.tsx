@@ -237,7 +237,7 @@ export function recoverySteps(
 // ---- Component ----
 
 export default function AuditRecoveryPage() {
-  const { capabilities, dataRevision, isReadWrite, pushToast, refreshRecoveryLock, displayPath } = useProject();
+  const { capabilities, dataRevision, isReadWrite, pushToast, refreshRecoveryLock, displayPath, storages } = useProject();
 
   // Plan filter
   const [planFilter, setPlanFilter] = useState<string>("");
@@ -258,6 +258,13 @@ export default function AuditRecoveryPage() {
   const [quarantineRoot, setQuarantineRoot] = useState("");
   const [sourceRoots, setSourceRoots] = useState("");
   const [recoveryResult, setRecoveryResult] = useState("");
+
+  useEffect(() => {
+    const roots = Array.from(new Set((storages ?? []).map((s) => s.root_path).filter(Boolean))).join("\n");
+    if (roots) setSourceRoots((prev) => prev || roots);
+    const quarantine = capabilities.default_quarantine_root?.trim();
+    if (quarantine) setQuarantineRoot((prev) => prev || quarantine);
+  }, [storages, capabilities.default_quarantine_root]);
 
   // ---- Data loading ----
 
@@ -437,6 +444,7 @@ export default function AuditRecoveryPage() {
                   placeholder="隔离根目录"
                   value={quarantineRoot}
                   onChange={(e) => setQuarantineRoot(e.target.value)}
+                  readOnly={Boolean(capabilities.default_quarantine_root)}
                 />
                 <textarea
                   placeholder="源根目录（每行一个）"

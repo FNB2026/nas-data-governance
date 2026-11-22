@@ -122,6 +122,9 @@ type API struct {
 	jobScope      string // legacy JobManager compatibility scope; may be the historical abs path
 	projectSvc    *projectsvc.Service
 	dirPicker     DirectoryPicker // injected by main.go; nil outside Wails runtime
+	// defaultQuarantine is the private in-container quarantine root used by the
+	// sandboxed MAS build. It never requires a second user grant.
+	defaultQuarantine string
 }
 
 // NewAPI creates a new Wails API instance. The store starts nil;
@@ -133,7 +136,7 @@ func NewAPI() *API {
 // initReadWriteServicesLocked is composition-root wiring, not project
 // lifecycle logic. The caller must hold a.mu.
 func (a *API) initReadWriteServicesLocked(st *store.SQLiteStore) {
-	if a.sandbox {
+	if a.sandbox && !sandboxWrites {
 		st.SetGovernanceReadOnly()
 	}
 	mgr := jobs.New(st)
@@ -1010,7 +1013,7 @@ func (a *API) SaveGroupDecision(req SaveDecisionRequest) (GroupDecisionDTO, erro
 	}
 	previewCtx, previewCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer previewCancel()
-	if a.scanRunner == nil || a.sandbox || a.closing || a.store.CheckDecisionWrite(previewCtx) != nil {
+	if a.scanRunner == nil || (a.sandbox && !sandboxWrites) || a.closing || a.store.CheckDecisionWrite(previewCtx) != nil {
 		return GroupDecisionDTO{}, errGovernanceUnavailable
 	}
 	ref, e := a.store.FindGovernanceSubject(previewCtx, req.GroupID)
@@ -1075,7 +1078,7 @@ func (a *API) ApprovePlans(req ApprovePlansRequest) (ApprovePlansResponse, error
 	if a.scanRunner == nil {
 		return ApprovePlansResponse{}, ErrProjectNotReadWrite
 	}
-	if a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+	if (a.sandbox && !sandboxWrites) || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
 		return ApprovePlansResponse{}, errGovernanceUnavailable
 	}
 	if len(req.PlanIDs) == 0 {
@@ -1217,21 +1220,34 @@ func (a *API) ExecuteRestore(req ExecuteRestoreRequest) (ExecuteRestoreResponse,
 	if e := a.denySourceWrites(); e != nil {
 		return ExecuteRestoreResponse{}, e
 	}
+	if strings.TrimSpace(req.PlanID) == "" {
+		return ExecuteRestoreResponse{}, errors.New("wails: plan_id is required")
+	}
+	if strings.TrimSpace(req.Digest) == "" {
+		return ExecuteRestoreResponse{}, errors.New("wails: digest is required")
+	}
+	if len(req.SourceRoots) == 0 {
+		return ExecuteRestoreResponse{}, errors.New("wails: at least one source root is required")
+	}
+	access, e := a.acquireWriteAccess(req.SourceRoots, req.QuarantineRoot)
+	if e != nil {
+		return ExecuteRestoreResponse{}, e
+	}
+	defer access.Release()
+	req.SourceRoots = access.roots
+	req.QuarantineRoot = access.quarantine
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return ExecuteRestoreResponse{}, fileaccess.ErrAuthorizationRequired
+	}
 
 	if a.quarantineSvc == nil {
 		return ExecuteRestoreResponse{}, ErrNoProjectOpen
 	}
 	if a.scanRunner == nil {
 		return ExecuteRestoreResponse{}, ErrProjectNotReadWrite
-	}
-	if strings.TrimSpace(req.PlanID) == "" {
-		return ExecuteRestoreResponse{}, errors.New("wails: plan_id is required")
-	}
-	if strings.TrimSpace(req.Digest) == "" {
-		return ExecuteRestoreResponse{}, errors.New("wails: digest is required")
 	}
 	if strings.TrimSpace(req.QuarantineRoot) == "" {
 		return ExecuteRestoreResponse{}, errors.New("wails: quarantine_root is required")
@@ -1433,9 +1449,38 @@ func (a *API) RecoverSourcePlans() ([]RecoveryResultDTO, error) {
 	if e := a.denySourceWrites(); e != nil {
 		return nil, e
 	}
+	a.mu.RLock()
+	st := a.store
+	a.mu.RUnlock()
+	if st == nil {
+		return nil, ErrNoProjectOpen
+	}
+	storages, e := st.ListStorages(context.Background())
+	if e != nil {
+		return nil, fmt.Errorf("wails: load recovery sources: %w", e)
+	}
+	roots := make([]string, 0, len(storages))
+	seen := make(map[string]bool, len(storages))
+	for _, s := range storages {
+		if s.RootPath != "" && !seen[s.RootPath] {
+			seen[s.RootPath] = true
+			roots = append(roots, s.RootPath)
+		}
+	}
+	if a.sandbox && len(roots) == 0 {
+		return []RecoveryResultDTO{}, nil
+	}
+	access, e := a.acquireWriteAccess(roots, "")
+	if e != nil {
+		return nil, e
+	}
+	defer access.Release()
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing || a.store != st {
+		return nil, fileaccess.ErrAuthorizationRequired
+	}
 
 	if a.recoverySvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1465,9 +1510,22 @@ func (a *API) RecoverRestores(req RecoverRestoresRequest) ([]RestoreRecoveryResu
 	if e := a.denySourceWrites(); e != nil {
 		return nil, e
 	}
+	if len(req.SourceRoots) == 0 {
+		return nil, errors.New("wails: at least one source root is required")
+	}
+	access, e := a.acquireWriteAccess(req.SourceRoots, req.QuarantineRoot)
+	if e != nil {
+		return nil, e
+	}
+	defer access.Release()
+	req.SourceRoots = access.roots
+	req.QuarantineRoot = access.quarantine
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return nil, fileaccess.ErrAuthorizationRequired
+	}
 
 	if a.quarantineSvc == nil {
 		return nil, ErrNoProjectOpen
@@ -1599,7 +1657,7 @@ func (a *API) SaveDraftPlans(storageID string) ([]PlanDTO, error) {
 	if a.scanRunner == nil {
 		return nil, ErrProjectNotReadWrite
 	}
-	if a.sandbox || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
+	if (a.sandbox && !sandboxWrites) || a.closing || a.store.CheckDecisionWrite(context.Background()) != nil {
 		return nil, errGovernanceUnavailable
 	}
 	if a.planSvc == nil {
@@ -1659,9 +1717,25 @@ func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error
 	if e := a.denySourceWrites(); e != nil {
 		return ExecutePlansResponse{}, e
 	}
+	if len(req.PlanIDs) == 0 {
+		return ExecutePlansResponse{}, errors.New("wails: at least one plan_id is required")
+	}
+	if len(req.SourceRoots) == 0 {
+		return ExecutePlansResponse{}, errors.New("wails: at least one source root is required")
+	}
+	access, e := a.acquireWriteAccess(req.SourceRoots, req.QuarantineRoot)
+	if e != nil {
+		return ExecutePlansResponse{}, e
+	}
+	defer access.Release()
+	req.SourceRoots = access.roots
+	req.QuarantineRoot = access.quarantine
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.closing {
+		return ExecutePlansResponse{}, fileaccess.ErrAuthorizationRequired
+	}
 
 	if a.store == nil {
 		return ExecutePlansResponse{}, ErrNoProjectOpen
@@ -1672,14 +1746,8 @@ func (a *API) ExecutePlans(req ExecutePlansRequest) (ExecutePlansResponse, error
 	if a.executionSvc == nil {
 		return ExecutePlansResponse{}, ErrNoProjectOpen
 	}
-	if len(req.PlanIDs) == 0 {
-		return ExecutePlansResponse{}, errors.New("wails: at least one plan_id is required")
-	}
 	if strings.TrimSpace(req.QuarantineRoot) == "" {
 		return ExecutePlansResponse{}, errors.New("wails: quarantine_root is required")
-	}
-	if len(req.SourceRoots) == 0 {
-		return ExecutePlansResponse{}, errors.New("wails: at least one source root is required")
 	}
 
 	// Retention: default 720h (30d), minimum 24h.
@@ -1762,6 +1830,7 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 			ProjectMode:           "closed",
 			CanReauthorizeSources: a.sandbox && a.access != nil && !a.closing,
 			CanViewResults:        false,
+			DefaultQuarantineRoot: a.defaultQuarantine,
 			DisabledReasons: map[string]string{
 				"scan-jobs":         "请先打开项目",
 				"duplicate-results": "请先打开项目",
@@ -1787,9 +1856,9 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 	}
 
 	disabled := map[string]string{"purge": "当前发行版本禁止永久清理；历史与异常恢复仍可查看"}
-	canGovernanceWrite := isRW && !a.sandbox && !a.closing && a.store.CheckDecisionWrite(context.Background()) == nil
-	if a.sandbox {
-		disabled["execution-center"] = "商店只读预验证禁止文件写入及恢复操作"
+	canGovernanceWrite := isRW && (!a.sandbox || sandboxWrites) && !a.closing && a.store.CheckDecisionWrite(context.Background()) == nil
+	if a.sandbox && !sandboxWrites {
+		disabled["execution-center"] = "只读构建禁止文件写入及恢复操作"
 	}
 	if !isRW {
 		disabled["execution-center"] = "只读模式，无法执行写操作"
@@ -1807,10 +1876,11 @@ func (a *API) GetAppCapabilities() (AppCapabilitiesDTO, error) {
 		CanViewResults:        true,
 		CanEditReviews:        canGovernanceWrite,
 		CanApprovePlans:       canGovernanceWrite,
-		CanExecuteQuarantine:  isRW && !recoveryLock && !a.sandbox,
-		CanExecutePurge:       isRW && !recoveryLock && !a.sandbox && app.PurgeReleaseAllowed(),
+		CanExecuteQuarantine:  isRW && !recoveryLock && (!a.sandbox || sandboxWrites),
+		CanExecutePurge:       isRW && !recoveryLock && app.PurgeReleaseAllowed(),
 		RecoveryLockActive:    recoveryLock,
 		DisabledReasons:       disabled,
+		DefaultQuarantineRoot: a.defaultQuarantine,
 	}, nil
 }
 

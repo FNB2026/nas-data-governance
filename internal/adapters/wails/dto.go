@@ -845,6 +845,9 @@ type AppCapabilitiesDTO struct {
 	CanExecutePurge       bool              `json:"can_execute_purge"`
 	RecoveryLockActive    bool              `json:"recovery_lock_active"`
 	DisabledReasons       map[string]string `json:"disabled_reasons"`
+	// DefaultQuarantineRoot is the private in-container quarantine directory
+	// for sandboxed builds. Desktop builds leave it empty and ask for a path.
+	DefaultQuarantineRoot string `json:"default_quarantine_root,omitempty"`
 }
 
 // ReadinessCheckDTO is a single readiness dimension with pass/fail and

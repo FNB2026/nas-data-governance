@@ -1245,6 +1245,7 @@ export namespace wails {
 	    can_execute_quarantine: boolean;
 	    can_execute_purge: boolean;
 	    recovery_lock_active: boolean;
+	    default_quarantine_root?: string;
 	    disabled_reasons: Record<string, string>;
 
 	    static createFrom(source: any = {}) {
@@ -1263,6 +1264,7 @@ export namespace wails {
 	        this.can_execute_quarantine = source["can_execute_quarantine"];
 	        this.can_execute_purge = source["can_execute_purge"];
 	        this.recovery_lock_active = source["recovery_lock_active"];
+	        this.default_quarantine_root = source["default_quarantine_root"];
 	        this.disabled_reasons = source["disabled_reasons"];
 	    }
 	}

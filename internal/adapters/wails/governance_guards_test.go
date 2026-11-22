@@ -31,17 +31,26 @@ func TestLegacyDecisionRejectsSandboxAndRecoveryLock(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := a.SaveGroupDecision(SaveDecisionRequest{GroupID: ref.GroupID, DecisionType: "KEEP_ALL", SubjectVersion: ref.SubjectVersion, DecisionRevision: ref.DecisionRevision}); err == nil {
-				t.Fatal("restricted decision write accepted")
-			}
-			if _, err := a.store.GetGroupDecision(context.Background(), ref.GroupID); err == nil {
-				t.Fatal("restricted decision persisted")
+			_, err = a.SaveGroupDecision(SaveDecisionRequest{GroupID: ref.GroupID, DecisionType: "KEEP_ALL", SubjectVersion: ref.SubjectVersion, DecisionRevision: ref.DecisionRevision})
+			_, storedErr := a.store.GetGroupDecision(context.Background(), ref.GroupID)
+			switch {
+			case mode == "sandbox" && sandboxWrites:
+				if err != nil || storedErr != nil {
+					t.Fatalf("read-write sandbox rejected a decision write: save=%v read=%v", err, storedErr)
+				}
+			default:
+				if err == nil {
+					t.Fatal("restricted decision write accepted")
+				}
+				if storedErr == nil {
+					t.Fatal("restricted decision persisted")
+				}
 			}
 		})
 	}
 }
 
-func TestSandboxManualDraftAndApprovalAreRejected(t *testing.T) {
+func TestSandboxManualDraftAndApprovalFollowWritablePolicy(t *testing.T) {
 	// Exercise the actual sandbox composition and an authorized, container-owned
 	// disposable project, including when the binary's default build is MAS.
 	a, _, source := sandboxTestAPI(t)
@@ -59,18 +68,41 @@ func TestSandboxManualDraftAndApprovalAreRejected(t *testing.T) {
 	if e := a.store.SavePlans(ctx, task.ID, []domain.OperationPlan{{ID: "synthetic-plan", TaskID: task.ID, State: domain.PlanDraft, Risk: domain.RiskLow}}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := a.ApprovePlans(ApprovePlansRequest{PlanIDs: []string{"synthetic-plan"}}); !errors.Is(e, errGovernanceUnavailable) {
-		t.Error("sandbox approval did not return the governance refusal")
-	}
-	if _, e := a.SaveDraftPlans(""); !errors.Is(e, errGovernanceUnavailable) {
-		t.Error("sandbox manual plan persistence did not return the governance refusal")
-	}
+	_, approveErr := a.ApprovePlans(ApprovePlansRequest{PlanIDs: []string{"synthetic-plan"}})
+	drafts, draftErr := a.SaveDraftPlans("")
 	plans, e := a.store.ListAllPlans(ctx)
-	if e != nil || len(plans) != 1 || plans[0].State != domain.PlanDraft {
-		t.Error("sandbox changed approved/draft plan state")
+	if e != nil {
+		t.Fatal(e)
 	}
 	c, e := a.GetAppCapabilities()
-	if e != nil || c.CanApprovePlans {
-		t.Error("sandbox advertised approval capability")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !sandboxWrites {
+		if !errors.Is(approveErr, errGovernanceUnavailable) {
+			t.Error("read-only sandbox approval did not return the governance refusal")
+		}
+		if !errors.Is(draftErr, errGovernanceUnavailable) {
+			t.Error("read-only sandbox manual plan persistence did not return the governance refusal")
+		}
+		if len(plans) != 1 || plans[0].State != domain.PlanDraft {
+			t.Error("read-only sandbox changed approved/draft plan state")
+		}
+		if c.CanApprovePlans {
+			t.Error("read-only sandbox advertised approval capability")
+		}
+		return
+	}
+	if approveErr != nil {
+		t.Fatalf("read-write sandbox rejected approval: %v", approveErr)
+	}
+	if draftErr != nil || len(drafts) != 0 {
+		t.Fatalf("read-write sandbox draft save = %d plans, err=%v; want empty project draft", len(drafts), draftErr)
+	}
+	if len(plans) != 1 || plans[0].State != domain.PlanApproved {
+		t.Fatal("read-write sandbox did not persist approval")
+	}
+	if !c.CanApprovePlans {
+		t.Error("read-write sandbox did not advertise approval capability")
 	}
 }

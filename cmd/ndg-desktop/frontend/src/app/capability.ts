@@ -15,6 +15,8 @@ export interface AppCapabilities {
   can_execute_quarantine: boolean;
   can_execute_purge: boolean;
   recovery_lock_active: boolean;
+  /** Private in-container quarantine root for the sandboxed MAS build. */
+  default_quarantine_root?: string;
   /** Disabled route → human-readable reason shown in tooltip / sidebar. */
   disabled_reasons: Partial<Record<AppRoute | "purge", string>>;
 }
@@ -24,7 +26,7 @@ export function deriveCapabilities(opts: {
   isReadWrite: boolean;
   recoveryLockActive?: boolean;
   /** undefined is pure legacy derivation; null means server permission unconfirmed. */
-  backend?: Partial<Pick<AppCapabilities, "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine">> | null;
+  backend?: Partial<Pick<AppCapabilities, "can_scan" | "can_edit_reviews" | "can_approve_plans" | "can_execute_quarantine" | "default_quarantine_root">> | null;
 }): AppCapabilities {
   const { projectOpen, isReadWrite } = opts;
   const recoveryLock = opts.recoveryLockActive ?? false;
@@ -66,6 +68,7 @@ export function deriveCapabilities(opts: {
     can_execute_quarantine: isReadWrite && !recoveryLock && permitted("can_execute_quarantine"),
     can_execute_purge: false,
     recovery_lock_active: recoveryLock,
+    default_quarantine_root: opts.backend?.default_quarantine_root ?? "",
     disabled_reasons,
   };
 }
@@ -74,7 +77,16 @@ export function isRouteEnabled(
   route: AppRoute,
   caps: AppCapabilities,
 ): boolean {
-  if (MAS_CHANNEL && !NAV_ITEMS.some(({ id }) => id === route)) return false;
+  // MAS keeps a trimmed sidebar, but the legacy plan-review page stays
+  // reachable from the workbench: it is the only entry point for creating,
+  // reviewing and approving execution plans before the task center.
+  if (
+    MAS_CHANNEL &&
+    route !== "governance-review" &&
+    !NAV_ITEMS.some(({ id }) => id === route)
+  ) {
+    return false;
+  }
   if (route in caps.disabled_reasons) return false;
   switch (route) {
     case "sources":

@@ -64,7 +64,7 @@ function planStateBadgeClass(state: string, prefix: string): string {
 // ---- Component ----
 
 export default function ExecutionCenterPage() {
-  const { capabilities, isReadWrite, dataRevision, pushToast, refreshRecoveryLock } = useProject();
+  const { capabilities, isReadWrite, dataRevision, pushToast, refreshRecoveryLock, storages } = useProject();
 
   const [activeTab, setActiveTab] = useState<ExecTab>("plans");
 
@@ -118,6 +118,22 @@ export default function ExecutionCenterPage() {
   const [recoveryStatus, setRecoveryStatus] = useState<wails.RecoveryStatusDTO | null>(null);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryResults, setRecoveryResults] = useState<string | null>(null);
+
+  // MAS uses a private in-container quarantine root and already-authorized
+  // project storages, so execution never depends on a manually typed path.
+  useEffect(() => {
+    const roots = Array.from(new Set((storages ?? []).map((s) => s.root_path).filter(Boolean))).join("\n");
+    if (roots) {
+      setExecSourceRootsInput((prev) => prev || roots);
+      setRestoreSourceRoots((prev) => prev || roots);
+    }
+    const quarantine = capabilities.default_quarantine_root?.trim();
+    if (quarantine) {
+      setExecRootInput((prev) => prev || quarantine);
+      setRestoreRoot((prev) => prev || quarantine);
+      setPurgeRoot((prev) => prev || quarantine);
+    }
+  }, [storages, capabilities.default_quarantine_root]);
 
   // ---- Data loading ----
 
@@ -430,6 +446,9 @@ export default function ExecutionCenterPage() {
   // ---- Filtered items ----
 
   const filteredItems = quarantineItems;
+  const rootsReady =
+    execRootInput.trim() !== "" &&
+    execSourceRootsInput.split("\n").some((root) => root.trim() !== "");
 
   // ---- Render ----
 
@@ -488,7 +507,7 @@ export default function ExecutionCenterPage() {
 
       <section className="exec-safety-flow" aria-label="隔离执行安全前置链">
         <div className="exec-safety-step exec-safety-step--complete"><strong>1. 已批准</strong><span>{approvedPlans.length} 个计划可供选择</span></div>
-        <div className={`exec-safety-step ${hasSelectedPlans ? "exec-safety-step--complete" : ""}`}><strong>2. 执行前校验</strong><span>{hasSelectedPlans ? "已选择计划；仍需填写隔离与源根目录" : "先选择已批准计划"}</span></div>
+        <div className={`exec-safety-step ${hasSelectedPlans ? "exec-safety-step--complete" : ""}`}><strong>2. 执行前校验</strong><span>{hasSelectedPlans ? (rootsReady ? "已选择计划；隔离与源根目录已就绪" : "已选择计划；仍需填写隔离与源根目录") : "先选择已批准计划"}</span></div>
         <div className={`exec-safety-step ${dryRunCompleted ? "exec-safety-step--complete" : ""}`}><strong>3. 试运行</strong><span>{dryRunCompleted ? "已通过，可进入隔离执行" : "通过后才能隔离"}</span></div>
         <div className={`exec-safety-step ${dryRunCompleted ? "exec-safety-step--ready" : ""}`}><strong>4. 隔离并验证</strong><span>隔离可恢复，绝不等同于删除</span></div>
       </section>
@@ -513,6 +532,7 @@ export default function ExecutionCenterPage() {
                   value={execRootInput}
                   onChange={(e) => setExecRootInput(e.target.value)}
                   className="exec-root-input"
+                  readOnly={Boolean(capabilities.default_quarantine_root)}
                 />
                 <textarea
                   placeholder="源根目录（每行一个）"
@@ -683,6 +703,7 @@ export default function ExecutionCenterPage() {
                   placeholder="隔离根目录"
                   value={restoreRoot}
                   onChange={(e) => setRestoreRoot(e.target.value)}
+                  readOnly={Boolean(capabilities.default_quarantine_root)}
                   className="exec-root-input"
                 />
                 <input
@@ -834,6 +855,7 @@ export default function ExecutionCenterPage() {
                 placeholder="隔离根目录"
                 value={purgeRoot}
                 onChange={(e) => setPurgeRoot(e.target.value)}
+                readOnly={Boolean(capabilities.default_quarantine_root)}
                 className="exec-root-input"
               />
             )}

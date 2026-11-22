@@ -3,3 +3,4 @@
 package wails
 
 const sandboxBuild = false
+const sandboxWrites = false
