@@ -1,3 +1,4 @@
+import { MAS_CHANNEL } from "../app/routes";
 // OnboardingOverlay: lightweight first-run introduction (UI-P7-C).
 //
 // Product rule: the goal is NOT to teach NDG, it is to make the user
@@ -27,7 +28,11 @@ export interface OnboardingOverlayProps {
   error?: string | null;
 }
 
-const SAFETY_FACTS = [
+const SAFETY_FACTS = MAS_CHANNEL ? [
+  { title: "扫描只读", body: "通过系统选择器授权目录，扫描只读取文件并记录指纹。" },
+  { title: "项目留在本机", body: "索引、结果和扫描进度保存在应用容器内，可重新打开项目。" },
+  { title: "查看证据", body: "比较重复文件和目录用途，结合保留理由自行判断。" },
+] : [
   { title: "扫描只读", body: "扫描过程只读取文件并记录指纹，不改动、不移动、不删除任何源文件。" },
   { title: "隔离而非删除", body: "治理动作先进入隔离区，随时可以恢复，不会直接抹掉数据。" },
   { title: "恢复锁", body: "存在未完成的执行计划时会锁定写操作，先处理完再继续。" },

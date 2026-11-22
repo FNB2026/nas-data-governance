@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unsafe"
@@ -82,9 +83,24 @@ func SupportBase() (string, error) {
 		return "", fileaccess.ErrAuthorizationRequired
 	}
 	defer C.free(unsafe.Pointer(raw))
+	bundle := C.ndg_access_bundle_id()
+	if bundle == nil {
+		return "", errors.New("MAS_CONTAINER_REQUIRED")
+	}
+	defer C.free(unsafe.Pointer(bundle))
 	dir := C.GoString(raw)
-	if !strings.Contains(dir, "/Containers/com.fnb.ndg.mas.phase1a/Data/") {
+	if !isSupportContainer(dir, C.GoString(bundle)) {
 		return "", errors.New("MAS_CONTAINER_REQUIRED")
 	}
 	return dir, nil
+}
+
+func isSupportContainer(dir, bundle string) bool {
+	switch bundle {
+	case "com.fnb.ndg.mas", "com.fnb.ndg.mas.launchqa", "com.fnb.ndg.mas.phase1a":
+	default:
+		return false
+	}
+	suffix := filepath.Join("Library", "Containers", bundle, "Data", "Library", "Application Support", "NDG")
+	return filepath.IsAbs(dir) && filepath.Clean(dir) == dir && strings.HasSuffix(dir, "/"+suffix)
 }

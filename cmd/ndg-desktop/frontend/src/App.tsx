@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ProjectProvider, useProject } from "./state/ProjectContext";
 import { isRouteEnabled } from "./app/capability";
-import { DEFAULT_ROUTE, type AppRoute } from "./app/routes";
+import { DEFAULT_ROUTE, MAS_CHANNEL, type AppRoute } from "./app/routes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { hasWailsRuntime } from "./lib/utils";
 import { api } from "./api/client";
@@ -14,6 +14,7 @@ import ToastContainer from "./components/Toast";
 import OnboardingOverlay from "./components/OnboardingOverlay";
 import SourcesPage from "./pages/SourcesPage";
 import ScanJobsPage from "./pages/ScanJobsPage";
+import DuplicateResultsPage from "./pages/DuplicateResultsPage";
 import GovernanceWorkbenchPage from "./pages/GovernanceWorkbenchPage";
 import GovernanceReviewPage from "./pages/GovernanceReviewPage";
 import ExecutionCenterPage from "./pages/ExecutionCenterPage";
@@ -24,8 +25,10 @@ function renderPage(route: AppRoute, onRouteChange: (route: AppRoute) => void) {
   switch (route) {
     case "sources": return <SourcesPage onNavigate={onRouteChange} />;
     case "scan-jobs": return <ScanJobsPage />;
-    case "governance-workbench":
-    case "duplicate-results": return <GovernanceWorkbenchPage onNavigate={onRouteChange} />;
+    case "duplicate-results":
+      if (MAS_CHANNEL) return <DuplicateResultsPage />;
+      return <GovernanceWorkbenchPage onNavigate={onRouteChange} />;
+    case "governance-workbench": return <GovernanceWorkbenchPage onNavigate={onRouteChange} />;
     case "governance-review": return <GovernanceReviewPage onNavigate={onRouteChange} />;
     case "execution-center": return <ExecutionCenterPage />;
     case "audit-recovery": return <AuditRecoveryPage />;
@@ -125,8 +128,8 @@ function AppContent() {
 
   return (
     <>
-      <AppShell activeRoute={activeRoute} onRouteChange={setActiveRoute}>
-        {renderPage(activeRoute, setActiveRoute)}
+      <AppShell activeRoute={activeRoute} onRouteChange={handleShortcutRouteChange}>
+        {renderPage(activeRoute, handleShortcutRouteChange)}
       </AppShell>
       {!project && !onboardingDone && (
         <OnboardingOverlay

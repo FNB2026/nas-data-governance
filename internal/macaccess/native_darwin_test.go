@@ -29,3 +29,24 @@ func TestCancelledResolveDoesNotStartScope(t *testing.T) {
 		t.Fatal("cancelled request activated scope")
 	}
 }
+
+func TestSupportContainerMatchesCurrentMASBundle(t *testing.T) {
+	const base = "/Users/test/Library/Containers/"
+	const suffix = "/Data/Library/Application Support/NDG"
+	for _, tc := range []struct {
+		path, bundle string
+		want         bool
+	}{
+		{base + "com.fnb.ndg.mas" + suffix, "com.fnb.ndg.mas", true},
+		{base + "com.fnb.ndg.mas.launchqa" + suffix, "com.fnb.ndg.mas.launchqa", true},
+		{base + "com.fnb.ndg.mas.phase1a" + suffix, "com.fnb.ndg.mas.phase1a", true},
+		{base + "com.fnb.ndg.mas" + suffix, "com.fnb.ndg.mas.launchqa", false},
+		{base + "com.fnb.ndg" + suffix, "com.fnb.ndg", false},
+		{base + "com.fnb.ndg.mas/../com.fnb.ndg.mas" + suffix, "com.fnb.ndg.mas", false},
+		{base + "com.fnb.ndg.mas" + suffix + "/other", "com.fnb.ndg.mas", false},
+	} {
+		if got := isSupportContainer(tc.path, tc.bundle); got != tc.want {
+			t.Errorf("isSupportContainer(%q, %q) = %t, want %t", tc.path, tc.bundle, got, tc.want)
+		}
+	}
+}

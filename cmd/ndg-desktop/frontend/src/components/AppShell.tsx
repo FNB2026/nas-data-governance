@@ -2,7 +2,7 @@
 // Renders seven-domain navigation with capability-based enable/disable.
 
 import { type ReactNode } from "react";
-import { NAV_ITEMS, type AppRoute } from "../app/routes";
+import { MAS_CHANNEL, NAV_ITEMS, type AppRoute } from "../app/routes";
 import { isRouteEnabled } from "../app/capability";
 import { useProject } from "../state/ProjectContext";
 
@@ -31,7 +31,7 @@ export default function AppShell({
   const modeLabel = !project
     ? "未打开"
     : isReadWrite
-      ? "读写"
+      ? MAS_CHANNEL ? "项目读写 · 源只读" : "读写"
       : "只读";
 
   const scanActive = activeJobId !== null;

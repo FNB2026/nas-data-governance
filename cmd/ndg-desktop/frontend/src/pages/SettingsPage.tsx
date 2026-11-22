@@ -1,3 +1,4 @@
+import { MAS_CHANNEL } from "../app/routes";
 // Settings page: reorganized into five top-level groups (UI-P7-A).
 //
 //   常规  General   — recent projects, first-run guide, shortcuts
@@ -262,6 +263,7 @@ export default function SettingsPage() {
                 <th scope="row">可执行扫描</th>
                 <td>{capabilities.can_scan ? "可用" : "受限"}</td>
               </tr>
+              {!MAS_CHANNEL && <>
               <tr>
                 <th scope="row">可执行治理（隔离）</th>
                 <td>{capabilities.can_execute_quarantine ? "可用" : "受限"}</td>
@@ -270,6 +272,7 @@ export default function SettingsPage() {
                 <th scope="row">可执行永久清理</th>
                 <td>{capabilities.can_execute_purge ? "可用" : "受限"}</td>
               </tr>
+              </>}
               <tr>
                 <th scope="row">Recovery Lock</th>
                 <td>

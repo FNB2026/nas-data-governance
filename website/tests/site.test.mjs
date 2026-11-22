@@ -28,7 +28,10 @@ test("light style and privacy are present", async () => {
   assert.match(favicon, /fill="#0071e3"/);
   const privacy = await visit("https://ndg.fnbapp.net/privacy");
   assert.equal(privacy.status, 200);
-  assert.match(await privacy.text(), /隐私说明/);
+  assert.match(await privacy.text(), /mac-app-privacy/);
+  const appPrivacy = await visit("https://ndg.fnbapp.net/mac-app-privacy");
+  assert.equal(appPrivacy.status, 200);
+  assert.match(await appPrivacy.text(), /Privacy Policy for NDG on the Mac App Store/);
 });
 test("alias redirects with path and query", async () => {
   const redirect = await visit("https://ngd.fnbapp.net/privacy?q=1");

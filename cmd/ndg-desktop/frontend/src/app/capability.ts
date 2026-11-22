@@ -1,7 +1,7 @@
 // Capability model: derives what the user can do from project state.
 // Frontend navigation and buttons read this object instead of guessing.
 
-import type { AppRoute } from "./routes";
+import { MAS_CHANNEL, NAV_ITEMS, type AppRoute } from "./routes";
 
 export type ProjectMode = "closed" | "read_only" | "read_write";
 
@@ -74,6 +74,7 @@ export function isRouteEnabled(
   route: AppRoute,
   caps: AppCapabilities,
 ): boolean {
+  if (MAS_CHANNEL && !NAV_ITEMS.some(({ id }) => id === route)) return false;
   if (route in caps.disabled_reasons) return false;
   switch (route) {
     case "sources":

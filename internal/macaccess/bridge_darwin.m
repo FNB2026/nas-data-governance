@@ -78,3 +78,10 @@ char *ndg_access_resolve(const char *raw,const char *expectedRoot,int expectedNe
 char *ndg_access_support(void) {
  @autoreleasepool {NSURL *u=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;return strdup([[u URLByAppendingPathComponent:@"NDG"] path].UTF8String);}
 }
+
+char *ndg_access_bundle_id(void) {
+ @autoreleasepool {
+  const char *bundleID = NSBundle.mainBundle.bundleIdentifier.UTF8String;
+  return bundleID ? strdup(bundleID) : NULL;
+ }
+}
