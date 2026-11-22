@@ -3,7 +3,6 @@
 import concurrent.futures
 import json
 import os
-import signal
 import subprocess
 import time
 import urllib.error
@@ -30,7 +29,10 @@ def verify_worker_lifecycle(base, compose, request, item_id):
         docker("exec", "-T", "-d", "worker", "/ndg-quarantine-candidate", "-role", "worker")
 
     def worker_pid():
-        processes = docker("top", "worker", "-eo", "pid,args")
+        container = docker("ps", "-q", "worker")
+        processes = subprocess.check_output(
+            ["docker", "top", container, "-eo", "pid,args"], text=True, timeout=10,
+        )
         matches = [
             int(row.split(maxsplit=1)[0])
             for row in processes.splitlines()[1:]
@@ -99,7 +101,7 @@ def verify_worker_lifecycle(base, compose, request, item_id):
             try:
                 trace.communicate(timeout=3)
             except subprocess.TimeoutExpired:
-                trace.send_signal(signal.SIGTERM)
+                subprocess.run(["sudo", "-n", "kill", "-TERM", str(trace.pid)], check=False)
                 trace.communicate(timeout=4)
         await_value(lambda: not worker_pid(), "interrupted Worker did not exit")
 
