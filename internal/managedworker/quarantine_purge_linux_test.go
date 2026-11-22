@@ -284,7 +284,7 @@ func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 				}
 			}
 			if wantState == "EXECUTING" {
-				service, err := NewQuarantinePurge(st, f.root)
+				service, err := managedworker.NewQuarantinePurge(st, f.root)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -302,7 +302,7 @@ func TestQuarantinePurgePersistsAcrossDatabaseProcessKill(t *testing.T) {
 				if err != nil || caps.RecoveryLockActive {
 					t.Fatal("terminal recovery did not release the project lock", err)
 				}
-				assertSinglePurgeTerminalAudit(t, st, p.ID, expected)
+				managedworker.AssertSinglePurgeTerminalAudit(t, st, p.ID, expected)
 			}
 			if got, err := os.ReadFile(f.sentinel); err != nil || string(got) != string(f.raw) {
 				t.Fatal("outside sentinel changed")
@@ -376,21 +376,4 @@ func TestQuarantinePurgeDatabaseKillChild(t *testing.T) {
 	}
 	stop("after_database_commit")
 	t.Fatal("subprocess did not reach kill point")
-}
-
-func assertSinglePurgeTerminalAudit(t *testing.T, st *store.SQLiteStore, planID, state string) {
-	t.Helper()
-	decisions, err := st.ListAuthorizationDecisions(context.Background(), 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, decision := range decisions {
-		if decision.PlanID == planID && decision.Detail == state {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("got %d audit entries for the terminal state", count)
-	}
 }

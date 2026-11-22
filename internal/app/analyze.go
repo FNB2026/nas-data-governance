@@ -317,17 +317,18 @@ func (s *AnalyzeService) Analyze(ctx context.Context, in AnalyzeInput) (*Analyze
 				info, analyzeErr = s.analyze(file.Path)
 			} else {
 				analyzeErr = boundary.ReadFile(file, func(opened *os.File) error {
-					var err error
-					if file.Physical.Reliable && file.Device != 0 && file.Inode != 0 {
-						if file.ContentSHA256 != "" {
-							sha, err := fingerprint.FullReader(opened)
-							if err != nil || sha != file.ContentSHA256 {
-								return scanner.ErrMountBoundary
-							}
-						}
-						proof := store.BindAnalyzedFormat(file)
-						binding = &proof
+					if !file.Physical.Reliable || file.Device == 0 || file.Inode == 0 {
+						return scanner.ErrMountBoundary
 					}
+					if file.ContentSHA256 != "" {
+						sha, err := fingerprint.FullReader(opened)
+						if err != nil || sha != file.ContentSHA256 {
+							return scanner.ErrMountBoundary
+						}
+					}
+					proof := store.BindAnalyzedFormat(file)
+					binding = &proof
+					var err error
 					info, err = format.AnalyzeDescriptor(opened, file.Path)
 					return err
 				})
@@ -423,12 +424,15 @@ func (s *AnalyzeService) analysisRoots(ctx context.Context, explicit string, fil
 		if err != nil {
 			return nil, scanner.ErrMountBoundary
 		}
-		for _, file := range files {
-			roots[file.StorageID] = root
+		explicit = root
+		if runtime.GOOS != "linux" || s.store == nil {
+			for _, file := range files {
+				roots[file.StorageID] = root
+			}
+			return roots, nil
 		}
-		return roots, nil
 	}
-	if runtime.GOOS != "linux" || s.customAnalyze || len(files) == 0 {
+	if runtime.GOOS != "linux" || (s.customAnalyze && explicit == "") || len(files) == 0 {
 		return roots, nil
 	}
 	registry, ok := s.store.(interface {
@@ -452,6 +456,9 @@ func (s *AnalyzeService) analysisRoots(ctx context.Context, explicit string, fil
 		root, ok := registered[file.StorageID]
 		if !ok {
 			return nil, fmt.Errorf("app: Linux analysis could not prove a local storage root; source path omitted")
+		}
+		if explicit != "" && root != explicit {
+			return nil, fmt.Errorf("app: explicit Linux analysis root does not match registered storage; source path omitted")
 		}
 		roots[file.StorageID] = root
 	}

@@ -91,7 +91,10 @@ Run it after every rescan before authorizing direct purge. Unknown or legacy
 unbound format records cannot authorize deletion.
 
 On Linux the Analyzer takes the analysis root from the registered storage for
-each selected file when using a project database. For JSON-only analysis,
+each selected file when using a project database. An explicit
+`--confined-root` must match that registered root. For JSON-only analysis,
 provide the authorized source with `--confined-root`. The index does not set
-the source boundary. The Worker also requires a kernel file identity handle
+the source boundary. Linux analysis needs an index with verified file identity.
+Resume can display previously verified records from the same indexed generation
+without reading their source content again. The Worker also requires a kernel file identity handle
 for a recoverable purge, checked before claiming the execution.

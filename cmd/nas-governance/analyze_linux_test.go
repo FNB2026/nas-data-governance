@@ -17,7 +17,7 @@ import (
 )
 
 func TestAnalyzeLinuxDefaultBoundary(t *testing.T) {
-	for _, scenario := range []string{"valid", "no_root", "explicit", "ancestor_symlink", "root_replaced", "same_device_nested_bind"} {
+	for _, scenario := range []string{"valid", "no_root", "explicit", "explicit_registered", "explicit_mismatch", "file_changed", "unproven_identity", "outside_index_entry", "ancestor_symlink", "root_replaced", "same_device_nested_bind"} {
 		t.Run(scenario, func(t *testing.T) {
 			temp := t.TempDir()
 			root, outside := filepath.Join(temp, "source"), filepath.Join(temp, "outside")
@@ -55,10 +55,14 @@ func TestAnalyzeLinuxDefaultBoundary(t *testing.T) {
 				return
 			case "explicit":
 				args = append(args, "--confined-root", root)
+			case "explicit_registered":
+				args = append(args, "--db", db, "--confined-root", root)
+			case "explicit_mismatch":
+				args = append(args, "--db", db, "--confined-root", outside)
 			default:
 				args = append(args, "--db", db)
 			}
-			allowed := scenario == "valid" || scenario == "explicit"
+			allowed := scenario == "valid" || scenario == "explicit" || scenario == "explicit_registered"
 
 			watch, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 			if err != nil {
@@ -73,6 +77,21 @@ func TestAnalyzeLinuxDefaultBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch scenario {
+			case "file_changed":
+				if err := os.WriteFile(insideName, []byte("changed size and contents"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "unproven_identity":
+				files[0].Physical.Reliable = false
+				files[0].Device, files[0].Inode = 0, 0
+				if err := idx.Write(index, files); err != nil {
+					t.Fatal(err)
+				}
+			case "outside_index_entry":
+				files[0].Path = sentinel
+				if err := idx.Write(index, files); err != nil {
+					t.Fatal(err)
+				}
 			case "ancestor_symlink":
 				if err := os.Rename(nested, filepath.Join(temp, "old")); err != nil {
 					t.Fatal(err)
@@ -118,20 +137,29 @@ func TestAnalyzeLinuxDefaultBoundary(t *testing.T) {
 				}
 			}
 
-			if err := runAnalyze(args); err != nil {
+			if err := runAnalyze(args); scenario == "explicit_mismatch" {
+				if err == nil {
+					t.Fatal("explicit root overrode the project storage")
+				}
+				if _, err := os.Stat(report); !os.IsNotExist(err) {
+					t.Fatal("unexpected report for mismatched project root", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
-			var entries []formatReportEntry
-			readJSONFile(t, report, &entries)
-			if len(entries) != 1 {
-				t.Fatalf("unexpected report cardinality %d", len(entries))
-			}
-			if allowed {
-				if entries[0].Error != "" || entries[0].Format.Format != "pdf" {
-					t.Fatal("in-scope format analysis failed")
+			if scenario != "explicit_mismatch" {
+				var entries []formatReportEntry
+				readJSONFile(t, report, &entries)
+				if len(entries) != 1 {
+					t.Fatalf("unexpected report cardinality %d", len(entries))
 				}
-			} else if entries[0].Path != "" || entries[0].Format.Format != "" || entries[0].Error == "" {
-				t.Fatal("refused entry carried file data")
+				if allowed {
+					if entries[0].Error != "" || entries[0].Format.Format != "pdf" {
+						t.Fatal("in-scope format analysis failed")
+					}
+				} else if entries[0].Path != "" || entries[0].Format.Format != "" || entries[0].Error == "" {
+					t.Fatal("refused entry carried file data")
+				}
 			}
 			var event [1024]byte
 			if n, err := unix.Read(watch, event[:]); n > 0 || !errors.Is(err, unix.EAGAIN) {

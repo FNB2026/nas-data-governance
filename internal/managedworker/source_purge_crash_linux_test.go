@@ -166,7 +166,7 @@ func verifySourceCrashState(t *testing.T, ctx context.Context, st *store.SQLiteS
 			}
 		}
 		verifySourceCrashState(t, ctx, st, root, plan, expected, deleted, expected == "ROLLED_BACK")
-		assertSinglePurgeTerminalAudit(t, st, plan.ID, expected)
+		AssertSinglePurgeTerminalAudit(t, st, plan.ID, expected)
 	}
 }
 
@@ -233,4 +233,21 @@ func TestSourcePurgeDatabaseKillChild(t *testing.T) {
 	}
 	stop("after_database_commit")
 	t.Fatal("subprocess did not reach kill point")
+}
+
+func AssertSinglePurgeTerminalAudit(t *testing.T, st *store.SQLiteStore, planID, state string) {
+	t.Helper()
+	decisions, err := st.ListAuthorizationDecisions(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, decision := range decisions {
+		if decision.PlanID == planID && decision.Detail == state {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d audit entries for the terminal state", count)
+	}
 }
