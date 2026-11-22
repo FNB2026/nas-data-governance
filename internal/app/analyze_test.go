@@ -27,7 +27,7 @@ func TestAnalyzeService_JSONOnlyMode(t *testing.T) {
 
 	explicitRoot := ""
 	if runtime.GOOS == "linux" {
-		scanned, err := NewScanService(nil).Scan(context.Background(), ScanInput{Root: root, StorageID: "test", Workers: 1})
+		scanned, err := NewScanService(nil).Scan(context.Background(), ScanInput{Root: root, StorageID: "test", Workers: 1, HashAttempts: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
