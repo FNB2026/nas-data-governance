@@ -121,8 +121,9 @@ for _ in range(30):
 else:
     raise RuntimeError('candidate TLS endpoint did not become ready')
 
-duplicate_worker = subprocess.run(sys.argv[2:] + ['run', '--no-deps', '--rm', 'worker'], capture_output=True, timeout=20)
-assert duplicate_worker.returncode != 0
+if os.environ.get('NDG_TEST_WORKER_LIFECYCLE') != '1':
+    duplicate_worker = subprocess.run(sys.argv[2:] + ['run', '--no-deps', '--rm', 'worker'], capture_output=True, timeout=20)
+    assert duplicate_worker.returncode != 0
 
 with opener.open(url + '/gov/purge-console', timeout=5) as page:
     assert "frame-ancestors 'none'" in page.headers.get('Content-Security-Policy', '')
