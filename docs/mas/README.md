@@ -15,7 +15,7 @@ Prerequisites: macOS Apple Silicon, Xcode/CLT, Go matching go.mod, Wails CLI 2.1
 
 Native tests (build frontend first): `go test -tags 'masprobe,production' ./cmd/ndg-mas-probe`; `go vet -tags 'masprobe,production' ./cmd/ndg-mas-probe`. Core regression: `go test ./internal/scanner ./internal/fingerprint ./internal/store`. Tests run outside App Sandbox; actual GUI observations supply OS authorization evidence.
 
-The probe mutex serializes native scope and scans. Source grants are private 0600 data in a 0700 Foundation Application Support container. It refuses a resolved root relocation; prototype `locked` refers only to authorization. Production Journal/Recovery Lock integration, general migration and every write path are future work. Prototype has no executor/Purge API. Production MAS config is only a proposed read-only target until those changes are reviewed.
+The probe mutex serializes native scope and scans. Source grants are private 0600 data in a 0700 Foundation Application Support container. It refuses a resolved root relocation; prototype `locked` refers only to authorization. The probe has no executor/Purge API. The production MAS channel is now a read-write governance target built by `scripts/mas/build-launch.sh`: user-selected read-write grants, plan review, quarantine and restore are wired; permanent purge stays compile-time disabled. This README's probe results remain the evidence for the native authorization boundary, not for the current product build.
 
 ## Phase 1A product authorization layer
 

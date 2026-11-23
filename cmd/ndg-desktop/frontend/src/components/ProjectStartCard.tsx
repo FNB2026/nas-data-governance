@@ -74,7 +74,7 @@ export default function ProjectStartCard({
     <section className="card project-start-card">
       <h2>开始</h2>
       <p className="muted">
-        选择待扫描的目录，NDG 会在本机自动创建项目数据库；扫描源保持只读，不会被写入。
+        选择待扫描的目录，NDG 会在本机自动创建项目数据库。扫描阶段只读取文件；隔离与恢复只会在你明确批准后写入已授权目录。
       </p>
 
       {/* Primary entry: new scan project */}

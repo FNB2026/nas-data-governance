@@ -19,6 +19,11 @@ func NewSandboxAPI(access *fileaccess.Manager, support string) *API {
 	a.sandbox = true
 	a.access = access
 	a.support = support
+	q := filepath.Join(support, "quarantine")
+	if e := os.MkdirAll(q, 0700); e != nil || os.Chmod(q, 0700) != nil || !a.safeDatabaseDirectory(q) {
+		panic("QUARANTINE_UNAVAILABLE")
+	}
+	a.defaultQuarantine = q
 	a.scanCtx, a.scanCancel = context.WithCancel(context.Background())
 	a.projectSvc = projectsvc.NewService(projectsvc.Options{SupportBase: func() (string, error) {
 		if !a.safeDatabaseDirectory(support) {
@@ -76,10 +81,123 @@ func (a *API) authorizeDatabase(path string) error {
 	return nil
 }
 func (a *API) denySourceWrites() error {
-	if a.sandbox {
+	if a.sandbox && !sandboxWrites {
 		return fileaccess.ErrWriteDisabled
 	}
 	return nil
+}
+
+// writeAccess holds security-scoped leases for the whole multi-step file
+// operation. A lease is never dropped between copy, verify and source removal.
+type writeAccess struct {
+	roots      []string
+	quarantine string
+	leases     []*fileaccess.Lease
+}
+
+func (w *writeAccess) Release() {
+	if w == nil {
+		return
+	}
+	for i := len(w.leases) - 1; i >= 0; i-- {
+		w.leases[i].Release()
+	}
+	w.leases = nil
+}
+
+func (a *API) withinSupport(path string) bool {
+	if a.support == "" {
+		return false
+	}
+	abs, e := filepath.Abs(path)
+	if e != nil {
+		return false
+	}
+	rel, e := filepath.Rel(a.support, abs)
+	return e == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))))
+}
+
+func (a *API) acquireOneWriteRoot(root string) (string, *fileaccess.Lease, error) {
+	if !a.sandbox {
+		return root, nil, nil
+	}
+	if a.withinSupport(root) {
+		// Container-owned roots still need every component checked for
+		// symlinks: resolving a symlinked parent must not turn into an
+		// unauthorized write outside the container.
+		if !a.safeDatabaseDirectory(root) {
+			return "", nil, fileaccess.ErrAuthorizationRequired
+		}
+		real, e := filepath.EvalSymlinks(root)
+		if e != nil || !a.withinSupport(real) {
+			return "", nil, fileaccess.ErrAuthorizationRequired
+		}
+		return real, nil, nil
+	}
+	lease, e := a.access.Acquire(context.Background(), root)
+	if e != nil {
+		return "", nil, e
+	}
+	return lease.Root, lease, nil
+}
+
+// acquireWriteAccess resolves every source root and the quarantine root before
+// the executor is called. The sandbox cannot write through a path alone: each
+// external root must still have a live read-write security-scoped lease.
+func (a *API) acquireWriteAccess(sourceRoots []string, quarantineRoot string) (*writeAccess, error) {
+	if !a.sandbox {
+		return &writeAccess{roots: sourceRoots, quarantine: quarantineRoot}, nil
+	}
+	a.mu.RLock()
+	access, closing, fallback := a.access, a.closing, a.defaultQuarantine
+	a.mu.RUnlock()
+	if access == nil || closing || fallback == "" {
+		return nil, fileaccess.ErrAuthorizationRequired
+	}
+	q := strings.TrimSpace(quarantineRoot)
+	if q == "" {
+		q = fallback
+	}
+	if !a.withinSupport(q) && !filepath.IsAbs(q) {
+		return nil, fileaccess.ErrAuthorizationRequired
+	}
+	// Never create the quarantine directory from an API-supplied path. The
+	// container default is created by NewSandboxAPI; anything else must
+	// already exist and pass the same symlink checks as a source root.
+	wa := &writeAccess{quarantine: q}
+	seen := make(map[string]bool, len(sourceRoots)+1)
+	for _, root := range sourceRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		resolved, lease, e := a.acquireOneWriteRoot(root)
+		if e != nil {
+			wa.Release()
+			return nil, e
+		}
+		if lease != nil {
+			wa.leases = append(wa.leases, lease)
+		}
+		if !seen[resolved] {
+			seen[resolved] = true
+			wa.roots = append(wa.roots, resolved)
+		}
+	}
+	if len(wa.roots) == 0 {
+		wa.Release()
+		return nil, fileaccess.ErrAuthorizationRequired
+	}
+	resolvedQ, qLease, e := a.acquireOneWriteRoot(q)
+	if e != nil {
+		wa.Release()
+		return nil, e
+	}
+	if qLease != nil {
+		wa.leases = append(wa.leases, qLease)
+	}
+	wa.quarantine = resolvedQ
+	return wa, nil
 }
 
 // ShutdownSandboxAPI must run in OnBeforeClose while the main event loop is active.

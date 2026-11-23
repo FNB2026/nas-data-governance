@@ -1,5 +1,8 @@
-// Package fileaccess owns read-only OS grants. A persisted path is an identity,
-// never an authority. Raw bookmark bytes stay in a private capability repository.
+// Package fileaccess owns user-authorized OS grants. A persisted path is an
+// identity, never an authority. Raw bookmark bytes stay in a private capability
+// repository. Writable grants are explicit: grants persisted before read-write
+// support are rejected so an old read-only bookmark can never silently
+// downgrade a write operation.
 package fileaccess
 
 import (
@@ -25,6 +28,7 @@ type Grant struct {
 	Bookmark string
 	Identity string
 	Network  bool
+	Writable bool
 }
 type Native interface {
 	Pick(context.Context) (Grant, func(), error)
@@ -124,7 +128,7 @@ func (m *Manager) Select(ctx context.Context) (string, error) {
 		return "", e
 	}
 	g.Root = root
-	if g.Bookmark == "" || g.Identity == "" || stop == nil {
+	if g.Bookmark == "" || g.Identity == "" || !g.Writable || stop == nil {
 		return "", ErrAuthorizationRequired
 	}
 	if e = m.save(g); e != nil {
@@ -193,7 +197,7 @@ func (m *Manager) load(root string) (Grant, error) {
 	if e != nil || !os.SameFile(info, actual) || actual.Size() > 1024*1024 {
 		return g, ErrAuthorizationRequired
 	}
-	if json.NewDecoder(f).Decode(&g) != nil || g.Root != root || g.Bookmark == "" || g.Identity == "" {
+	if json.NewDecoder(f).Decode(&g) != nil || g.Root != root || g.Bookmark == "" || g.Identity == "" || !g.Writable {
 		return Grant{}, ErrAuthorizationRequired
 	}
 	return g, nil
@@ -241,7 +245,7 @@ func (m *Manager) Acquire(ctx context.Context, root string) (*Lease, error) {
 		stop()
 		return nil, classify(e, saved.Network)
 	}
-	if resolved != saved.Root || g.Identity != saved.Identity || g.Network != saved.Network || g.Bookmark == "" {
+	if resolved != saved.Root || g.Identity != saved.Identity || g.Network != saved.Network || g.Bookmark == "" || !g.Writable {
 		stop()
 		return nil, ErrAuthorizationRequired
 	}

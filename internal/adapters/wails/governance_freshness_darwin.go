@@ -2,7 +2,7 @@
 
 package wails
 
-// macOS currently has no implementation in this slice that proves a rooted
-// read cannot cross a same-device nested mount. Governance decision previews
-// therefore remain UNVERIFIED until an equivalent native boundary exists.
-func governanceFreshnessMountProofAvailable() bool { return false }
+// macOS uses descriptor-relative O_NOFOLLOW opens plus per-component device and
+// statfs mount-identity equality. The proof covers the descriptor actually
+// read and refuses same-device bind/nullfs-style mount crossings.
+func governanceFreshnessMountProofAvailable() bool { return true }

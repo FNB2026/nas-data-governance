@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import { deriveCapabilities, isRouteEnabled } from "./capability";
 import { NAV_ITEMS } from "./routes";
 
@@ -125,5 +126,22 @@ describe("isRouteEnabled", () => {
     // Other view routes remain enabled
     expect(isRouteEnabled("duplicate-results", caps)).toBe(true);
     expect(isRouteEnabled("audit-recovery", caps)).toBe(true);
+  });
+
+  it("keeps the MAS plan-review route reachable from the read-write workbench", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_NDG_CHANNEL", "mas");
+    try {
+      const routes = await import("./routes");
+      const capabilities = await import("./capability");
+      const caps = capabilities.deriveCapabilities({ projectOpen: true, isReadWrite: true });
+      expect(routes.MAS_CHANNEL).toBe(true);
+      expect(routes.NAV_ITEMS.some((item) => item.id === "governance-review")).toBe(false);
+      expect(capabilities.isRouteEnabled("governance-review", caps)).toBe(true);
+      expect(capabilities.isRouteEnabled("execution-center", caps)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });

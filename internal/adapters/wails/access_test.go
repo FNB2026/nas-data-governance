@@ -38,7 +38,7 @@ func (n *nativeTestGrant) Resolve(context.Context, fileaccess.Grant) (fileaccess
 	if afterResolve != nil {
 		afterResolve()
 	}
-	return fileaccess.Grant{Root: root, Bookmark: "sealed", Identity: "directory-identity"}, func() {
+	return fileaccess.Grant{Root: root, Bookmark: "sealed", Identity: "directory-identity", Writable: true}, func() {
 		n.mu.Lock()
 		n.releases++
 		n.mu.Unlock()
@@ -68,14 +68,20 @@ func TestSandboxDirectEntryPointsFailBeforeSideEffects(t *testing.T) {
 	if _, e := a.PreflightSource(root); !errors.Is(e, fileaccess.ErrAuthorizationRequired) {
 		t.Fatal("path-only probe bypass")
 	}
-	if _, e := a.ExecutePlans(ExecutePlansRequest{}); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-		t.Fatal("quarantine bypass")
-	}
-	if _, e := a.ExecuteRestore(ExecuteRestoreRequest{}); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-		t.Fatal("restore bypass")
-	}
-	if _, e := a.ExecutePurge(ExecutePurgeRequest{}); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-		t.Fatal("purge bypass")
+	// Read-write MAS builds reach validation/open-project errors instead of
+	// the blanket write refusal, but must still fail without a grant.
+	for name, call := range map[string]func() error{
+		"quarantine": func() error { _, e := a.ExecutePlans(ExecutePlansRequest{}); return e },
+		"restore":    func() error { _, e := a.ExecuteRestore(ExecuteRestoreRequest{}); return e },
+		"purge":      func() error { _, e := a.ExecutePurge(ExecutePurgeRequest{}); return e },
+	} {
+		e := call()
+		if e == nil {
+			t.Fatalf("%s bypass", name)
+		}
+		if !sandboxWrites && !errors.Is(e, fileaccess.ErrWriteDisabled) {
+			t.Fatalf("%s is not blocked by the read-only policy: %v", name, e)
+		}
 	}
 }
 func TestSandboxGrantLossKeepsIndexedFilesActive(t *testing.T) {
@@ -167,8 +173,9 @@ func TestSandboxRepeatedResumeAndReopen(t *testing.T) {
 		t.Fatal("repeat resume changed durable coverage")
 	}
 	caps, e := a.GetAppCapabilities()
-	if e != nil || caps.CanExecuteQuarantine || caps.CanExecutePurge {
-		t.Fatal("sandbox exposed writes")
+	if e != nil || caps.CanExecuteQuarantine != sandboxWrites || caps.CanExecutePurge {
+		t.Fatalf("sandbox capabilities = quarantine %v, purge %v; want quarantine %v, purge false",
+			caps.CanExecuteQuarantine, caps.CanExecutePurge, sandboxWrites)
 	}
 }
 
@@ -206,8 +213,21 @@ func TestReauthorizationNeverClearsRecoveryLock(t *testing.T) {
 	if _, e = a.StartScan(StartScanRequest{Root: root}); e == nil {
 		t.Fatal("scan bypassed recovery lock")
 	}
-	if _, e = a.RecoverSourcePlans(); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-		t.Fatal("write recovery bypass")
+	if !sandboxWrites {
+		if _, e = a.RecoverSourcePlans(); !errors.Is(e, fileaccess.ErrWriteDisabled) {
+			t.Fatal("read-only recovery bypass")
+		}
+		return
+	}
+	// The read-write build may recover only after the grant is restored; the
+	// no-journal plan returns to DRAFT so a human must review it again.
+	results, e := a.RecoverSourcePlans()
+	if e != nil || len(results) != 1 || results[0].Action != "reset_to_draft" {
+		t.Fatalf("read-write recovery results = %+v, err=%v; want one reset_to_draft", results, e)
+	}
+	lock, e = a.CheckRecoveryLock()
+	if e != nil || lock.LockActive {
+		t.Fatal("confirmed recovery did not clear the lock")
 	}
 }
 
@@ -303,8 +323,12 @@ func TestAllSandboxFilesystemEntryPointsStayDeniedWithoutAuthority(t *testing.T)
 		func() error { _, e := a.DiagnoseMerges(DiagnoseMergesRequest{}); return e },
 	}
 	for i, fn := range checks {
-		if e := fn(); !errors.Is(e, fileaccess.ErrWriteDisabled) {
-			t.Fatalf("entry %d escaped policy", i)
+		e := fn()
+		if e == nil {
+			t.Fatalf("entry %d succeeded without an open project", i)
+		}
+		if !sandboxWrites && !errors.Is(e, fileaccess.ErrWriteDisabled) {
+			t.Fatalf("entry %d escaped the read-only policy: %v", i, e)
 		}
 	}
 }

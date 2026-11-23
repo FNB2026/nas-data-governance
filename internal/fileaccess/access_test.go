@@ -30,7 +30,7 @@ func (f *fakeNative) Resolve(_ context.Context, saved Grant) (Grant, func(), err
 		return Grant{}, nil, ErrAuthorizationRequired
 	}
 	f.started++
-	return Grant{Root: f.root, Bookmark: "token", Identity: "stable-local-id"}, func() { f.mu.Lock(); defer f.mu.Unlock(); f.stopped++ }, nil
+	return Grant{Root: f.root, Bookmark: "token", Identity: "stable-local-id", Writable: true}, func() { f.mu.Lock(); defer f.mu.Unlock(); f.stopped++ }, nil
 }
 func setup(t *testing.T) (*Manager, *fakeNative, string) {
 	t.Helper()
@@ -190,6 +190,25 @@ func TestCloseWaitsForOutstandingLeaseAndBlocksNewBorrowers(t *testing.T) {
 	lease.Release()
 	<-done
 }
+func TestLegacyReadOnlyGrantCannotAuthorizeWrites(t *testing.T) {
+	m, b, root := setup(t)
+	if _, e := m.Select(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	g, stop, e := b.Resolve(context.Background(), Grant{Bookmark: "token"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	stop()
+	g.Writable = false
+	if e := m.save(g); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := m.Acquire(context.Background(), root); !errors.Is(e, ErrAuthorizationRequired) {
+		t.Fatal("legacy read-only grant authorized a write lease")
+	}
+}
+
 func TestRepositoryReplacementFailsBeforeSavingAuthority(t *testing.T) {
 	m, b, _ := setup(t)
 	original := m.dir
