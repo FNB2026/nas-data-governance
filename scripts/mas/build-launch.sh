@@ -110,6 +110,14 @@ PY
   cp "$NDG_MAS_PROFILE" "$contents/embedded.provisionprofile"
   cp "$NDG_MAS_PRIVACY_MANIFEST" "$contents/Resources/PrivacyInfo.xcprivacy"
   identity="$NDG_MAS_APP_IDENTITY"
+  # Copied distribution resources may carry Finder download attributes.
+  # Clear only the staged bundle before sealing the signature.
+  xattr -cr "$app"
+  bundle_xattrs="$(xattr -lr "$app")"
+  if grep -F 'com.apple.quarantine' >/dev/null <<<"$bundle_xattrs"; then
+    echo "Quarantine xattr remains in bundle" >&2
+    exit 1
+  fi
 fi
 # umask 077 protects private build inputs, but App Store validation rejects a
 # bundle whose files are unreadable to non-root users (error 90255). Restore
